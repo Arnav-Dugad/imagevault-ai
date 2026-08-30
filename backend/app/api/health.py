@@ -52,9 +52,14 @@ async def component_status(db: Database) -> tuple[dict[str, ComponentHealth], in
             detail="Heartbeat received" if heartbeat else "No recent heartbeat",
         )
         model_status = await redis_client.get("imagevault:worker:model")
+        model_device = await redis_client.get("imagevault:worker:device")
         components["embedding_model"] = ComponentHealth(
             status="healthy" if model_status == "loaded" else "idle",
-            detail="OpenCLIP loaded" if model_status == "loaded" else "Loads on first AI job",
+            detail=(
+                f"OpenCLIP loaded on {model_device or 'CPU'}"
+                if model_status == "loaded"
+                else "Loads on first AI job"
+            ),
         )
     except Exception:
         components["worker"] = ComponentHealth(status="unhealthy", detail="Redis unavailable")

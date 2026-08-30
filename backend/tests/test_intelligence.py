@@ -3,7 +3,7 @@ from uuid import uuid4
 
 from PIL import Image as PillowImage, ImageDraw, ImageFilter
 
-from app.models import Image, ProcessingStatus
+from app.models import FaceFeedbackType, Image, ProcessingStatus
 from app.services.albums import (
     best_photo,
     cluster_face_records,
@@ -12,6 +12,7 @@ from app.services.albums import (
     group_events,
 )
 from app.services.intelligence import merge_smart_labels, quality_metrics
+from app.services.people import learned_face_threshold
 
 
 def sample_image(*, created_at: datetime, quality: float = 0.5) -> Image:
@@ -131,3 +132,34 @@ def test_face_clustering_does_not_chain_two_people_through_one_ambiguous_face():
     groups = cluster_face_records(faces, threshold=0.79)
 
     assert sorted(len(group) for group in groups) == [1, 2]
+
+
+def test_manual_people_seeds_and_negative_feedback_override_automatic_merges():
+    first_person, second_person = uuid4(), uuid4()
+    faces = [
+        (uuid4(), uuid4(), [1.0, 0.0], 1.0),
+        (uuid4(), uuid4(), [0.999, 0.01], 1.0),
+        (uuid4(), uuid4(), [0.998, 0.02], 1.0),
+    ]
+    groups = cluster_face_records(
+        faces,
+        threshold=0.95,
+        seed_person_by_face={faces[0][0]: first_person, faces[2][0]: second_person},
+        blocked_pairs={frozenset((faces[0][0], faces[2][0]))},
+    )
+
+    assert sorted(len(group) for group in groups) == [1, 2]
+    assert not any(faces[0] in group and faces[2] in group for group in groups)
+
+
+def test_private_feedback_calibrates_the_face_threshold():
+    lower = learned_face_threshold(0.30, [(FaceFeedbackType.SAME, 0.25)])
+    higher = learned_face_threshold(0.30, [(FaceFeedbackType.DIFFERENT, 0.36)])
+    separated = learned_face_threshold(
+        0.30,
+        [(FaceFeedbackType.DIFFERENT, 0.27), (FaceFeedbackType.SAME, 0.35)],
+    )
+
+    assert lower < 0.30
+    assert higher > 0.30
+    assert separated == 0.31

@@ -1,20 +1,41 @@
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from sqlalchemy import desc, or_, select
 
 from app.api.dependencies import CurrentUser, Database
 from app.core.config import get_settings
-from app.models import DetectedFace, DuplicateMatch, DuplicateType, Image, ProcessingStatus
-from app.schemas import SmartAlbum, SmartAlbumsResponse
+from app.models import (
+    ActivityLog,
+    DetectedFace,
+    DuplicateMatch,
+    DuplicateType,
+    FaceAssignment,
+    FaceFeedback,
+    FaceFeedbackType,
+    Image,
+    Person,
+    ProcessingStatus,
+)
+from app.schemas import (
+    MessageResponse,
+    PersonFeedbackRequest,
+    PersonIgnoreRequest,
+    PersonMergeRequest,
+    PersonRenameRequest,
+    PersonSplitRequest,
+    SmartAlbum,
+    SmartAlbumsResponse,
+)
 from app.services.albums import (
     best_photo,
-    cluster_face_records,
     group_bursts,
     group_events,
     image_time,
 )
 from app.services.images import image_summary
+from app.services.people import reconcile_people
+from app.services.similarity import cosine_similarity
 
 router = APIRouter(prefix="/albums", tags=["Smart albums"])
 settings = get_settings()
@@ -111,31 +132,30 @@ async def burst_albums(user: CurrentUser, db: Database) -> SmartAlbumsResponse:
 
 
 @router.get("/people", response_model=SmartAlbumsResponse)
-async def people_albums(user: CurrentUser, db: Database) -> SmartAlbumsResponse:
+async def people_albums(
+    user: CurrentUser,
+    db: Database,
+    include_ignored: bool = False,
+) -> SmartAlbumsResponse:
+    clusters, _ = await reconcile_people(
+        user.id,
+        db,
+        embedding_model=settings.face_embedding_model,
+        base_threshold=settings.face_cluster_threshold,
+    )
+    visible_clusters = [
+        cluster for cluster in clusters if include_ignored or not cluster.person.ignored
+    ]
+    all_ids = {face[1] for cluster in visible_clusters for face in cluster.faces}
+    all_face_ids = {face[0] for cluster in visible_clusters for face in cluster.faces}
     face_rows = (
         await db.execute(
-            select(
-                DetectedFace.id,
-                DetectedFace.image_id,
-                DetectedFace.embedding,
-                DetectedFace.confidence,
-                DetectedFace.bounding_box,
-            ).where(
-                DetectedFace.user_id == user.id,
-                DetectedFace.embedding_model == settings.face_embedding_model,
-                DetectedFace.confidence >= 0.45,
+            select(DetectedFace.id, DetectedFace.bounding_box).where(
+                DetectedFace.id.in_(all_face_ids)
             )
         )
-    ).all()
-    groups = cluster_face_records(
-        [
-            (face_id, image_id, list(embedding), confidence)
-            for face_id, image_id, embedding, confidence, _ in face_rows
-        ],
-        settings.face_cluster_threshold,
-    )
-    all_ids = {face[1] for group in groups for face in group}
-    face_boxes = {face_id: box for face_id, _, _, _, box in face_rows}
+    ).all() if all_face_ids else []
+    face_boxes = dict(face_rows)
     image_map = {
         image.id: image
         for image in (
@@ -156,13 +176,11 @@ async def people_albums(user: CurrentUser, db: Database) -> SmartAlbumsResponse:
         )
     }
     albums: list[SmartAlbum] = []
-    for group in groups[:100]:
+    for cluster in visible_clusters[:100]:
+        group = cluster.faces
         image_ids = list(dict.fromkeys(face[1] for face in group))
         images = [image_map[image_id] for image_id in image_ids if image_id in image_map]
-        # A single sighting is not yet a useful people album. Suppressing
-        # singletons also avoids a wall of misleading "Person 1" cards while
-        # the model gathers enough evidence to form a confident identity.
-        if len(images) < 2:
+        if len(images) < 2 and not cluster.person.confirmed:
             continue
         images.sort(key=image_time, reverse=True)
         keeper = best_photo(images)
@@ -177,11 +195,245 @@ async def people_albums(user: CurrentUser, db: Database) -> SmartAlbumsResponse:
         index = len(albums) + 1
         albums.append(
             album_payload(
-                f"person-{min(str(face[0]) for face in group)}",
-                f"Person {index}",
+                f"person-{cluster.person.id}",
+                cluster.person.display_name or f"Person {index}",
                 f"{len(images)} photo{'s' if len(images) != 1 else ''}",
                 images,
                 cover_focus=focus,
+            ).model_copy(
+                update={
+                    "person_id": cluster.person.id,
+                    "ignored": cluster.person.ignored,
+                    "confirmed": cluster.person.confirmed,
+                }
             )
         )
     return SmartAlbumsResponse(items=albums, total=len(albums))
+
+
+async def _owned_people(person_ids: list[UUID], user_id: UUID, db: Database) -> list[Person]:
+    unique_ids = list(dict.fromkeys(person_ids))
+    people = list(
+        (
+            await db.scalars(
+                select(Person).where(Person.user_id == user_id, Person.id.in_(unique_ids))
+            )
+        ).all()
+    )
+    if len(people) != len(unique_ids):
+        raise HTTPException(status_code=404, detail="One or more people were not found")
+    people_by_id = {person.id: person for person in people}
+    return [people_by_id[person_id] for person_id in unique_ids]
+
+
+async def _merge_people(
+    people: list[Person],
+    user_id: UUID,
+    db: Database,
+    display_name: str | None = None,
+) -> Person:
+    target = people[0]
+    target.confirmed = True
+    target.ignored = all(person.ignored for person in people)
+    if display_name:
+        target.display_name = display_name.strip()
+    elif not target.display_name:
+        target.display_name = next((person.display_name for person in people if person.display_name), None)
+    source_ids = [person.id for person in people[1:]]
+    if source_ids:
+        assignments = list(
+            (
+                await db.scalars(
+                    select(FaceAssignment).where(
+                        FaceAssignment.user_id == user_id,
+                        FaceAssignment.person_id.in_(source_ids),
+                    )
+                )
+            ).all()
+        )
+        for assignment in assignments:
+            assignment.person_id = target.id
+            assignment.source = "manual"
+            assignment.confidence = 1.0
+        await db.flush()
+        for person in people[1:]:
+            await db.delete(person)
+    for assignment in (
+        await db.scalars(
+            select(FaceAssignment).where(FaceAssignment.person_id == target.id)
+        )
+    ).all():
+        assignment.source = "manual"
+    return target
+
+
+@router.post("/people/{person_id}/rename", response_model=MessageResponse)
+async def rename_person(
+    person_id: UUID,
+    request: PersonRenameRequest,
+    user: CurrentUser,
+    db: Database,
+) -> MessageResponse:
+    person = (await _owned_people([person_id], user.id, db))[0]
+    person.display_name = request.display_name.strip()
+    person.confirmed = True
+    db.add(ActivityLog(user_id=user.id, action="person.renamed", details={"person_id": str(person.id)}))
+    await db.commit()
+    return MessageResponse(message=f"Renamed person to {person.display_name}")
+
+
+@router.post("/people/merge", response_model=MessageResponse)
+async def merge_people(
+    request: PersonMergeRequest,
+    user: CurrentUser,
+    db: Database,
+) -> MessageResponse:
+    people = await _owned_people(request.person_ids, user.id, db)
+    if len(people) < 2:
+        raise HTTPException(status_code=400, detail="Choose at least two different people")
+    target = await _merge_people(people, user.id, db, request.display_name)
+    db.add(
+        ActivityLog(
+            user_id=user.id,
+            action="people.merged",
+            details={"target_person_id": str(target.id), "count": len(people)},
+        )
+    )
+    await db.commit()
+    return MessageResponse(message=f"Merged {len(people)} people")
+
+
+@router.post("/people/{person_id}/split", response_model=MessageResponse)
+async def split_person(
+    person_id: UUID,
+    request: PersonSplitRequest,
+    user: CurrentUser,
+    db: Database,
+) -> MessageResponse:
+    person = (await _owned_people([person_id], user.id, db))[0]
+    assignments = list(
+        (
+            await db.scalars(
+                select(FaceAssignment)
+                .join(DetectedFace, DetectedFace.id == FaceAssignment.face_id)
+                .where(
+                    FaceAssignment.user_id == user.id,
+                    FaceAssignment.person_id == person.id,
+                    DetectedFace.image_id.in_(request.image_ids),
+                )
+            )
+        ).all()
+    )
+    all_count = int(
+        len(
+            (
+                await db.scalars(
+                    select(FaceAssignment.id).where(FaceAssignment.person_id == person.id)
+                )
+            ).all()
+        )
+    )
+    if not assignments:
+        raise HTTPException(status_code=404, detail="No selected photos belong to this person")
+    if len(assignments) >= all_count:
+        raise HTTPException(status_code=400, detail="Leave at least one photo in the original person")
+    separated = Person(
+        user_id=user.id,
+        display_name=request.display_name.strip() if request.display_name else None,
+        confirmed=True,
+    )
+    db.add(separated)
+    await db.flush()
+    person.confirmed = True
+    for assignment in assignments:
+        assignment.person_id = separated.id
+        assignment.source = "manual"
+        assignment.confidence = 1.0
+    db.add(
+        ActivityLog(
+            user_id=user.id,
+            action="person.split",
+            details={"person_id": str(person.id), "new_person_id": str(separated.id), "photos": len(assignments)},
+        )
+    )
+    await db.commit()
+    return MessageResponse(message=f"Moved {len(assignments)} photo{'s' if len(assignments) != 1 else ''} to a new person")
+
+
+@router.post("/people/{person_id}/ignore", response_model=MessageResponse)
+async def ignore_person(
+    person_id: UUID,
+    request: PersonIgnoreRequest,
+    user: CurrentUser,
+    db: Database,
+) -> MessageResponse:
+    person = (await _owned_people([person_id], user.id, db))[0]
+    person.ignored = request.ignored
+    person.confirmed = True
+    await db.commit()
+    return MessageResponse(message="Person hidden" if request.ignored else "Person restored")
+
+
+@router.post("/people/feedback", response_model=MessageResponse)
+async def person_feedback(
+    request: PersonFeedbackRequest,
+    user: CurrentUser,
+    db: Database,
+) -> MessageResponse:
+    if request.first_person_id == request.second_person_id:
+        raise HTTPException(status_code=400, detail="Choose two different people")
+    people = await _owned_people(
+        [request.first_person_id, request.second_person_id], user.id, db
+    )
+    representatives: list[tuple[FaceAssignment, DetectedFace]] = []
+    for person in people:
+        row = (
+            await db.execute(
+                select(FaceAssignment, DetectedFace)
+                .join(DetectedFace, DetectedFace.id == FaceAssignment.face_id)
+                .where(FaceAssignment.person_id == person.id)
+                .order_by(FaceAssignment.confidence.desc())
+                .limit(1)
+            )
+        ).first()
+        if row is None:
+            raise HTTPException(status_code=400, detail="A selected person has no face samples")
+        representatives.append(row)
+    first_face, second_face = representatives[0][1], representatives[1][1]
+    ordered = sorted((first_face.id, second_face.id), key=str)
+    existing = await db.scalar(
+        select(FaceFeedback).where(
+            FaceFeedback.first_face_id == ordered[0],
+            FaceFeedback.second_face_id == ordered[1],
+        )
+    )
+    similarity = cosine_similarity(list(first_face.embedding), list(second_face.embedding))
+    if existing:
+        existing.feedback_type = request.feedback_type
+        existing.similarity_score = similarity
+    else:
+        db.add(
+            FaceFeedback(
+                user_id=user.id,
+                first_face_id=ordered[0],
+                second_face_id=ordered[1],
+                feedback_type=request.feedback_type,
+                similarity_score=similarity,
+            )
+        )
+    if request.feedback_type == FaceFeedbackType.SAME:
+        await _merge_people(people, user.id, db)
+        message = "Saved as the same person and merged their albums"
+    else:
+        for person in people:
+            person.confirmed = True
+        message = "Saved as different people; future clustering will respect this"
+    db.add(
+        ActivityLog(
+            user_id=user.id,
+            action="person.feedback",
+            details={"type": request.feedback_type.value, "similarity": round(similarity, 4)},
+        )
+    )
+    await db.commit()
+    return MessageResponse(message=message)

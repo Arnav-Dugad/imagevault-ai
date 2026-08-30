@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from app.models import DuplicateType, ProcessingStatus
+from app.models import DuplicateType, FaceFeedbackType, MediaKind, ProcessingStatus
 
 
 class RegisterRequest(BaseModel):
@@ -58,6 +58,10 @@ class ImageSummary(BaseModel):
     is_screenshot: bool = False
     smart_labels: list[str] = Field(default_factory=list)
     face_count: int = 0
+    media_kind: MediaKind = MediaKind.PHOTO
+    frame_count: int = 1
+    duration_seconds: float | None = None
+    processing_device: str | None = None
 
 
 class SimilarImage(BaseModel):
@@ -80,6 +84,9 @@ class ImageDetail(ImageSummary):
     exif_timestamp: datetime | None
     camera_model: str | None
     ocr_text: str | None
+    ocr_language: str | None
+    ocr_layout: list[dict] = Field(default_factory=list)
+    document_type: str | None
     exact_duplicate_of: ImageSummary | None = None
     similar_images: list[SimilarImage] = Field(default_factory=list)
 
@@ -130,11 +137,38 @@ class SmartAlbum(BaseModel):
     best_image_id: UUID | None = None
     cover_focus_x: float | None = None
     cover_focus_y: float | None = None
+    person_id: UUID | None = None
+    ignored: bool = False
+    confirmed: bool = False
 
 
 class SmartAlbumsResponse(BaseModel):
     items: list[SmartAlbum]
     total: int
+
+
+class PersonRenameRequest(BaseModel):
+    display_name: str = Field(min_length=1, max_length=100)
+
+
+class PersonMergeRequest(BaseModel):
+    person_ids: list[UUID] = Field(min_length=2, max_length=20)
+    display_name: str | None = Field(default=None, min_length=1, max_length=100)
+
+
+class PersonSplitRequest(BaseModel):
+    image_ids: list[UUID] = Field(min_length=1, max_length=100)
+    display_name: str | None = Field(default=None, min_length=1, max_length=100)
+
+
+class PersonIgnoreRequest(BaseModel):
+    ignored: bool
+
+
+class PersonFeedbackRequest(BaseModel):
+    first_person_id: UUID
+    second_person_id: UUID
+    feedback_type: FaceFeedbackType
 
 
 class DuplicateCandidate(BaseModel):

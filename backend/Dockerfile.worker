@@ -5,6 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     TORCH_HOME=/home/imagevault/.cache/torch \
     HF_HOME=/home/imagevault/.cache/huggingface \
+    PYTORCH_NVML_BASED_CUDA_CHECK=1 \
     FACE_DETECTOR_MODEL_PATH=/opt/imagevault/models/face_detection_yunet_2023mar.onnx \
     FACE_RECOGNIZER_MODEL_PATH=/opt/imagevault/models/face_recognition_sface_2021dec.onnx
 
@@ -12,7 +13,10 @@ RUN groupadd --system imagevault && useradd --system --gid imagevault --create-h
 WORKDIR /app
 
 RUN apt-get update && \
-    apt-get install --yes --no-install-recommends ca-certificates curl tesseract-ocr tesseract-ocr-eng && \
+    apt-get install --yes --no-install-recommends ca-certificates curl ffmpeg \
+      tesseract-ocr tesseract-ocr-osd tesseract-ocr-eng tesseract-ocr-hin \
+      tesseract-ocr-mar tesseract-ocr-ben tesseract-ocr-tam tesseract-ocr-tel \
+      tesseract-ocr-guj tesseract-ocr-pan && \
     rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /opt/imagevault/models && \
@@ -26,11 +30,13 @@ RUN mkdir -p /opt/imagevault/models && \
     echo "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79  /opt/imagevault/models/face_recognition_sface_2021dec.onnx" | sha256sum --check --strict
 
 COPY pyproject.toml ./
-COPY app ./app
 ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
-RUN pip install --upgrade pip && \
+RUN mkdir -p app && touch app/__init__.py && \
+    pip install --upgrade pip && \
     pip install --index-url "${TORCH_INDEX_URL}" torch==2.7.0 torchvision==0.22.0 && \
     pip install '.[worker]'
+
+COPY app ./app
 
 RUN mkdir -p /home/imagevault/.cache && chown -R imagevault:imagevault /home/imagevault
 USER imagevault

@@ -39,7 +39,9 @@ class ClipEmbedder:
         import torch
 
         settings = get_settings()
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        requested = settings.ai_device.casefold()
+        cuda_available = torch.cuda.is_available()
+        self.device = "cuda" if requested in {"auto", "cuda"} and cuda_available else "cpu"
         self.model, _, self.preprocess = open_clip.create_model_and_transforms(
             settings.clip_model,
             pretrained=settings.clip_pretrained,
@@ -53,44 +55,84 @@ class ClipEmbedder:
         try:
             redis = Redis.from_url(settings.redis_url, decode_responses=True)
             redis.set("imagevault:worker:model", "loaded", ex=3600)
+            redis.set("imagevault:worker:device", self.device, ex=3600)
             redis.close()
         except Exception:
             pass
 
-    def image_embedding(self, data: bytes) -> tuple[list[float], float, str]:
+    def _fallback_to_cpu(self) -> None:
+        if self.device != "cuda":
+            return
+        self.model.to("cpu")
+        self.device = "cpu"
+        self.torch.cuda.empty_cache()
+        try:
+            redis = Redis.from_url(get_settings().redis_url, decode_responses=True)
+            redis.set("imagevault:worker:device", "cpu-fallback", ex=3600)
+            redis.close()
+        except Exception:
+            pass
+
+    def image_embedding_frames(
+        self, images: Sequence[PillowImage.Image]
+    ) -> tuple[list[float], float, str]:
         self._load()
         started = time.perf_counter()
-        with PillowImage.open(BytesIO(data)) as source:
+        views: list[PillowImage.Image] = []
+        for source in images:
             image = source.convert("RGB")
-            # Combine a normal CLIP crop with a full-frame padded view and its
-            # mirror. This retains edge content and makes near-duplicate search
-            # more robust to crops, borders, screenshots, and horizontal flips.
             full_frame = ImageOps.pad(
                 image,
                 (384, 384),
                 method=PillowImage.Resampling.LANCZOS,
                 color=(127, 127, 127),
             )
-            views = [image, full_frame, ImageOps.mirror(full_frame)]
+            views.extend([image, full_frame, ImageOps.mirror(full_frame)])
+
+        def infer() -> object:
             tensor = self.torch.stack([self.preprocess(view) for view in views]).to(self.device)
-        with self.torch.no_grad():
-            view_embeddings = self.model.encode_image(tensor)
-            view_embeddings /= view_embeddings.norm(dim=-1, keepdim=True)
-            embedding = view_embeddings.mean(dim=0, keepdim=True)
-            embedding /= embedding.norm(dim=-1, keepdim=True)
+            with self.torch.no_grad():
+                view_embeddings = self.model.encode_image(tensor)
+                view_embeddings /= view_embeddings.norm(dim=-1, keepdim=True)
+                combined = view_embeddings.mean(dim=0, keepdim=True)
+                combined /= combined.norm(dim=-1, keepdim=True)
+            return combined
+
+        try:
+            embedding = infer()
+        except RuntimeError:
+            if self.device != "cuda":
+                raise
+            self._fallback_to_cpu()
+            embedding = infer()
         duration = time.perf_counter() - started
         INFERENCE_DURATION.observe(duration)
         vector = normalize_vector(embedding[0].cpu().float().tolist())
         return vector, duration, self.device
 
+    def image_embedding(self, data: bytes) -> tuple[list[float], float, str]:
+        with PillowImage.open(BytesIO(data)) as source:
+            image = source.convert("RGB")
+        return self.image_embedding_frames([image])
+
     def text_embeddings(self, texts: Sequence[str]) -> list[list[float]]:
         if not texts:
             return []
         self._load()
-        tokens = self.tokenizer(list(texts)).to(self.device)
-        with self.torch.no_grad():
-            embeddings = self.model.encode_text(tokens)
-            embeddings /= embeddings.norm(dim=-1, keepdim=True)
+        def infer() -> object:
+            tokens = self.tokenizer(list(texts)).to(self.device)
+            with self.torch.no_grad():
+                result = self.model.encode_text(tokens)
+                result /= result.norm(dim=-1, keepdim=True)
+            return result
+
+        try:
+            embeddings = infer()
+        except RuntimeError:
+            if self.device != "cuda":
+                raise
+            self._fallback_to_cpu()
+            embeddings = infer()
         return [normalize_vector(row) for row in embeddings.cpu().float().tolist()]
 
     def text_embedding(self, text: str) -> list[float]:

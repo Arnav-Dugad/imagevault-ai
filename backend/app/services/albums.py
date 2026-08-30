@@ -107,7 +107,13 @@ def _centroid(cluster: list[FaceVector]) -> list[float]:
     return _normalized(averaged)
 
 
-def cluster_face_records(faces: list[FaceVector], threshold: float) -> list[list[FaceVector]]:
+def cluster_face_records(
+    faces: list[FaceVector],
+    threshold: float,
+    *,
+    seed_person_by_face: dict[UUID, UUID] | None = None,
+    blocked_pairs: set[frozenset[UUID]] | None = None,
+) -> list[list[FaceVector]]:
     """Agglomerative identity clustering without single-link chain errors.
 
     Every merge must pass centroid, average-link, and strongest-pair checks.
@@ -119,7 +125,17 @@ def cluster_face_records(faces: list[FaceVector], threshold: float) -> list[list
         for face_id, image_id, embedding, confidence in faces
         if (normalized := _normalized(embedding))
     ]
-    clusters: list[list[FaceVector]] = [[face] for face in prepared]
+    seeds = seed_person_by_face or {}
+    blocked = blocked_pairs or set()
+    seeded_clusters: dict[UUID, list[FaceVector]] = {}
+    clusters: list[list[FaceVector]] = []
+    for face in prepared:
+        person_id = seeds.get(face[0])
+        if person_id is None:
+            clusters.append([face])
+        else:
+            seeded_clusters.setdefault(person_id, []).append(face)
+    clusters.extend(seeded_clusters.values())
     while True:
         best: tuple[float, int, int] | None = None
         for first_index, first in enumerate(clusters):
@@ -128,6 +144,12 @@ def cluster_face_records(faces: list[FaceVector], threshold: float) -> list[list
             for second_index in range(first_index + 1, len(clusters)):
                 second = clusters[second_index]
                 if first_images.intersection(face[1] for face in second):
+                    continue
+                first_seeds = {seeds[face[0]] for face in first if face[0] in seeds}
+                second_seeds = {seeds[face[0]] for face in second if face[0] in seeds}
+                if first_seeds and second_seeds and first_seeds != second_seeds:
+                    continue
+                if any(frozenset((left[0], right[0])) in blocked for left in first for right in second):
                     continue
                 cross_scores = [
                     cosine_similarity(first_face[2], second_face[2])

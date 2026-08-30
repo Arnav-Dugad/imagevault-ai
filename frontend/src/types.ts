@@ -1,5 +1,6 @@
 export type ProcessingStatus = "PENDING" | "PROCESSING" | "READY" | "EXACT_DUPLICATE" | "FAILED";
 export type DuplicateType = "EXACT" | "PERCEPTUAL" | "VISUAL";
+export type MediaKind = "PHOTO" | "ANIMATED_IMAGE" | "RAW" | "VIDEO";
 
 export interface User {
   id: string;
@@ -40,6 +41,10 @@ export interface VaultImage {
   is_screenshot: boolean;
   smart_labels: string[];
   face_count: number;
+  media_kind: MediaKind;
+  frame_count: number;
+  duration_seconds: number | null;
+  processing_device: string | null;
 }
 
 export interface SimilarImage {
@@ -62,6 +67,9 @@ export interface ImageDetail extends VaultImage {
   exif_timestamp: string | null;
   camera_model: string | null;
   ocr_text: string | null;
+  ocr_language: string | null;
+  ocr_layout: { text: string; confidence: number; x: number; y: number; width: number; height: number; block: number; paragraph: number; line: number }[];
+  document_type: string | null;
   exact_duplicate_of: VaultImage | null;
   similar_images: SimilarImage[];
 }
@@ -153,6 +161,9 @@ export interface SmartAlbum {
   best_image_id: string | null;
   cover_focus_x: number | null;
   cover_focus_y: number | null;
+  person_id: string | null;
+  ignored: boolean;
+  confirmed: boolean;
 }
 
 export interface SmartAlbums {

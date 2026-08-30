@@ -8,10 +8,12 @@ RUN groupadd --system imagevault && useradd --system --gid imagevault --create-h
 WORKDIR /app
 
 COPY pyproject.toml ./
+RUN mkdir -p app && touch app/__init__.py && \
+    pip install --upgrade pip && pip install .
+
 COPY app ./app
 COPY alembic.ini ./
 COPY alembic ./alembic
-RUN pip install --upgrade pip && pip install .
 
 USER imagevault
 EXPOSE 8000

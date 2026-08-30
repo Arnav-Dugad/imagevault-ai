@@ -32,6 +32,7 @@ from app.schemas import (
 )
 from app.services.images import (
     image_summary,
+    media_kind_for,
     object_keys,
     page_count,
     read_validated_image,
@@ -83,7 +84,7 @@ async def similarity_map(image_ids: list[UUID], db: Database) -> dict[UUID, floa
 async def upload_images(
     user: CurrentUser,
     db: Database,
-    files: Annotated[list[UploadFile], File(description="One or more JPG, PNG, or WebP files")],
+    files: Annotated[list[UploadFile], File(description="One or more supported photos or videos")],
 ) -> UploadResponse:
     if not files:
         raise HTTPException(status_code=400, detail="Choose at least one image")
@@ -120,6 +121,7 @@ async def upload_images(
                 object_key=original_key,
                 thumbnail_key=thumbnail_key,
                 mime_type=mime_type,
+                media_kind=media_kind_for(mime_type),
                 file_size=len(data),
                 sha256=digest,
                 status=ProcessingStatus.EXACT_DUPLICATE if exact else ProcessingStatus.PENDING,
@@ -507,6 +509,9 @@ async def get_image(image_id: UUID, user: CurrentUser, db: Database) -> ImageDet
         exif_timestamp=image.exif_timestamp,
         camera_model=image.camera_model,
         ocr_text=image.ocr_text,
+        ocr_language=image.ocr_language,
+        ocr_layout=image.ocr_layout or [],
+        document_type=image.document_type,
         exact_duplicate_of=duplicate,
         similar_images=await similar_for(image, db),
     )

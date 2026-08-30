@@ -12,9 +12,9 @@
 
 The system manages private image collections and highlights waste caused by exact and near-duplicate content. It is also a demonstrable local cloud platform: services are containerized, orchestrated, declared as code, continuously validated, health checked, and observed.
 
-In scope: self-hosted accounts, batch-aware multi-image upload, MinIO objects, metadata, thumbnails, SHA-256, three perceptual hashes, color/frame evidence, multi-view OpenCLIP embeddings, pgvector retrieval, gallery, explainable duplicate review, storage analytics, explicit deletion, service status, Compose, Minikube, Terraform, CI, metrics, logs, and documentation.
+In scope: self-hosted accounts, batch-aware photo/animation/RAW/video upload, MinIO objects, metadata, thumbnails, SHA-256, three perceptual hashes, color/frame evidence, multi-frame OpenCLIP embeddings, pgvector retrieval, multilingual OCR and document layout, private face clustering and feedback, quality scoring, smart albums, gallery, explainable duplicate review, storage analytics, explicit bulk deletion, service status, Compose, Minikube, Terraform, CI, metrics, logs, and documentation.
 
-Out of scope for the first release: public internet hosting, high availability, cross-region replication, automatic deletion, facial recognition, OCR, video, email verification, password recovery, and mobile clients.
+Out of scope for the current release: public internet hosting, high availability, cross-region replication, automatic deletion, identity lookup against public sources, email verification, password recovery, and mobile clients.
 
 ## 2. Quality attributes
 
@@ -46,6 +46,12 @@ Before queueing expensive inference, the API searches `(user_id, sha256)`. A hit
 ### AI processing module
 
 One Celery worker reads the original, extracts safe dimensions/optional EXIF fields, computes pHash, dHash, wHash, and a normalized color histogram, then writes a 640×640 maximum WebP thumbnail. It lazily loads OpenCLIP ViT-B/32 and averages embeddings from a normal crop, padded full-frame view, and mirrored view. The normalized 512-dimensional result is persisted with pgvector and used to retrieve up to 60 semantic candidates. A perceptual prefilter adds candidates that vector retrieval may miss. The final gate combines AI, hash consensus, color, and aspect evidence while keeping near-duplicate and semantic decisions distinct. CUDA is selected only when PyTorch reports it available.
+
+Pillow/pillow-heif decode standard and animated images, rawpy/LibRaw develops camera RAW files, and FFprobe/FFmpeg extract metadata and representative video frames. Tesseract selects an installed script-aware language group and stores searchable text plus bounded word coordinates, confidence, line, paragraph, and block structure. The worker samples frames for animated/video embeddings and records the active processing device. CUDA runtime failures are retried on CPU without losing the job.
+
+### Private people intelligence module
+
+OpenCV YuNet detects faces and SFace produces local face embeddings. Automatic clusters are reconciled with persistent user-owned person records. Rename, merge, split, and ignore actions persist across re-analysis. Same-person and different-person feedback is stored privately as normalized face pairs; its observed similarities adapt the account's automatic threshold while explicit different-person pairs remain blocked. No public identity service or external face API is used.
 
 ### Duplicate review module
 
@@ -135,8 +141,13 @@ All private queries include the authenticated `user_id` predicate. IDs alone nev
 - `/api/auth/*`: registration, login, current user.
 - `/api/images`: filter (`all`, `originals`, `exact`, `similar`, `recent`), search, sort, and pagination.
 - `/api/images/upload`: multipart batch, `202 Accepted`.
+- `/api/images/reindex`: enqueue older media for the current analysis version.
+- `/api/images/smart-search`: natural-language vector search across the private library.
+- `/api/images/bulk-delete`: confirmed deletion of multiple owned items.
 - `/api/images/{id}` and `/similar`: signed media, metadata, evidence.
 - `/api/images/{id}?confirm=true`: explicit deletion of MinIO original, thumbnail, database row, vector, matches, and job.
+- `/api/albums/events`, `/bursts`, `/people`: private smart albums.
+- `/api/albums/people/*`: rename, merge, split, ignore, and feedback controls.
 - `/api/duplicates`, `/dashboard`, `/system/status`: review, analytics, operations.
 - `/health/live`: process alive; `/health/ready`: required dependencies ready; `/metrics`: non-sensitive Prometheus data.
 
@@ -168,7 +179,9 @@ stateDiagram-v2
 | Model/inference failure | Image and job become FAILED with a bounded diagnostic; counter increments |
 | Database or MinIO unavailable | Readiness returns 503 so orchestration stops sending traffic |
 | Redis unavailable | Worker status becomes unhealthy; liveness remains independent |
-| Thumbnail unavailable | Signed original is used as gallery fallback |
+| Thumbnail unavailable while processing | The UI shows a stable media placeholder and retries after processing |
+| CUDA unavailable or inference fails | Worker selects CPU or retries the operation once on CPU |
+| Unsupported RAW/video codec | Job fails safely with a bounded diagnostic; original remains private |
 | Deletion without confirmation | API returns 400 and does not modify state |
 
 An advanced production version would add a durable outbox/requeue mechanism for jobs accepted while Redis is unavailable.
@@ -195,10 +208,10 @@ Prometheus retains seven days locally. Compose provisions an eight-panel Grafana
 
 ## 11. Testing strategy
 
-- Unit/API tests: auth, rejection, authorization isolation, upload, exact duplicates, health, pHash, normalization, thumbnails.
+- Unit/API tests: auth, rejection, authorization isolation, upload/media signatures, exact duplicates, health, pHash, normalization, thumbnails, people controls, feedback constraints, and learned thresholds.
 - Frontend: utility tests, strict TypeScript build, ESLint, production bundling.
 - Static infrastructure: Compose resolution, Dockerfile build checks, Kubernetes render, Terraform format/validate.
-- Manual integration: first model download, CPU inference, signed MinIO links, full Compose/Minikube health, Grafana traffic, scale demonstration.
+- Manual integration: generated GIF/HEIC/video decoding, multilingual OCR availability, first model download, CPU/GPU selection and fallback, signed MinIO links, full Compose/Minikube health, Grafana traffic, scale demonstration.
 - Evidence/results: `[Insert actual test output, screenshots, and benchmark measurements after execution.]`
 
 ## 12. Decisions and alternatives

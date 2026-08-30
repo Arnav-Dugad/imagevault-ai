@@ -32,11 +32,25 @@ class Settings(BaseSettings):
 
     cors_origins: str = "http://localhost:5173"
     max_upload_bytes: int = 15 * 1024 * 1024
+    max_video_upload_bytes: int = 300 * 1024 * 1024
     max_batch_files: int = 20
     allowed_mime_types: set[str] = {
         "image/jpeg",
         "image/png",
         "image/webp",
+        "image/gif",
+        "image/heic",
+        "image/heif",
+        "image/x-adobe-dng",
+        "image/x-canon-cr2",
+        "image/x-nikon-nef",
+        "image/x-sony-arw",
+        "image/x-raw",
+        "video/mp4",
+        "video/quicktime",
+        "video/webm",
+        "video/x-matroska",
+        "video/x-msvideo",
     }
 
     clip_model: str = "ViT-B-32"
@@ -50,7 +64,10 @@ class Settings(BaseSettings):
     metrics_port: int = 9101
     semantic_search_timeout_seconds: int = 30
     semantic_search_min_score: float = 0.16
-    analysis_version: int = 4
+    analysis_version: int = 5
+    ai_device: str = "auto"
+    media_sample_frames: int = 6
+    ocr_languages: str = "eng+hin+mar+ben+tam+tel+guj+pan"
     face_detector_model_path: str = "/opt/imagevault/models/face_detection_yunet_2023mar.onnx"
     face_recognizer_model_path: str = "/opt/imagevault/models/face_recognition_sface_2021dec.onnx"
     face_embedding_model: str = "opencv-sface-2021dec"

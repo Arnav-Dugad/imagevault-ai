@@ -8,7 +8,7 @@ from uuid import UUID
 import imagehash
 import structlog
 from celery import signals
-from PIL import ExifTags, Image as PillowImage
+from PIL import Image as PillowImage
 from prometheus_client import start_http_server
 from redis import Redis
 from sqlalchemy import delete, or_, select
@@ -27,17 +27,19 @@ from app.models import (
     DuplicateType,
     Image,
     JobStatus,
+    MediaKind,
     ProcessingJob,
     ProcessingStatus,
 )
 from app.services.intelligence import (
     SEMANTIC_LABEL_PROMPTS,
-    extract_ocr,
+    extract_ocr_layout,
     looks_like_screenshot,
     merge_smart_labels,
     quality_metrics,
 )
 from app.services.faces import face_engine
+from app.services.media import DecodedMedia, decode_media
 from app.services.similarity import cosine_similarity, evaluate_similarity, hash_distance
 from app.services.storage import storage
 from app.worker.celery_app import celery_app
@@ -112,6 +114,7 @@ def _color_signature(image: PillowImage.Image) -> list[float]:
 
 def _thumbnail_and_metadata(
     data: bytes,
+    mime_type: str = "image/png",
 ) -> tuple[
     bytes,
     int,
@@ -123,40 +126,32 @@ def _thumbnail_and_metadata(
     datetime | None,
     str | None,
 ]:
-    with PillowImage.open(BytesIO(data)) as source:
-        width, height = source.size
-        rgb = source.convert("RGB")
-        perceptual_hash = str(imagehash.phash(rgb))
-        difference_hash = str(imagehash.dhash(rgb))
-        wavelet_hash = str(imagehash.whash(rgb))
-        color_signature = _color_signature(rgb)
-        exif_timestamp: datetime | None = None
-        camera_model: str | None = None
-        try:
-            exif = source.getexif()
-            model_value = exif.get(ExifTags.Base.Model.value)
-            camera_model = str(model_value)[:200] if model_value else None
-            date_value = exif.get(ExifTags.Base.DateTimeOriginal.value)
-            if date_value:
-                exif_timestamp = datetime.strptime(str(date_value), "%Y:%m:%d %H:%M:%S").replace(
-                    tzinfo=UTC
-                )
-        except (ValueError, TypeError, AttributeError):
-            pass
-        rgb.thumbnail((640, 640), PillowImage.Resampling.LANCZOS)
-        output = BytesIO()
-        rgb.save(output, format="WEBP", quality=82, method=4)
-        return (
-            output.getvalue(),
-            width,
-            height,
-            perceptual_hash,
-            difference_hash,
-            wavelet_hash,
-            color_signature,
-            exif_timestamp,
-            camera_model,
-        )
+    return _metadata_for_media(decode_media(data, mime_type))
+
+
+def _metadata_for_media(
+    media: DecodedMedia,
+) -> tuple[bytes, int, int, str, str, str, list[float], datetime | None, str | None]:
+    rgb = media.primary.convert("RGB")
+    perceptual_hash = str(imagehash.phash(rgb))
+    difference_hash = str(imagehash.dhash(rgb))
+    wavelet_hash = str(imagehash.whash(rgb))
+    color_signature = _color_signature(rgb)
+    thumbnail = rgb.copy()
+    thumbnail.thumbnail((640, 640), PillowImage.Resampling.LANCZOS)
+    output = BytesIO()
+    thumbnail.save(output, format="WEBP", quality=82, method=4)
+    return (
+        output.getvalue(),
+        media.width,
+        media.height,
+        perceptual_hash,
+        difference_hash,
+        wavelet_hash,
+        color_signature,
+        media.exif_timestamp,
+        media.camera_model,
+    )
 
 
 def _phash_distance(first: str | None, second: str | None) -> int | None:
@@ -225,6 +220,13 @@ async def _save_result(
     is_screenshot: bool,
     smart_labels: list[str],
     ocr_text: str,
+    ocr_language: str | None,
+    ocr_layout: list[dict],
+    document_type: str | None,
+    media_kind: MediaKind,
+    frame_count: int,
+    duration_seconds: float | None,
+    processing_device: str,
     faces: list[tuple[dict[str, int], float, list[float]]],
 ) -> int:
     matches_created = 0
@@ -249,6 +251,13 @@ async def _save_result(
         image.is_screenshot = is_screenshot
         image.smart_labels = smart_labels
         image.ocr_text = ocr_text or None
+        image.ocr_language = ocr_language
+        image.ocr_layout = ocr_layout or None
+        image.document_type = document_type
+        image.media_kind = media_kind
+        image.frame_count = frame_count
+        image.duration_seconds = duration_seconds
+        image.processing_device = processing_device
         image.face_count = len(faces)
         image.analysis_version = settings.analysis_version
         image.processed_at = datetime.now(UTC)
@@ -413,6 +422,7 @@ async def _process(image_id: UUID) -> dict[str, object]:
         return {"status": "missing", "image_id": str(image_id)}
     try:
         data = storage.get_bytes(image.object_key)
+        media = decode_media(data, image.mime_type)
         (
             thumbnail,
             width,
@@ -423,20 +433,19 @@ async def _process(image_id: UUID) -> dict[str, object]:
             color_signature,
             exif_time,
             camera,
-        ) = _thumbnail_and_metadata(data)
+        ) = _metadata_for_media(media)
         storage.put_bytes(image.thumbnail_key, thumbnail, "image/webp")
-        embedding, inference_seconds, device = embedder.image_embedding(data)
-        with PillowImage.open(BytesIO(data)) as source:
-            rgb = source.convert("RGB")
-            ocr_text = extract_ocr(rgb)
-            screenshot = looks_like_screenshot(
-                rgb,
-                filename=image.original_filename,
-                camera_model=camera,
-                ocr_text=ocr_text,
-            )
-            quality = quality_metrics(rgb, is_screenshot=screenshot, ocr_text=ocr_text)
-            analyzed_faces = face_engine.analyze(rgb)
+        embedding, inference_seconds, device = embedder.image_embedding_frames(media.frames)
+        rgb = media.primary
+        ocr = extract_ocr_layout(rgb)
+        screenshot = looks_like_screenshot(
+            rgb,
+            filename=image.original_filename,
+            camera_model=camera,
+            ocr_text=ocr.text,
+        )
+        quality = quality_metrics(rgb, is_screenshot=screenshot, ocr_text=ocr.text)
+        analyzed_faces = face_engine.analyze(rgb)
         faces = [
             (face.bounding_box, face.confidence, face.embedding)
             for face in analyzed_faces
@@ -444,12 +453,19 @@ async def _process(image_id: UUID) -> dict[str, object]:
         labels = merge_smart_labels(
             _semantic_labels(embedding),
             is_screenshot=screenshot,
-            ocr_text=ocr_text,
+            ocr_text=ocr.text,
             face_boxes=[face.bounding_box for face in analyzed_faces],
             image_size=(width, height),
             filename=image.original_filename,
             camera_model=camera,
         )
+        media_label = {
+            "VIDEO": "video",
+            "RAW": "raw",
+            "ANIMATED_IMAGE": "animated",
+        }.get(media.media_kind.value)
+        if media_label:
+            labels = [media_label, *[label for label in labels if label != media_label]][:6]
         matches = await _save_result(
             image_id,
             width=width,
@@ -468,7 +484,14 @@ async def _process(image_id: UUID) -> dict[str, object]:
             quality_score=quality.overall,
             is_screenshot=screenshot,
             smart_labels=labels,
-            ocr_text=ocr_text,
+            ocr_text=ocr.text,
+            ocr_language=ocr.language,
+            ocr_layout=ocr.layout,
+            document_type=ocr.document_type,
+            media_kind=media.media_kind,
+            frame_count=media.frame_count,
+            duration_seconds=media.duration_seconds,
+            processing_device=device,
             faces=faces,
         )
         duration = time.perf_counter() - started

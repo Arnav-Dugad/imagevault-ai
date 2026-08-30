@@ -32,6 +32,13 @@ def png_bytes(color: tuple[int, int, int] = (80, 180, 120)) -> bytes:
     return output.getvalue()
 
 
+def gif_bytes() -> bytes:
+    output = BytesIO()
+    frames = [PillowImage.new("RGB", (24, 24), color) for color in ("red", "blue")]
+    frames[0].save(output, format="GIF", save_all=True, append_images=frames[1:], duration=80)
+    return output.getvalue()
+
+
 @pytest.mark.asyncio
 async def test_upload_and_exact_duplicate_detection(client, monkeypatch):
     auth = await create_user(client)
@@ -176,6 +183,30 @@ async def test_declared_mime_must_match_decoded_content(client):
         headers={"Authorization": f"Bearer {auth['access_token']}"},
     )
     assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_animated_image_and_video_containers_are_accepted(client, monkeypatch):
+    auth = await create_user(client, "media@example.com")
+    headers = {"Authorization": f"Bearer {auth['access_token']}"}
+    fake = FakeStorage()
+    monkeypatch.setattr(image_routes, "storage", fake)
+    monkeypatch.setattr(image_service, "storage", fake)
+    monkeypatch.setattr(image_routes, "process_image", SimpleNamespace(delay=lambda _: None))
+    mp4 = b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isomiso2"
+
+    response = await client.post(
+        "/api/images/upload",
+        files=[
+            ("files", ("motion.gif", gif_bytes(), "image/gif")),
+            ("files", ("clip.mp4", mp4, "video/mp4")),
+        ],
+        headers=headers,
+    )
+
+    assert response.status_code == 202
+    kinds = [item["image"]["media_kind"] for item in response.json()["items"]]
+    assert kinds == ["ANIMATED_IMAGE", "VIDEO"]
 
 
 @pytest.mark.asyncio

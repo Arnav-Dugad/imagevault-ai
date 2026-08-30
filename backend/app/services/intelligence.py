@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 from PIL import Image as PillowImage, ImageFilter, ImageStat
 
+from app.core.config import get_settings
+
 
 @dataclass(frozen=True)
 class QualityMetrics:
@@ -12,6 +14,14 @@ class QualityMetrics:
     resolution: float
     screenshot: float | None
     overall: float
+
+
+@dataclass(frozen=True)
+class OcrResult:
+    text: str
+    language: str | None
+    layout: list[dict]
+    document_type: str | None
 
 
 # Each visual label is contrastively compared with an explicit negative. This
@@ -207,7 +217,56 @@ def looks_like_screenshot(
     return common_ratio and text_density >= 0.00012
 
 
-def extract_ocr(image: PillowImage.Image) -> str:
+def _ocr_language(image: PillowImage.Image, pytesseract: object) -> str:
+    configured = get_settings().ocr_languages.split("+")
+    try:
+        available = set(pytesseract.get_languages(config=""))
+    except (RuntimeError, OSError):
+        available = {"eng"}
+    usable = [language for language in configured if language in available]
+    if not usable:
+        return "eng" if "eng" in available else next(iter(available), "eng")
+    script = "Latin"
+    if min(image.size) >= 160:
+        try:
+            osd = pytesseract.image_to_osd(
+                image,
+                output_type=pytesseract.Output.DICT,
+                timeout=6,
+            )
+            script = str(osd.get("script") or "Latin")
+        except (RuntimeError, OSError):
+            pass
+    script_languages = {
+        "Latin": ["eng"],
+        "Devanagari": ["hin", "mar", "eng"],
+        "Bengali": ["ben", "eng"],
+        "Tamil": ["tam", "eng"],
+        "Telugu": ["tel", "eng"],
+        "Gujarati": ["guj", "eng"],
+        "Gurmukhi": ["pan", "eng"],
+    }
+    selected = [language for language in script_languages.get(script, usable) if language in usable]
+    return "+".join(selected or usable[:3])
+
+
+def _document_type(text: str, layout: list[dict]) -> str | None:
+    lowered = text.casefold()
+    words = set(re.findall(r"[\w₹$€£]+", lowered))
+    if "receipt" in words and len({"subtotal", "tax", "total", "payment", "change"}.intersection(words)) >= 2:
+        return "receipt"
+    if ("invoice" in words or "bill" in words) and len({"subtotal", "tax", "total", "amount"}.intersection(words)) >= 2:
+        return "invoice"
+    if len({"resume", "experience", "education", "skills", "curriculum"}.intersection(words)) >= 2:
+        return "resume"
+    if len({"statement", "account", "balance", "transaction", "credit", "debit"}.intersection(words)) >= 3:
+        return "statement"
+    if len(layout) >= 12 or len(text.strip()) >= 100:
+        return "document"
+    return None
+
+
+def extract_ocr_layout(image: PillowImage.Image) -> OcrResult:
     try:
         import pytesseract
 
@@ -221,15 +280,53 @@ def extract_ocr(image: PillowImage.Image) -> str:
                 (round(working.width * scale), round(working.height * scale)),
                 PillowImage.Resampling.LANCZOS,
             )
-        text = pytesseract.image_to_string(
+        language = _ocr_language(working, pytesseract)
+        data = pytesseract.image_to_data(
             working,
-            lang="eng",
+            lang=language,
             config="--oem 1 --psm 11",
             timeout=12,
+            output_type=pytesseract.Output.DICT,
         )
-        return re.sub(r"[ \t]+", " ", text).strip()[:20_000]
+        words: list[dict] = []
+        lines: dict[tuple[int, int, int], list[str]] = {}
+        for index, raw_text in enumerate(data.get("text", [])):
+            value = re.sub(r"[ \t]+", " ", str(raw_text)).strip()
+            try:
+                confidence = float(data["conf"][index])
+            except (KeyError, TypeError, ValueError, IndexError):
+                confidence = -1
+            if not value or confidence < 25:
+                continue
+            line_key = (
+                int(data.get("block_num", [0])[index]),
+                int(data.get("par_num", [0])[index]),
+                int(data.get("line_num", [0])[index]),
+            )
+            lines.setdefault(line_key, []).append(value)
+            if len(words) < 1200:
+                words.append(
+                    {
+                        "text": value,
+                        "confidence": round(confidence / 100.0, 3),
+                        "x": int(data["left"][index]),
+                        "y": int(data["top"][index]),
+                        "width": int(data["width"][index]),
+                        "height": int(data["height"][index]),
+                        "block": line_key[0],
+                        "paragraph": line_key[1],
+                        "line": line_key[2],
+                    }
+                )
+        text = "\n".join(" ".join(values) for values in lines.values()).strip()[:20_000]
+        return OcrResult(text, language, words, _document_type(text, words))
     except (ImportError, RuntimeError, OSError):
-        return ""
+        return OcrResult("", None, [], None)
+
+
+def extract_ocr(image: PillowImage.Image) -> str:
+    """Compatibility wrapper for callers that only need searchable text."""
+    return extract_ocr_layout(image).text
 
 
 def merge_smart_labels(

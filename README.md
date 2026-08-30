@@ -7,10 +7,12 @@ ImageVault AI stores original images in private S3-compatible MinIO object stora
 ## What it demonstrates
 
 - Local account registration and JWT login with Argon2 password hashing.
-- User-isolated batch upload for JPG, PNG, and WebP files, with progress and cancellation.
+- User-isolated batch upload for JPG, PNG, WebP, GIF, HEIC/HEIF, common camera RAW, and common video files, with progress and cancellation.
 - Byte-for-byte duplicate detection through SHA-256 before expensive AI inference.
 - Multi-signal matching with pHash, dHash, wHash, color histograms, frame geometry, and multi-view local OpenCLIP ViT-B/32 embeddings.
 - Batch intelligence reports, connected duplicate families, explainable evidence, recommended keepers, confidence filters, and guarded bulk cleanup.
+- Persistent private people albums with rename, merge, split, ignore, and same-person/different-person feedback that tunes each account's matching threshold.
+- Local multilingual OCR with word-level layout, searchable text, document classification, smart labels, photo-quality scoring, events, and burst best-shot albums.
 - Private MinIO originals, generated WebP thumbnails, metadata, gallery filters, image details, and explicit deletion.
 - Live storage analytics, health/readiness/liveness endpoints, Prometheus metrics, and an automatically provisioned Grafana dashboard.
 - A multi-service Docker Compose deployment plus Minikube/Kubernetes and Terraform alternatives.
@@ -49,7 +51,7 @@ See [architecture.md](docs/architecture.md) and [technical-design.md](docs/techn
 | Metadata / vector search | PostgreSQL 16 + pgvector |
 | Object storage | MinIO, using an S3-compatible object-key design |
 | Async jobs | Redis + Celery |
-| Local AI | OpenCLIP ViT-B/32, OpenCV YuNet + SFace, Tesseract OCR, Pillow, ImageHash |
+| Local AI/media | OpenCLIP ViT-B/32, OpenCV YuNet + SFace, multilingual Tesseract OCR, Pillow/pillow-heif, rawpy/LibRaw, FFmpeg, ImageHash |
 | Gateway | Nginx |
 | Containers / orchestration | Docker Compose, Kubernetes, Minikube |
 | Infrastructure as Code | Terraform |
@@ -73,13 +75,15 @@ From PowerShell in the repository:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\bootstrap_env.ps1
-docker compose up -d --build
+powershell -ExecutionPolicy Bypass -File .\scripts\start_imagevault.ps1
 docker compose ps
 ```
 
 On Linux/macOS, copy `.env.example` to `.env` and replace every `REPLACE_...` value with independent random values before running Compose.
 
-The worker downloads the selected OpenCLIP weights on its first non-exact image. Expect roughly 350–600 MB depending on the model package/cache format and several minutes on the first CPU run. Weights are cached in the `model-cache` Docker volume and never committed.
+The start script detects a usable NVIDIA GPU, attempts the CUDA worker, and automatically rebuilds/runs the supported CPU worker if CUDA cannot start. The worker also falls back to CPU after a CUDA runtime error. It downloads the selected OpenCLIP weights on its first non-exact image; expect roughly 350–600 MB and several minutes on the first CPU run. Weights are cached in the `model-cache` Docker volume and never committed.
+
+After upgrading an existing installation, open **Settings** and select **Re-analyze all** once so older files receive the new OCR, media, quality, label, and face-clustering data.
 
 | Surface | Local URL |
 |---|---|
@@ -217,7 +221,14 @@ The workflow validates a local deployment artifact. It does not publish images, 
 | `GET` | `/api/images` | User-scoped search, filter, sort, pagination |
 | `GET` | `/api/images/{id}` | Metadata, preview, duplicate and similarity evidence |
 | `GET` | `/api/images/{id}/similar` | Similar images |
+| `POST` | `/api/images/bulk-delete` | Guarded multi-file deletion |
 | `DELETE` | `/api/images/{id}?confirm=true` | Explicit object/thumbnail/vector deletion |
+| `GET` | `/api/albums/events`, `/bursts`, `/people` | Automatic smart albums |
+| `POST` | `/api/albums/people/{id}/rename` | Rename a private person album |
+| `POST` | `/api/albums/people/merge` | Merge selected people |
+| `POST` | `/api/albums/people/{id}/split` | Move selected faces to a new person |
+| `POST` | `/api/albums/people/{id}/ignore` | Hide or restore a person |
+| `POST` | `/api/albums/people/feedback` | Store private same/different-person feedback |
 | `GET` | `/api/duplicates` | Duplicate review groups |
 | `GET` | `/api/duplicates/review?batch_id=...` | Premium report for the whole library or one upload batch |
 | `GET` | `/api/dashboard` | Storage analytics |
@@ -236,14 +247,18 @@ Interactive schemas and examples are available at `/docs`.
 - **Explainable fusion:** near-duplicate and semantic matches use separate confidence gates, then expose AI, structure, color, frame, and plain-language reasons in the UI. Thresholds are configurable demonstrations, not universal scientific guarantees.
 - **Connected visual families:** pairwise matches are merged into non-overlapping groups, including every relevant image from the same upload batch and direct matches from the existing library.
 
-The worker chooses CUDA when PyTorch reports it available; otherwise it uses CPU. CUDA is never required for correctness.
+The worker chooses CUDA when PyTorch reports it available; otherwise it uses CPU. A CUDA inference failure triggers an in-process CPU retry and records the active device in system status. CUDA is never required for correctness.
 
 The default worker image installs the smaller CPU-only PyTorch wheel. Optional NVIDIA acceleration is isolated in an override so ordinary laptops never fail on a missing GPU:
 
 ```powershell
-# Requires a compatible NVIDIA driver and NVIDIA Container Toolkit.
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml build worker
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+# Automatic NVIDIA detection and CPU fallback:
+powershell -ExecutionPolicy Bypass -File .\scripts\start_imagevault.ps1
+
+# Force CPU mode when troubleshooting:
+powershell -ExecutionPolicy Bypass -File .\scripts\start_imagevault.ps1 -CpuOnly
+
+# Inspect the active PyTorch device:
 docker compose exec worker python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU')"
 ```
 
@@ -312,7 +327,8 @@ docker-compose.yml       Primary laptop deployment
 - One MinIO instance, one PostgreSQL instance, and one AI worker are deliberate laptop-friendly defaults, not a high-availability production topology.
 - The local JWT flow has no email verification or password-recovery service.
 - Similarity thresholds need evaluation against the intended photo collection; AI results can be wrong.
-- Animated GIF ingestion, video indexing, and manual merge/split controls for people clusters are future scope.
+- RAW decoding depends on LibRaw's support for the specific camera model; unsupported proprietary codecs fail safely and retain a diagnostic.
+- Video indexing samples representative frames for search and duplicate intelligence; it is not full scene-by-scene transcription.
 - Direct exposure beyond a trusted laptop would require TLS, secret rotation, backups, and a formal security review.
 
 ## Screenshots and measured results

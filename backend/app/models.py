@@ -43,6 +43,18 @@ class DuplicateType(str, enum.Enum):
     VISUAL = "VISUAL"
 
 
+class MediaKind(str, enum.Enum):
+    PHOTO = "PHOTO"
+    ANIMATED_IMAGE = "ANIMATED_IMAGE"
+    RAW = "RAW"
+    VIDEO = "VIDEO"
+
+
+class FaceFeedbackType(str, enum.Enum):
+    SAME = "SAME"
+    DIFFERENT = "DIFFERENT"
+
+
 class JobStatus(str, enum.Enum):
     PENDING = "PENDING"
     RUNNING = "RUNNING"
@@ -91,6 +103,15 @@ class Image(Base):
     is_screenshot: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     smart_labels: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     ocr_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ocr_language: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    ocr_layout: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
+    document_type: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    media_kind: Mapped[MediaKind] = mapped_column(
+        Enum(MediaKind, native_enum=False), default=MediaKind.PHOTO, index=True
+    )
+    frame_count: Mapped[int] = mapped_column(Integer, default=1)
+    duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    processing_device: Mapped[str | None] = mapped_column(String(80), nullable=True)
     face_count: Mapped[int] = mapped_column(Integer, default=0)
     analysis_version: Mapped[int] = mapped_column(Integer, default=0, index=True)
     embedding: Mapped[list[float] | None] = mapped_column(
@@ -156,6 +177,9 @@ class DetectedFace(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     image: Mapped[Image] = relationship(back_populates="detected_faces")
+    assignment: Mapped["FaceAssignment | None"] = relationship(
+        back_populates="face", cascade="all, delete-orphan", uselist=False
+    )
 
     __table_args__ = (
         UniqueConstraint("image_id", "face_index", name="uq_detected_face_index"),
@@ -165,6 +189,74 @@ class DetectedFace(Base):
             postgresql_using="hnsw",
             postgresql_ops={"embedding": "vector_cosine_ops"},
         ),
+    )
+
+
+class Person(Base):
+    __tablename__ = "people"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    display_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    ignored: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+    assignments: Mapped[list["FaceAssignment"]] = relationship(
+        back_populates="person", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (Index("ix_people_user_ignored", "user_id", "ignored"),)
+
+
+class FaceAssignment(Base):
+    __tablename__ = "face_assignments"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    person_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("people.id", ondelete="CASCADE"), index=True
+    )
+    face_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("detected_faces.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    source: Mapped[str] = mapped_column(String(20), default="automatic")
+    confidence: Mapped[float] = mapped_column(Float, default=1.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    person: Mapped[Person] = relationship(back_populates="assignments")
+    face: Mapped[DetectedFace] = relationship(back_populates="assignment")
+
+
+class FaceFeedback(Base):
+    __tablename__ = "face_feedback"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    first_face_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("detected_faces.id", ondelete="CASCADE"), index=True
+    )
+    second_face_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("detected_faces.id", ondelete="CASCADE"), index=True
+    )
+    feedback_type: Mapped[FaceFeedbackType] = mapped_column(
+        Enum(FaceFeedbackType, native_enum=False), index=True
+    )
+    similarity_score: Mapped[float] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    __table_args__ = (
+        UniqueConstraint("first_face_id", "second_face_id", name="uq_face_feedback_pair"),
+        Index("ix_face_feedback_user_type", "user_id", "feedback_type"),
     )
 
 

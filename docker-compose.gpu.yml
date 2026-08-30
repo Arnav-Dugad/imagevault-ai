@@ -1,6 +1,8 @@
 # Optional override. Requires a supported NVIDIA driver and NVIDIA Container Toolkit.
 services:
   worker:
+    environment:
+      AI_DEVICE: auto
     build:
       args:
         TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu128}

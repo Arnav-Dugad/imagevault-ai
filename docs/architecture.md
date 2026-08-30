@@ -63,9 +63,9 @@ sequenceDiagram
     participant Q as Redis
     participant W as AI worker
 
-    User->>UI: Select one or more images
+    User->>UI: Select photos, animations, RAW files, or videos
     UI->>API: POST /api/images/upload + JWT
-    API->>API: Validate type, decoder, size; calculate SHA-256
+    API->>API: Validate signature/type/size; calculate SHA-256
     API->>DB: Query same user + SHA-256
     alt exact bytes already exist
         API->>S3: Store private UUID object
@@ -78,9 +78,10 @@ sequenceDiagram
     API-->>UI: 202 Accepted + exact-match result
     Q->>W: Deliver job
     W->>S3: Read original
-    W->>W: Thumbnail, metadata, pHash + dHash + wHash, color/frame evidence
+    W->>W: Decode representative frames and safe metadata
+    W->>W: Thumbnail, OCR/layout, quality, faces, hashes, color/frame evidence
     alt non-exact image
-        W->>W: Multi-view OpenCLIP embedding on CPU or CUDA
+        W->>W: Multi-frame OpenCLIP embedding on CPU or CUDA with CPU fallback
         W->>DB: pgvector cosine nearest-neighbour query
         W->>DB: Store vector and advisory matches
     else exact duplicate
@@ -88,7 +89,7 @@ sequenceDiagram
     end
     W->>S3: Store WebP thumbnail
     W->>DB: Mark READY / EXACT_DUPLICATE
-    UI->>API: Poll gallery/dashboard
+    UI->>API: Poll gallery, albums, and dashboard
     API-->>UI: Updated processing state
 ```
 
