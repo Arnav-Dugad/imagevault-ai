@@ -34,6 +34,22 @@ from app.worker.embedder import embedder
 
 logger = structlog.get_logger("imagevault.worker")
 settings = get_settings()
+_worker_runner: asyncio.Runner | None = None
+
+
+def _get_worker_runner() -> asyncio.Runner:
+    """Return the process-local runner used by every Celery task.
+
+    SQLAlchemy's asyncpg connections belong to the event loop that created
+    them. Creating a fresh loop with ``asyncio.run`` for every task lets the
+    connection pool hand a later task a connection from a closed loop. A
+    long-lived runner keeps all tasks and pooled connections on one loop.
+    """
+    global _worker_runner
+    if _worker_runner is None:
+        _worker_runner = asyncio.Runner()
+        _worker_runner.get_loop()
+    return _worker_runner
 
 
 def _heartbeat() -> None:
@@ -47,8 +63,23 @@ def _heartbeat() -> None:
 
 @signals.worker_process_init.connect
 def start_worker_metrics(**_: object) -> None:
+    _get_worker_runner()
     start_http_server(settings.metrics_port)
     _heartbeat()
+
+
+@signals.worker_process_shutdown.connect
+def close_worker_resources(**_: object) -> None:
+    global _worker_runner
+    if _worker_runner is None:
+        return
+    from app.db import engine
+
+    try:
+        _worker_runner.run(engine.dispose())
+    finally:
+        _worker_runner.close()
+        _worker_runner = None
 
 
 @signals.heartbeat_sent.connect
@@ -263,4 +294,4 @@ async def _process(image_id: UUID) -> dict[str, object]:
 )
 def process_image(self, image_id: str) -> dict[str, object]:
     del self
-    return asyncio.run(_process(UUID(image_id)))
+    return _get_worker_runner().run(_process(UUID(image_id)))
