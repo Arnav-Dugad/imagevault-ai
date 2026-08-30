@@ -120,6 +120,10 @@ async def upload_images(
                 exact_duplicate_of_id=duplicate.id if duplicate else None,
             )
             db.add(image)
+            # The job and activity log reference this image by foreign key. Flush the
+            # parent row first because those models do not have ORM relationships that
+            # let SQLAlchemy infer the required INSERT ordering.
+            await db.flush()
             db.add(ProcessingJob(image_id=image_id, status=JobStatus.PENDING))
             db.add(
                 ActivityLog(
