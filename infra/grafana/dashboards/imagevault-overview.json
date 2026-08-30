@@ -86,31 +86,11 @@
       "targets": [{"expr": "sum(imagevault_processing_failures_total)", "legendFormat": "processing failures", "refId": "A"}, {"expr": "sum(imagevault_similar_images_total)", "legendFormat": "similar matches", "refId": "B"}, {"expr": "imagevault_embedding_model_loaded", "legendFormat": "model loaded", "refId": "C"}],
       "title": "Worker outcomes",
       "type": "timeseries"
-    },
-    {
-      "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "unit": "percentunit"}, "overrides": []},
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 22},
-      "id": 9,
-      "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "desc"}},
-      "targets": [{"expr": "sum by (name) (rate(container_cpu_usage_seconds_total{name=~\"imagevault-ai.*\"}[5m]))", "legendFormat": "{{name}}", "refId": "A"}],
-      "title": "Container CPU (optional cAdvisor profile)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "unit": "bytes"}, "overrides": []},
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 22},
-      "id": 10,
-      "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "desc"}},
-      "targets": [{"expr": "sum by (name) (container_memory_working_set_bytes{name=~\"imagevault-ai.*\"})", "legendFormat": "{{name}}", "refId": "A"}],
-      "title": "Container memory (optional cAdvisor profile)",
-      "type": "timeseries"
     }
   ],
   "refresh": "10s",
   "schemaVersion": 40,
-  "tags": ["imagevault", "cloud-devops", "college-project"],
+  "tags": ["imagevault", "monitoring"],
   "templating": {"list": []},
   "time": {"from": "now-1h", "to": "now"},
   "timezone": "browser",

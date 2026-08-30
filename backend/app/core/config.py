@@ -50,7 +50,14 @@ class Settings(BaseSettings):
     metrics_port: int = 9101
     semantic_search_timeout_seconds: int = 30
     semantic_search_min_score: float = 0.16
-    face_cluster_threshold: float = 0.87
+    analysis_version: int = 4
+    face_detector_model_path: str = "/opt/imagevault/models/face_detection_yunet_2023mar.onnx"
+    face_recognizer_model_path: str = "/opt/imagevault/models/face_recognition_sface_2021dec.onnx"
+    face_embedding_model: str = "opencv-sface-2021dec"
+    # SFace's official cosine thresholds are far lower than CLIP's. 0.30 is
+    # deliberately cross-pose friendly while the clusterer adds centroid and
+    # average-link checks to prevent unrelated identities from chaining.
+    face_cluster_threshold: float = 0.30
     event_gap_hours: int = 12
     burst_gap_seconds: int = 12
 

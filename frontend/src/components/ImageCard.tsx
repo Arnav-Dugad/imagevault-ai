@@ -5,12 +5,13 @@ import { formatBytes, formatDate, percent } from "../lib/utils";
 import type { VaultImage } from "../types";
 import { StatusBadge } from "./ui";
 
-export function ImageCard({ image, selectable, selected, onSelect }: { image: VaultImage; selectable?: boolean; selected?: boolean; onSelect?: (id: string) => void }) {
-  return <motion.article layout whileHover={{ y: -4 }} transition={{ duration: .2 }} className={`panel group relative overflow-hidden rounded-2xl ${selected ? "ring-2 ring-acid" : ""}`}>
+export function ImageCard({ image, index = 0, selectable, selected, onSelect }: { image: VaultImage; index?: number; selectable?: boolean; selected?: boolean; onSelect?: (id: string) => void }) {
+  return <motion.article layout initial={{ opacity: 0, y: 14, scale: .985 }} animate={{ opacity: 1, y: 0, scale: 1 }} whileHover={{ y: -6, scale: 1.006 }} transition={{ layout: { type: "spring", stiffness: 360, damping: 32 }, opacity: { delay: Math.min(index, 12) * .035 }, y: { delay: Math.min(index, 12) * .035, duration: .3 }, scale: { duration: .22 } }} className={`panel premium-card group relative overflow-hidden rounded-2xl ${selected ? "ring-2 ring-acid" : ""}`}>
     {selectable && <button onClick={() => onSelect?.(image.id)} aria-label={`${selected ? "Deselect" : "Select"} ${image.original_filename}`} className={`focus-ring absolute left-3 top-3 z-20 grid h-8 w-8 place-items-center rounded-full border ${selected ? "border-acid bg-acid text-canvas" : "border-white/25 bg-black/55"}`}>{selected && <Check className="h-4 w-4" />}</button>}
     <Link to={`/images/${image.id}`} className="focus-ring block">
       <div className="relative aspect-[4/3] overflow-hidden bg-[#171b21]">
-        {image.thumbnail_url ? <img src={image.thumbnail_url} alt={image.original_filename} loading="lazy" className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]" /> : <div className="grid h-full place-items-center"><ImageIcon className="h-8 w-8 text-muted/40" /></div>}
+        {image.thumbnail_url ? <img src={image.thumbnail_url} alt={image.original_filename} loading="lazy" className="h-full w-full object-cover transition duration-700 ease-out group-hover:scale-[1.055]" /> : <div className="grid h-full place-items-center"><ImageIcon className="h-8 w-8 text-muted/40" /></div>}
+        <div className="card-sheen absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
         <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/75 to-transparent" />
         <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between gap-2"><StatusBadge status={image.status} />{image.best_similarity !== null && <span className="rounded-full bg-white px-2.5 py-1 font-mono text-[10px] font-semibold text-black">{percent(image.best_similarity)}</span>}</div>
       </div>

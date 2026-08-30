@@ -183,14 +183,14 @@ Residual risks: local `.env` disclosure, host compromise, unencrypted HTTP on th
 
 API metrics include request count/latency/error status, uploads, bytes, and exact duplicates. Worker metrics include processed images, similar matches, inference/processing histograms, failures, queue gauge, and model-loaded state. JSON logs carry timestamp, level, service, request ID, image ID where appropriate, duration, and error context; they deliberately exclude secrets and image data.
 
-Prometheus retains seven days locally. Compose provisions a ten-panel Grafana dashboard; Minikube provisions a compact equivalent. Optional cAdvisor panels display container CPU/memory where the host supports it.
+Prometheus retains seven days locally. Compose provisions an eight-panel Grafana dashboard for API and worker health; Minikube provisions a compact equivalent. Docker resource usage remains available through Docker Desktop without adding an unreliable cAdvisor scrape target.
 
 ## 10. Deployment and capacity assumptions
 
 - One laptop, 4 CPU allocation, 10–12 GB Docker/Minikube memory, 12+ GB disk.
 - One worker to prevent multiple model copies from exhausting memory.
 - API memory limit 768 MiB; worker limit 4 GiB; PostgreSQL/MinIO 1 GiB each.
-- Model weights are downloaded and cached at runtime; no weights enter Git or Docker build context.
+- OpenCLIP weights are downloaded and cached at runtime. The worker image fetches checksum-verified OpenCV face models during its build; no weights enter Git or the Docker build context.
 - Prometheus retention is seven days to constrain disk use.
 
 ## 11. Testing strategy

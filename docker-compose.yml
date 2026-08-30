@@ -24,6 +24,8 @@ x-app-environment: &app-environment
   PERCEPTUAL_PREFILTER_DISTANCE: ${PERCEPTUAL_PREFILTER_DISTANCE:-18}
   CLIP_MODEL: ${CLIP_MODEL:-ViT-B-32}
   CLIP_PRETRAINED: ${CLIP_PRETRAINED:-laion2b_s34b_b79k}
+  ANALYSIS_VERSION: ${ANALYSIS_VERSION:-4}
+  FACE_CLUSTER_THRESHOLD: ${FACE_CLUSTER_THRESHOLD:-0.30}
 
 services:
   postgres:
@@ -193,21 +195,6 @@ services:
     ports:
       - "3001:3000"
     depends_on: [prometheus]
-    restart: unless-stopped
-    networks: [vault]
-
-  cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.49.2
-    profiles: ["container-metrics"]
-    privileged: true
-    devices:
-      - /dev/kmsg:/dev/kmsg
-    volumes:
-      - /:/rootfs:ro
-      - /var/run:/var/run:ro
-      - /sys:/sys:ro
-      - /var/lib/docker:/var/lib/docker:ro
-    expose: ["8080"]
     restart: unless-stopped
     networks: [vault]
 

@@ -83,18 +83,6 @@ class ClipEmbedder:
         vector = normalize_vector(embedding[0].cpu().float().tolist())
         return vector, duration, self.device
 
-    def image_embeddings(self, images: Sequence[PillowImage.Image]) -> list[list[float]]:
-        if not images:
-            return []
-        self._load()
-        tensor = self.torch.stack([self.preprocess(image.convert("RGB")) for image in images]).to(
-            self.device
-        )
-        with self.torch.no_grad():
-            embeddings = self.model.encode_image(tensor)
-            embeddings /= embeddings.norm(dim=-1, keepdim=True)
-        return [normalize_vector(row) for row in embeddings.cpu().float().tolist()]
-
     def text_embeddings(self, texts: Sequence[str]) -> list[list[float]]:
         if not texts:
             return []

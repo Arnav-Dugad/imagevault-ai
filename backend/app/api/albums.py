@@ -7,7 +7,13 @@ from app.api.dependencies import CurrentUser, Database
 from app.core.config import get_settings
 from app.models import DetectedFace, DuplicateMatch, DuplicateType, Image, ProcessingStatus
 from app.schemas import SmartAlbum, SmartAlbumsResponse
-from app.services.albums import best_photo, cluster_faces, group_bursts, group_events, image_time
+from app.services.albums import (
+    best_photo,
+    cluster_face_records,
+    group_bursts,
+    group_events,
+    image_time,
+)
 from app.services.images import image_summary
 
 router = APIRouter(prefix="/albums", tags=["Smart albums"])
@@ -54,6 +60,8 @@ def album_payload(
     title: str,
     subtitle: str,
     images: list[Image],
+    *,
+    cover_focus: tuple[float, float] | None = None,
 ) -> SmartAlbum:
     keeper = best_photo(images)
     return SmartAlbum(
@@ -64,6 +72,8 @@ def album_payload(
         images=[image_summary(image) for image in images[:24]],
         image_count=len(images),
         best_image_id=keeper.id,
+        cover_focus_x=cover_focus[0] if cover_focus else None,
+        cover_focus_y=cover_focus[1] if cover_focus else None,
     )
 
 
@@ -104,16 +114,28 @@ async def burst_albums(user: CurrentUser, db: Database) -> SmartAlbumsResponse:
 async def people_albums(user: CurrentUser, db: Database) -> SmartAlbumsResponse:
     face_rows = (
         await db.execute(
-            select(DetectedFace.id, DetectedFace.image_id, DetectedFace.embedding).where(
-                DetectedFace.user_id == user.id
+            select(
+                DetectedFace.id,
+                DetectedFace.image_id,
+                DetectedFace.embedding,
+                DetectedFace.confidence,
+                DetectedFace.bounding_box,
+            ).where(
+                DetectedFace.user_id == user.id,
+                DetectedFace.embedding_model == settings.face_embedding_model,
+                DetectedFace.confidence >= 0.45,
             )
         )
     ).all()
-    groups = cluster_faces(
-        [(face_id, image_id, list(embedding)) for face_id, image_id, embedding in face_rows],
+    groups = cluster_face_records(
+        [
+            (face_id, image_id, list(embedding), confidence)
+            for face_id, image_id, embedding, confidence, _ in face_rows
+        ],
         settings.face_cluster_threshold,
     )
-    all_ids = {image_id for group in groups for image_id in group}
+    all_ids = {face[1] for group in groups for face in group}
+    face_boxes = {face_id: box for face_id, _, _, _, box in face_rows}
     image_map = {
         image.id: image
         for image in (
@@ -134,17 +156,32 @@ async def people_albums(user: CurrentUser, db: Database) -> SmartAlbumsResponse:
         )
     }
     albums: list[SmartAlbum] = []
-    for index, group in enumerate(groups[:100], start=1):
-        images = [image_map[image_id] for image_id in group if image_id in image_map]
-        if not images:
+    for group in groups[:100]:
+        image_ids = list(dict.fromkeys(face[1] for face in group))
+        images = [image_map[image_id] for image_id in image_ids if image_id in image_map]
+        # A single sighting is not yet a useful people album. Suppressing
+        # singletons also avoids a wall of misleading "Person 1" cards while
+        # the model gathers enough evidence to form a confident identity.
+        if len(images) < 2:
             continue
         images.sort(key=image_time, reverse=True)
+        keeper = best_photo(images)
+        keeper_face = next((face for face in group if face[1] == keeper.id), None)
+        box = face_boxes.get(keeper_face[0]) if keeper_face else None
+        focus = None
+        if box and keeper.width and keeper.height:
+            focus = (
+                max(0.0, min(1.0, (box["x"] + box["width"] / 2) / keeper.width)),
+                max(0.0, min(1.0, (box["y"] + box["height"] / 2) / keeper.height)),
+            )
+        index = len(albums) + 1
         albums.append(
             album_payload(
-                f"person-{index}",
+                f"person-{min(str(face[0]) for face in group)}",
                 f"Person {index}",
                 f"{len(images)} photo{'s' if len(images) != 1 else ''}",
                 images,
+                cover_focus=focus,
             )
         )
     return SmartAlbumsResponse(items=albums, total=len(albums))

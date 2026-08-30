@@ -258,11 +258,11 @@ async def reindex_images(
     queued: list[UUID] = []
     for image in sorted(images, key=lambda item: item.exact_duplicate_of_id is not None):
         has_smart_index = bool(
-            image.difference_hash
+            image.analysis_version >= settings.analysis_version
+            and image.difference_hash
             and image.wavelet_hash
             and image.color_signature
             and image.quality_score is not None
-            and image.smart_labels
         )
         if missing_only and has_smart_index:
             continue

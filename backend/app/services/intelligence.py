@@ -1,7 +1,6 @@
 import math
 import re
 from dataclasses import dataclass
-from pathlib import Path
 
 from PIL import Image as PillowImage, ImageFilter, ImageStat
 
@@ -15,31 +14,128 @@ class QualityMetrics:
     overall: float
 
 
-@dataclass(frozen=True)
-class FaceCrop:
-    bounding_box: dict[str, int]
-    confidence: float
-    image: PillowImage.Image
-
-
-SEMANTIC_LABELS = {
-    "document": "a photo or scan of a document page with printed text",
-    "selfie": "a selfie photograph of one person looking at the camera",
-    "portrait": "a portrait photograph of a person",
-    "landscape": "a wide landscape, nature, mountain, beach, or outdoor scene",
-    "receipt": "a receipt, invoice, bill, or shopping payment slip",
-    "meme": "an internet meme with a picture and prominent caption text",
-    "screenshot": "a computer, phone, website, app, or chat screenshot",
-    "food": "a photograph of food, a meal, or a drink",
-    "pet": "a photograph of a pet, dog, or cat",
-    "vehicle": "a photograph containing a car, motorcycle, truck, or vehicle",
-    "product": "a product photograph of an object for sale",
-    "people": "a photograph containing a group of people",
+# Each visual label is contrastively compared with an explicit negative. This
+# is much less trigger-happy than accepting the three nearest CLIP prompts.
+SEMANTIC_LABEL_PROMPTS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "selfie": (
+        (
+            "a smartphone selfie taken at arm's length by the person in the picture",
+            "a casual front-camera selfie with a face close to the lens",
+        ),
+        (
+            "a professionally posed portrait photographed by another person",
+            "a full-body event photograph taken from a distance",
+        ),
+    ),
+    "landscape": (
+        (
+            "a wide landscape photograph of scenery, mountains, beach, or countryside",
+            "an outdoor scenic vista with a distant horizon",
+        ),
+        ("a close-up portrait of a person", "a document or screenshot"),
+    ),
+    "food": (
+        ("a photograph focused on food, a prepared meal, dessert, or drink",),
+        ("a photograph with no food or drinks",),
+    ),
+    "pet": (
+        ("a photograph focused on a pet dog, cat, or domestic animal",),
+        ("a photograph with no animal",),
+    ),
+    "vehicle": (
+        ("a photograph prominently containing a car, motorcycle, truck, or vehicle",),
+        ("a photograph with no vehicle",),
+    ),
+    "product": (
+        ("a clean product photograph focused on an object for sale",),
+        ("a candid photograph of people or scenery",),
+    ),
+    "architecture": (
+        ("an architectural photograph focused on a building or interior design",),
+        ("a close-up photograph of a person",),
+    ),
+    "nature": (
+        ("a nature photograph focused on plants, trees, wildlife, or flowers",),
+        ("an indoor portrait or document",),
+    ),
+    "night": (
+        ("a night photograph taken after dark with nighttime lighting",),
+        ("a bright daytime photograph",),
+    ),
+    "art": (
+        ("a photograph of artwork, an illustration, painting, or drawing",),
+        ("an ordinary camera photograph with no artwork",),
+    ),
+    "meme": (
+        ("an internet meme with a picture and a large humorous caption",),
+        ("an ordinary photograph without caption text",),
+    ),
 }
 
 
 def clamp(value: float) -> float:
     return round(max(0.0, min(1.0, value)), 4)
+
+
+def _pillow_sharpness(grayscale: PillowImage.Image) -> float:
+    """Dependency-light fallback used by API-only development environments."""
+    denoised = grayscale.filter(ImageFilter.GaussianBlur(0.65))
+    edges = denoised.filter(ImageFilter.FIND_EDGES)
+    edge_rms = ImageStat.Stat(edges).rms[0]
+    contrast = ImageStat.Stat(grayscale).stddev[0]
+    edge_score = 1.0 - math.exp(-max(0.0, edge_rms - 3.0) / 22.0)
+    contrast_score = 1.0 - math.exp(-contrast / 72.0)
+    return clamp(edge_score * 0.88 + contrast_score * 0.12)
+
+
+def _opencv_sharpness(grayscale: PillowImage.Image) -> float:
+    import cv2
+    import numpy as np
+
+    gray = np.asarray(grayscale, dtype=np.uint8)
+    denoised = cv2.GaussianBlur(gray, (0, 0), 0.55)
+    laplacian = np.abs(cv2.Laplacian(denoised, cv2.CV_32F, ksize=3))
+    if min(laplacian.shape) > 16:
+        laplacian = laplacian[4:-4, 4:-4]
+    laplacian = np.minimum(laplacian, np.percentile(laplacian, 99.0))
+    laplacian_rms = float(np.sqrt(np.mean(np.square(laplacian))))
+
+    sobel_x = cv2.Sobel(denoised, cv2.CV_32F, 1, 0, ksize=3)
+    sobel_y = cv2.Sobel(denoised, cv2.CV_32F, 0, 1, ksize=3)
+    gradient = cv2.magnitude(sobel_x, sobel_y)
+    gradient = np.minimum(gradient, np.percentile(gradient, 99.0))
+    gradient_rms = float(np.sqrt(np.mean(np.square(gradient))))
+    edge_density = float(np.mean(gradient >= 32.0))
+
+    fine_blur = cv2.GaussianBlur(gray, (0, 0), 0.8)
+    coarse_blur = cv2.GaussianBlur(gray, (0, 0), 2.4)
+    fine_energy = float(np.mean(cv2.absdiff(gray, fine_blur)))
+    coarse_energy = float(np.mean(cv2.absdiff(gray, coarse_blur)))
+    fine_ratio = fine_energy / max(0.1, coarse_energy)
+
+    laplacian_score = 1.0 - math.exp(-laplacian_rms / 24.0)
+    gradient_score = 1.0 - math.exp(-gradient_rms / 72.0)
+    ratio_score = clamp((fine_ratio - 0.14) / 0.42)
+    density_score = clamp(edge_density / 0.22)
+    raw = (
+        laplacian_score * 0.31
+        + gradient_score * 0.27
+        + ratio_score * 0.29
+        + density_score * 0.13
+    )
+
+    # JPEG block boundaries can create huge Laplacian values in a visibly soft
+    # image. Penalize boundary energy that is unusually stronger every 8 px.
+    if gray.shape[1] >= 32 and gray.shape[0] >= 32:
+        vertical = np.abs(np.diff(gray.astype(np.float32), axis=1))
+        horizontal = np.abs(np.diff(gray.astype(np.float32), axis=0))
+        v_boundary = float(np.mean(vertical[:, 7::8])) if vertical[:, 7::8].size else 0.0
+        h_boundary = float(np.mean(horizontal[7::8, :])) if horizontal[7::8, :].size else 0.0
+        v_regular = float(np.mean(vertical[:, 3::8])) if vertical[:, 3::8].size else 0.0
+        h_regular = float(np.mean(horizontal[3::8, :])) if horizontal[3::8, :].size else 0.0
+        block_ratio = (v_boundary + h_boundary) / max(0.5, v_regular + h_regular)
+        raw *= 1.0 - min(0.28, max(0.0, block_ratio - 1.18) * 0.22)
+    return clamp(raw)
 
 
 def quality_metrics(
@@ -50,29 +146,46 @@ def quality_metrics(
 ) -> QualityMetrics:
     rgb = image.convert("RGB")
     sample = rgb.copy()
-    sample.thumbnail((768, 768), PillowImage.Resampling.LANCZOS)
+    sample.thumbnail((1200, 1200), PillowImage.Resampling.LANCZOS)
     grayscale = sample.convert("L")
 
-    edge_variance = ImageStat.Stat(grayscale.filter(ImageFilter.FIND_EDGES)).var[0]
-    blur = clamp(math.log1p(edge_variance) / math.log1p(1800.0))
-
-    histogram = grayscale.histogram()
-    pixels = max(1, sum(histogram))
-    clipped = (sum(histogram[:8]) + sum(histogram[248:])) / pixels
-    mean = ImageStat.Stat(grayscale).mean[0]
-    balance = 1.0 - abs(mean - 127.5) / 127.5
-    # Preserve contrast-heavy documents and screenshots: intentional black text
-    # and white paper should not be treated like a blown-out camera exposure.
-    exposure = clamp(balance * (1.0 - min(0.75, clipped * 1.8)))
+    if min(grayscale.size) < 16:
+        raw_sharpness = 0.0
+    else:
+        try:
+            raw_sharpness = _opencv_sharpness(grayscale)
+        except (ImportError, AttributeError, ValueError):
+            raw_sharpness = _pillow_sharpness(grayscale)
 
     megapixels = (rgb.width * rgb.height) / 1_000_000
     resolution = clamp(math.log1p(megapixels) / math.log1p(12.0))
-    overall = clamp(blur * 0.45 + exposure * 0.25 + resolution * 0.30)
+    short_edge_progress = clamp((min(rgb.size) - 120.0) / 960.0)
+    # A tiny compressed web image cannot honestly be reported as perfectly
+    # sharp, even when block boundaries or a silhouette create strong edges.
+    sharpness_cap = 0.42 + 0.56 * math.sqrt(
+        max(0.0, short_edge_progress * 0.72 + resolution * 0.28)
+    )
+    blur = clamp(min(raw_sharpness, sharpness_cap))
 
+    histogram = grayscale.histogram()
+    pixels = max(1, sum(histogram))
+    clipped = (sum(histogram[:5]) + sum(histogram[251:])) / pixels
+    mean = ImageStat.Stat(grayscale).mean[0]
+    midtone = clamp(1.0 - max(0.0, abs(mean - 127.5) - 24.0) / 103.5)
+    middle_fraction = sum(histogram[48:208]) / pixels
+    exposure = clamp(
+        midtone * 0.62
+        + (1.0 - min(1.0, clipped * 4.0)) * 0.30
+        + middle_fraction * 0.08
+    )
+    if is_screenshot or len(ocr_text.strip()) >= 80:
+        exposure = max(exposure, clamp(0.72 + (1.0 - min(1.0, clipped * 3.0)) * 0.18))
+
+    overall = clamp(blur * 0.46 + exposure * 0.24 + resolution * 0.30)
     screenshot = None
     if is_screenshot:
         readable_text = min(1.0, len(ocr_text.strip()) / 180.0)
-        screenshot = clamp(blur * 0.45 + exposure * 0.25 + resolution * 0.15 + readable_text * 0.15)
+        screenshot = clamp(blur * 0.38 + exposure * 0.22 + resolution * 0.18 + readable_text * 0.22)
     return QualityMetrics(blur, exposure, resolution, screenshot, overall)
 
 
@@ -119,67 +232,15 @@ def extract_ocr(image: PillowImage.Image) -> str:
         return ""
 
 
-def detect_faces(image: PillowImage.Image, limit: int = 10) -> list[FaceCrop]:
-    try:
-        import cv2
-        import numpy as np
-
-        rgb = image.convert("RGB")
-        scale = min(1.0, 1600 / max(rgb.size))
-        working = rgb.resize(
-            (round(rgb.width * scale), round(rgb.height * scale)),
-            PillowImage.Resampling.LANCZOS,
-        )
-        pixels = np.asarray(working)
-        gray = cv2.cvtColor(pixels, cv2.COLOR_RGB2GRAY)
-        gray = cv2.equalizeHist(gray)
-        cascade_path = str(Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml")
-        classifier = cv2.CascadeClassifier(cascade_path)
-        if classifier.empty():
-            return []
-        minimum = max(36, min(working.size) // 14)
-        rectangles, _, weights = classifier.detectMultiScale3(
-            gray,
-            scaleFactor=1.08,
-            minNeighbors=5,
-            minSize=(minimum, minimum),
-            outputRejectLevels=True,
-        )
-        ranked = sorted(
-            zip(rectangles, weights, strict=True), key=lambda item: float(item[1]), reverse=True
-        )[:limit]
-        results: list[FaceCrop] = []
-        for (x, y, width, height), weight in ranked:
-            left = max(0, round(x / scale))
-            top = max(0, round(y / scale))
-            right = min(rgb.width, round((x + width) / scale))
-            bottom = min(rgb.height, round((y + height) / scale))
-            padding_x = round((right - left) * 0.22)
-            padding_y = round((bottom - top) * 0.28)
-            crop_box = (
-                max(0, left - padding_x),
-                max(0, top - padding_y),
-                min(rgb.width, right + padding_x),
-                min(rgb.height, bottom + padding_y),
-            )
-            results.append(
-                FaceCrop(
-                    bounding_box={"x": left, "y": top, "width": right - left, "height": bottom - top},
-                    confidence=clamp(0.55 + min(0.44, max(0.0, float(weight)) / 20.0)),
-                    image=rgb.crop(crop_box),
-                )
-            )
-        return results
-    except (ImportError, AttributeError, ValueError, OSError):
-        return []
-
-
 def merge_smart_labels(
-    semantic_labels: list[str],
+    semantic_evidence: dict[str, float],
     *,
     is_screenshot: bool,
     ocr_text: str,
-    face_count: int,
+    face_boxes: list[dict[str, int]],
+    image_size: tuple[int, int],
+    filename: str = "",
+    camera_model: str | None = None,
 ) -> list[str]:
     labels: list[str] = []
 
@@ -187,21 +248,59 @@ def merge_smart_labels(
         if label not in labels:
             labels.append(label)
 
+    lowered = ocr_text.casefold()
+    normalized_filename = filename.casefold()
     if is_screenshot:
         add("screenshot")
-    lowered = ocr_text.casefold()
+
     receipt_words = sum(
-        token in lowered
+        bool(re.search(rf"\b{token}\b", lowered))
         for token in ("total", "subtotal", "tax", "invoice", "receipt", "amount", "payment")
     )
-    if receipt_words >= 2:
+    if receipt_words >= 2 and len(ocr_text.strip()) >= 12:
         add("receipt")
-    elif len(ocr_text.strip()) >= 100:
+    elif len(ocr_text.strip()) >= 90 and not is_screenshot:
         add("document")
-    if face_count == 1:
-        add("portrait")
-    elif face_count > 1:
+
+    face_count = len(face_boxes)
+    if face_count > 1:
         add("people")
-    for label in semantic_labels:
+    elif face_count == 1:
+        add("portrait")
+        box = face_boxes[0]
+        image_area = max(1, image_size[0] * image_size[1])
+        face_area = box.get("width", 0) * box.get("height", 0) / image_area
+        explicit_selfie = "selfie" in normalized_filename or "front" in (camera_model or "").casefold()
+        model_selfie = semantic_evidence.get("selfie", 0.0) >= 0.86 and face_area >= 0.08
+        if not is_screenshot and (explicit_selfie or model_selfie):
+            add("selfie")
+
+    if (
+        semantic_evidence.get("meme", 0.0) >= 0.76
+        and 12 <= len(ocr_text.strip()) < 500
+        and not is_screenshot
+        and "document" not in labels
+    ):
+        add("meme")
+
+    aspect_ratio = image_size[0] / max(1, image_size[1])
+    thresholds = {
+        "landscape": 0.68,
+        "food": 0.70,
+        "pet": 0.69,
+        "vehicle": 0.69,
+        "product": 0.72,
+        "architecture": 0.70,
+        "nature": 0.70,
+        "night": 0.72,
+        "art": 0.72,
+    }
+    for label, confidence in sorted(
+        semantic_evidence.items(), key=lambda item: item[1], reverse=True
+    ):
+        if label not in thresholds or confidence < thresholds[label]:
+            continue
+        if label == "landscape" and aspect_ratio < 1.08:
+            continue
         add(label)
     return labels[:5]

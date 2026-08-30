@@ -128,6 +128,8 @@ class SmartAlbum(BaseModel):
     images: list[ImageSummary]
     image_count: int
     best_image_id: UUID | None = None
+    cover_focus_x: float | None = None
+    cover_focus_y: float | None = None
 
 
 class SmartAlbumsResponse(BaseModel):

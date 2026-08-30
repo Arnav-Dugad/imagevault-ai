@@ -9,7 +9,7 @@ import type { ImageDetail } from "../types";
 
 function ScoreBar({ label, value, color = "bg-acid" }: { label: string; value: number | null; color?: string }) {
   if (value === null) return null;
-  return <div><div className="mb-1.5 flex justify-between font-mono text-[9px] uppercase tracking-wide text-muted"><span>{label}</span><span>{percent(value)}</span></div><div className="h-1.5 rounded-full bg-white/[.06]"><div className={`h-full rounded-full ${color}`} style={{ width: `${Math.max(3, value * 100)}%` }} /></div></div>;
+  return <div><div className="mb-1.5 flex justify-between font-mono text-[9px] uppercase tracking-wide text-muted"><span>{label}</span><span>{percent(value)}</span></div><div className="h-1.5 overflow-hidden rounded-full bg-white/[.06]"><motion.div initial={{ width: 0 }} animate={{ width: `${Math.max(3, value * 100)}%` }} transition={{ type: "spring", stiffness: 90, damping: 18, delay: .12 }} className={`h-full rounded-full ${color}`} /></div></div>;
 }
 
 export function ImageDetailPage() {

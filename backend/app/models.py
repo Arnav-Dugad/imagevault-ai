@@ -92,6 +92,7 @@ class Image(Base):
     smart_labels: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     ocr_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     face_count: Mapped[int] = mapped_column(Integer, default=0)
+    analysis_version: Mapped[int] = mapped_column(Integer, default=0, index=True)
     embedding: Mapped[list[float] | None] = mapped_column(
         Vector(512).with_variant(JSON(), "sqlite"), nullable=True
     )
@@ -151,6 +152,7 @@ class DetectedFace(Base):
         Vector(512).with_variant(JSON(), "sqlite")
     )
     confidence: Mapped[float] = mapped_column(Float, default=1.0)
+    embedding_model: Mapped[str] = mapped_column(String(80), default="legacy")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     image: Mapped[Image] = relationship(back_populates="detected_faces")

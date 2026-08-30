@@ -151,6 +151,8 @@ export interface SmartAlbum {
   images: VaultImage[];
   image_count: number;
   best_image_id: string | null;
+  cover_focus_x: number | null;
+  cover_focus_y: number | null;
 }
 
 export interface SmartAlbums {

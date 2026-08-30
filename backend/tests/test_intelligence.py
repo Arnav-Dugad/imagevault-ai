@@ -4,7 +4,13 @@ from uuid import uuid4
 from PIL import Image as PillowImage, ImageDraw, ImageFilter
 
 from app.models import Image, ProcessingStatus
-from app.services.albums import best_photo, cluster_faces, group_bursts, group_events
+from app.services.albums import (
+    best_photo,
+    cluster_face_records,
+    cluster_faces,
+    group_bursts,
+    group_events,
+)
 from app.services.intelligence import merge_smart_labels, quality_metrics
 
 
@@ -41,15 +47,46 @@ def test_quality_score_rewards_a_sharp_frame():
     assert sharp_score.overall > blurred_score.overall
 
 
+def test_tiny_compressed_looking_image_cannot_report_perfect_sharpness():
+    tiny = PillowImage.new("RGB", (190, 265), "#d88f7e")
+    draw = ImageDraw.Draw(tiny)
+    draw.rectangle((42, 25, 146, 245), outline="black", width=2)
+    draw.ellipse((66, 32, 126, 92), fill="#c88a72", outline="black", width=2)
+
+    score = quality_metrics(tiny)
+
+    assert score.blur < 0.65
+    assert score.resolution < 0.05
+
+
 def test_rule_labels_prioritize_receipts_and_people():
     labels = merge_smart_labels(
-        ["product", "document"],
+        {"product": 0.9},
         is_screenshot=False,
         ocr_text="Receipt subtotal tax total amount payment",
-        face_count=2,
+        face_boxes=[
+            {"x": 10, "y": 10, "width": 80, "height": 80},
+            {"x": 100, "y": 10, "width": 80, "height": 80},
+        ],
+        image_size=(300, 200),
     )
     assert labels[:2] == ["receipt", "people"]
     assert "product" in labels
+
+
+def test_portrait_is_not_called_a_selfie_without_strong_evidence():
+    labels = merge_smart_labels(
+        {"selfie": 0.74, "product": 0.2},
+        is_screenshot=False,
+        ocr_text="2%",
+        face_boxes=[{"x": 45, "y": 20, "width": 90, "height": 105}],
+        image_size=(190, 265),
+        filename="event-photo.jpeg",
+    )
+
+    assert "portrait" in labels
+    assert "selfie" not in labels
+    assert "document" not in labels
 
 
 def test_events_and_bursts_require_the_right_relationships():
@@ -81,3 +118,16 @@ def test_face_clustering_is_conservative_and_deduplicates_images():
     )
     assert groups[0] == [first_image, second_image]
     assert groups[1] == [third_image]
+
+
+def test_face_clustering_does_not_chain_two_people_through_one_ambiguous_face():
+    images = [uuid4(), uuid4(), uuid4()]
+    faces = [
+        (uuid4(), images[0], [1.0, 0.0], 1.0),
+        (uuid4(), images[1], [0.8, 0.6], 1.0),
+        (uuid4(), images[2], [0.28, 0.96], 1.0),
+    ]
+
+    groups = cluster_face_records(faces, threshold=0.79)
+
+    assert sorted(len(group) for group in groups) == [1, 2]

@@ -49,12 +49,12 @@ See [architecture.md](docs/architecture.md) and [technical-design.md](docs/techn
 | Metadata / vector search | PostgreSQL 16 + pgvector |
 | Object storage | MinIO, using an S3-compatible object-key design |
 | Async jobs | Redis + Celery |
-| Local AI | OpenCLIP ViT-B/32, Pillow, ImageHash |
+| Local AI | OpenCLIP ViT-B/32, OpenCV YuNet + SFace, Tesseract OCR, Pillow, ImageHash |
 | Gateway | Nginx |
 | Containers / orchestration | Docker Compose, Kubernetes, Minikube |
 | Infrastructure as Code | Terraform |
 | CI/CD | GitHub Actions |
-| Observability | Prometheus, Grafana OSS, optional cAdvisor |
+| Observability | Prometheus and Grafana OSS |
 
 ## Prerequisites
 
@@ -97,12 +97,6 @@ Useful commands:
 docker compose logs -f backend worker
 docker compose ps
 docker compose down
-```
-
-Container CPU/memory panels are optional because cAdvisor support differs across Docker Desktop backends:
-
-```powershell
-docker compose --profile container-metrics up -d cadvisor
 ```
 
 ## Demo data and visible monitoring traffic
@@ -309,16 +303,16 @@ docker-compose.yml       Primary laptop deployment
 - **Images upload but thumbnails remain Processing:** verify `redis`, `worker`, PostgreSQL, and MinIO are healthy; retry after the worker is ready.
 - **Browser cannot open previews in Minikube:** set `MINIO_PUBLIC_ENDPOINT` to the reachable MinIO API host/port and restart backend/worker.
 - **Port 80 is occupied:** change the Nginx mapping in Compose to `8088:80`, then add that origin to `CORS_ORIGINS`.
-- **Docker Desktop is memory constrained:** allocate 10–12 GB, keep one worker, and leave cAdvisor disabled.
+- **Docker Desktop is memory constrained:** allocate 10–12 GB and keep one worker.
 - **CUDA is unavailable:** no action is required; CPU is the supported default.
-- **Grafana container panels are empty:** start the optional cAdvisor profile, or use Kubernetes/Docker-native resource inspection for the demo.
+- **Grafana has no data yet:** upload or browse a few images, then allow about 10 seconds for Prometheus to collect fresh API and worker metrics.
 
 ## Known limitations
 
 - One MinIO instance, one PostgreSQL instance, and one AI worker are deliberate laptop-friendly defaults, not a high-availability production topology.
 - The local JWT flow has no email verification or password-recovery service.
 - Similarity thresholds need evaluation against the intended photo collection; AI results can be wrong.
-- Animated GIF ingestion, OCR, faces, videos, albums, and text-to-image semantic search are future scope.
+- Animated GIF ingestion, video indexing, and manual merge/split controls for people clusters are future scope.
 - Direct exposure beyond a trusted laptop would require TLS, secret rotation, backups, and a formal security review.
 
 ## Screenshots and measured results

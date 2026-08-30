@@ -1,4 +1,5 @@
 import asyncio
+import math
 import time
 from datetime import UTC, datetime
 from io import BytesIO
@@ -30,13 +31,13 @@ from app.models import (
     ProcessingStatus,
 )
 from app.services.intelligence import (
-    SEMANTIC_LABELS,
-    detect_faces,
+    SEMANTIC_LABEL_PROMPTS,
     extract_ocr,
     looks_like_screenshot,
     merge_smart_labels,
     quality_metrics,
 )
+from app.services.faces import face_engine
 from app.services.similarity import cosine_similarity, evaluate_similarity, hash_distance
 from app.services.storage import storage
 from app.worker.celery_app import celery_app
@@ -45,7 +46,7 @@ from app.worker.embedder import embedder
 logger = structlog.get_logger("imagevault.worker")
 settings = get_settings()
 _worker_runner: asyncio.Runner | None = None
-_label_vectors: dict[str, list[float]] | None = None
+_label_vectors: dict[str, tuple[list[list[float]], list[list[float]]]] | None = None
 
 
 def _get_worker_runner() -> asyncio.Runner:
@@ -162,21 +163,27 @@ def _phash_distance(first: str | None, second: str | None) -> int | None:
     return hash_distance(first, second)
 
 
-def _semantic_labels(embedding: list[float]) -> list[str]:
+def _semantic_labels(embedding: list[float]) -> dict[str, float]:
     global _label_vectors
     if _label_vectors is None:
-        names = list(SEMANTIC_LABELS)
-        vectors = embedder.text_embeddings([SEMANTIC_LABELS[name] for name in names])
-        _label_vectors = dict(zip(names, vectors, strict=True))
-    ranked = sorted(
-        (
-            (label, cosine_similarity(embedding, vector))
-            for label, vector in _label_vectors.items()
-        ),
-        key=lambda item: item[1],
-        reverse=True,
-    )
-    return [label for label, score in ranked[:3] if score >= 0.16]
+        _label_vectors = {}
+        for label, (positive_prompts, negative_prompts) in SEMANTIC_LABEL_PROMPTS.items():
+            positive = embedder.text_embeddings(positive_prompts)
+            negative = embedder.text_embeddings(negative_prompts)
+            _label_vectors[label] = (positive, negative)
+
+    evidence: dict[str, float] = {}
+    for label, (positive_vectors, negative_vectors) in _label_vectors.items():
+        positive = sum(cosine_similarity(embedding, vector) for vector in positive_vectors) / len(
+            positive_vectors
+        )
+        negative = sum(cosine_similarity(embedding, vector) for vector in negative_vectors) / len(
+            negative_vectors
+        )
+        # A contrastive confidence cancels the broad "photo of ..." prior that
+        # caused portraits to be tagged as selfies and documents.
+        evidence[label] = round(1.0 / (1.0 + math.exp(-(positive - negative) * 30.0)), 4)
+    return evidence
 
 
 async def _set_running(image_id: UUID) -> Image | None:
@@ -243,6 +250,7 @@ async def _save_result(
         image.smart_labels = smart_labels
         image.ocr_text = ocr_text or None
         image.face_count = len(faces)
+        image.analysis_version = settings.analysis_version
         image.processed_at = datetime.now(UTC)
 
         await db.execute(delete(DetectedFace).where(DetectedFace.image_id == image.id))
@@ -255,6 +263,7 @@ async def _save_result(
                     bounding_box=bounding_box,
                     embedding=face_embedding,
                     confidence=confidence,
+                    embedding_model=settings.face_embedding_model,
                 )
             )
 
@@ -427,17 +436,19 @@ async def _process(image_id: UUID) -> dict[str, object]:
                 ocr_text=ocr_text,
             )
             quality = quality_metrics(rgb, is_screenshot=screenshot, ocr_text=ocr_text)
-            face_crops = detect_faces(rgb)
-        face_vectors = embedder.image_embeddings([face.image for face in face_crops])
+            analyzed_faces = face_engine.analyze(rgb)
         faces = [
-            (face.bounding_box, face.confidence, vector)
-            for face, vector in zip(face_crops, face_vectors, strict=True)
+            (face.bounding_box, face.confidence, face.embedding)
+            for face in analyzed_faces
         ]
         labels = merge_smart_labels(
             _semantic_labels(embedding),
             is_screenshot=screenshot,
             ocr_text=ocr_text,
-            face_count=len(faces),
+            face_boxes=[face.bounding_box for face in analyzed_faces],
+            image_size=(width, height),
+            filename=image.original_filename,
+            camera_model=camera,
         )
         matches = await _save_result(
             image_id,
