@@ -1,0 +1,6 @@
+# Never commit a populated terraform.tfvars file.
+kube_context           = "minikube"
+postgres_password      = "REPLACE_WITH_A_RANDOM_DATABASE_PASSWORD"
+minio_secret_key       = "REPLACE_WITH_A_RANDOM_MINIO_SECRET"
+jwt_secret             = "REPLACE_WITH_AT_LEAST_48_RANDOM_CHARACTERS"
+grafana_admin_password = "REPLACE_WITH_A_RANDOM_GRAFANA_PASSWORD"

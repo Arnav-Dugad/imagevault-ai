@@ -1,0 +1,150 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-data
+  namespace: imagevault
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: {storage: 2Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: imagevault
+spec:
+  selector: {app: prometheus}
+  ports:
+    - {name: http, port: 9090, targetPort: 9090}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: imagevault
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: prometheus}
+  template:
+    metadata:
+      labels: {app: prometheus}
+    spec:
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v3.3.0
+          args: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus", "--storage.tsdb.retention.time=7d"]
+          ports:
+            - {name: http, containerPort: 9090}
+          readinessProbe:
+            httpGet: {path: /-/ready, port: http}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /-/healthy, port: http}
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {cpu: 500m, memory: 768Mi}
+          volumeMounts:
+            - {name: config, mountPath: /etc/prometheus/prometheus.yml, subPath: prometheus.yml, readOnly: true}
+            - {name: data, mountPath: /prometheus}
+      volumes:
+        - name: config
+          configMap: {name: imagevault-prometheus}
+        - name: data
+          persistentVolumeClaim: {claimName: prometheus-data}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: imagevault-grafana-dashboard
+  namespace: imagevault
+data:
+  imagevault.json: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "panels": [
+        {"datasource":{"type":"prometheus","uid":"prometheus"},"fieldConfig":{"defaults":{"unit":"reqps"},"overrides":[]},"gridPos":{"h":8,"w":12,"x":0,"y":0},"id":1,"options":{"legend":{"displayMode":"list","placement":"bottom"},"tooltip":{"mode":"multi"}},"targets":[{"expr":"sum(rate(imagevault_http_requests_total[1m]))","legendFormat":"requests / second","refId":"A"}],"title":"API request rate","type":"timeseries"},
+        {"datasource":{"type":"prometheus","uid":"prometheus"},"fieldConfig":{"defaults":{"unit":"s"},"overrides":[]},"gridPos":{"h":8,"w":12,"x":12,"y":0},"id":2,"options":{"legend":{"displayMode":"list","placement":"bottom"},"tooltip":{"mode":"multi"}},"targets":[{"expr":"histogram_quantile(0.95, sum by (le) (rate(imagevault_http_request_duration_seconds_bucket[5m])))","legendFormat":"p95","refId":"A"}],"title":"API latency","type":"timeseries"},
+        {"datasource":{"type":"prometheus","uid":"prometheus"},"fieldConfig":{"defaults":{},"overrides":[]},"gridPos":{"h":6,"w":8,"x":0,"y":8},"id":3,"options":{"colorMode":"value","graphMode":"area","reduceOptions":{"calcs":["lastNotNull"],"values":false}},"targets":[{"expr":"sum(imagevault_image_uploads_total)","refId":"A"}],"title":"Images uploaded","type":"stat"},
+        {"datasource":{"type":"prometheus","uid":"prometheus"},"fieldConfig":{"defaults":{},"overrides":[]},"gridPos":{"h":6,"w":8,"x":8,"y":8},"id":4,"options":{"colorMode":"value","graphMode":"area","reduceOptions":{"calcs":["lastNotNull"],"values":false}},"targets":[{"expr":"sum(imagevault_exact_duplicates_total)","refId":"A"}],"title":"Exact duplicates","type":"stat"},
+        {"datasource":{"type":"prometheus","uid":"prometheus"},"fieldConfig":{"defaults":{},"overrides":[]},"gridPos":{"h":6,"w":8,"x":16,"y":8},"id":5,"options":{"colorMode":"value","graphMode":"area","reduceOptions":{"calcs":["lastNotNull"],"values":false}},"targets":[{"expr":"sum(imagevault_processing_failures_total)","refId":"A"}],"title":"Processing failures","type":"stat"}
+      ],
+      "refresh":"10s","schemaVersion":40,"tags":["imagevault"],"time":{"from":"now-1h","to":"now"},"title":"ImageVault AI · Minikube Overview","uid":"imagevault-k8s","version":1
+    }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-data
+  namespace: imagevault
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: {storage: 1Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: imagevault
+spec:
+  type: NodePort
+  selector: {app: grafana}
+  ports:
+    - {name: http, port: 3000, targetPort: 3000, nodePort: 30001}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: imagevault
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: grafana}
+  template:
+    metadata:
+      labels: {app: grafana}
+    spec:
+      securityContext:
+        fsGroup: 472
+      containers:
+        - name: grafana
+          image: grafana/grafana-oss:11.6.1
+          env:
+            - {name: GF_USERS_ALLOW_SIGN_UP, value: "false"}
+            - {name: GF_ANALYTICS_REPORTING_ENABLED, value: "false"}
+            - name: GF_SECURITY_ADMIN_USER
+              valueFrom: {secretKeyRef: {name: imagevault-secrets, key: GF_SECURITY_ADMIN_USER}}
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom: {secretKeyRef: {name: imagevault-secrets, key: GF_SECURITY_ADMIN_PASSWORD}}
+          ports:
+            - {name: http, containerPort: 3000}
+          readinessProbe:
+            httpGet: {path: /api/health, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /api/health, port: http}
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: 400m, memory: 512Mi}
+          volumeMounts:
+            - {name: provisioning, mountPath: /etc/grafana/provisioning/datasources/datasource.yml, subPath: datasource.yml, readOnly: true}
+            - {name: provisioning, mountPath: /etc/grafana/provisioning/dashboards/dashboard.yml, subPath: dashboard.yml, readOnly: true}
+            - {name: dashboard, mountPath: /var/lib/grafana/dashboards/imagevault.json, subPath: imagevault.json, readOnly: true}
+            - {name: data, mountPath: /var/lib/grafana}
+      volumes:
+        - name: provisioning
+          configMap: {name: imagevault-grafana-provisioning}
+        - name: dashboard
+          configMap: {name: imagevault-grafana-dashboard}
+        - name: data
+          persistentVolumeClaim: {claimName: grafana-data}

@@ -1,0 +1,7 @@
+# Optional override. Requires a supported NVIDIA driver and NVIDIA Container Toolkit.
+services:
+  worker:
+    build:
+      args:
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu128}
+    gpus: all

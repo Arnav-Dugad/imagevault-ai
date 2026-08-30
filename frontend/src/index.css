@@ -1,0 +1,55 @@
+@import "@fontsource-variable/dm-sans";
+@import "@fontsource/ibm-plex-mono/500.css";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --canvas: #0a0c10;
+  --panel: #111419;
+  --line: #292e36;
+  --ink: #f7f7f2;
+  --muted: #969da9;
+  font-family: "DM Sans Variable", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* { box-sizing: border-box; }
+html { background: var(--canvas); }
+body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--canvas); color: var(--ink); }
+button, input, select { font: inherit; }
+button { -webkit-tap-highlight-color: transparent; }
+::selection { background: #b9f36a; color: #111419; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #303640; border: 3px solid var(--canvas); border-radius: 99px; }
+
+.app-backdrop {
+  background:
+    radial-gradient(circle at 72% -10%, rgba(170, 179, 255, .1), transparent 31rem),
+    radial-gradient(circle at 14% 45%, rgba(185, 243, 106, .045), transparent 28rem),
+    #0a0c10;
+}
+
+.grain::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: .035;
+  z-index: 50;
+  background-image: radial-gradient(rgba(255,255,255,.55) .5px, transparent .5px);
+  background-size: 4px 4px;
+}
+
+.panel { background: rgba(17, 20, 25, .88); border: 1px solid var(--line); }
+.eyebrow { font: 500 11px/1 "IBM Plex Mono", monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.focus-ring { @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-acid focus-visible:ring-offset-2 focus-visible:ring-offset-canvas; }
+.skeleton { background: linear-gradient(90deg, #151920 25%, #20252d 50%, #151920 75%); background-size: 200% 100%; animation: shine 1.5s infinite; }
+@keyframes shine { to { background-position-x: -200%; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}

@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: imagevault
+  labels:
+    app.kubernetes.io/name: imagevault-ai
+    app.kubernetes.io/part-of: imagevault-ai

@@ -1,0 +1,23 @@
+FROM python:3.12-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    TORCH_HOME=/home/imagevault/.cache/torch \
+    HF_HOME=/home/imagevault/.cache/huggingface
+
+RUN groupadd --system imagevault && useradd --system --gid imagevault --create-home imagevault
+WORKDIR /app
+
+COPY pyproject.toml ./
+COPY app ./app
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+RUN pip install --upgrade pip && \
+    pip install --index-url "${TORCH_INDEX_URL}" torch==2.7.0 torchvision==0.22.0 && \
+    pip install '.[worker]'
+
+RUN mkdir -p /home/imagevault/.cache && chown -R imagevault:imagevault /home/imagevault
+USER imagevault
+EXPOSE 9101
+
+CMD ["celery", "-A", "app.worker.celery_app:celery_app", "worker", "--loglevel=INFO", "--concurrency=1"]

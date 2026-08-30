@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "imagevault-api"
+version = "1.0.0"
+description = "Private-cloud image storage and local visual similarity API"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+  "alembic==1.15.2",
+  "asyncpg==0.30.0",
+  "celery[redis]==5.5.2",
+  "email-validator==2.2.0",
+  "fastapi==0.115.12",
+  "httpx==0.28.1",
+  "imagehash==4.3.2",
+  "minio==7.2.15",
+  "pgvector==0.4.1",
+  "Pillow==11.2.1",
+  "prometheus-client==0.22.0",
+  "psycopg[binary]==3.2.9",
+  "pwdlib[argon2]==0.2.1",
+  "pydantic-settings==2.9.1",
+  "PyJWT==2.10.1",
+  "python-multipart==0.0.20",
+  "redis==5.2.1",
+  "SQLAlchemy[asyncio]==2.0.41",
+  "structlog==25.3.0",
+  "uvicorn[standard]==0.34.2",
+]
+
+[project.optional-dependencies]
+worker = [
+  "open-clip-torch==2.32.0",
+  "torch==2.7.0",
+  "torchvision==0.22.0",
+]
+dev = [
+  "aiosqlite==0.21.0",
+  "pytest==8.3.5",
+  "pytest-asyncio==0.26.0",
+  "ruff==0.11.8",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"alembic/versions/*.py" = ["E501"]

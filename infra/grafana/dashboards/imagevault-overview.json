@@ -1,0 +1,120 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "fixedColor", "fixedColor": "green"}, "unit": "reqps"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "id": 1,
+      "options": {"legend": {"calcs": [], "displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"expr": "sum(rate(imagevault_http_requests_total[1m]))", "legendFormat": "requests / second", "refId": "A"}],
+      "title": "API request rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "unit": "s"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "id": 2,
+      "options": {"legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le) (rate(imagevault_http_request_duration_seconds_bucket[5m])))", "legendFormat": "p95 latency", "refId": "A"}, {"expr": "histogram_quantile(0.50, sum by (le) (rate(imagevault_http_request_duration_seconds_bucket[5m])))", "legendFormat": "p50 latency", "refId": "B"}],
+      "title": "API latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "fixedColor", "fixedColor": "red"}, "unit": "percentunit"}, "overrides": []},
+      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 8},
+      "id": 3,
+      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+      "targets": [{"expr": "sum(rate(imagevault_http_requests_total{status=~\"5..\"}[5m])) / clamp_min(sum(rate(imagevault_http_requests_total[5m])), 0.0001)", "refId": "A"}],
+      "title": "HTTP error rate",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "fixedColor", "fixedColor": "green"}}, "overrides": []},
+      "gridPos": {"h": 6, "w": 6, "x": 6, "y": 8},
+      "id": 4,
+      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+      "targets": [{"expr": "sum(imagevault_image_uploads_total)", "refId": "A"}],
+      "title": "Images uploaded",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "fixedColor", "fixedColor": "purple"}}, "overrides": []},
+      "gridPos": {"h": 6, "w": 6, "x": 12, "y": 8},
+      "id": 5,
+      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+      "targets": [{"expr": "sum(imagevault_images_processed_total)", "refId": "A"}],
+      "title": "Images processed",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "fixedColor", "fixedColor": "orange"}}, "overrides": []},
+      "gridPos": {"h": 6, "w": 6, "x": 18, "y": 8},
+      "id": 6,
+      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+      "targets": [{"expr": "sum(imagevault_exact_duplicates_total)", "refId": "A"}],
+      "title": "Exact duplicates",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "unit": "s"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 14},
+      "id": 7,
+      "options": {"legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"expr": "rate(imagevault_ai_inference_duration_seconds_sum[5m]) / clamp_min(rate(imagevault_ai_inference_duration_seconds_count[5m]), 0.0001)", "legendFormat": "average inference", "refId": "A"}, {"expr": "rate(imagevault_processing_duration_seconds_sum[5m]) / clamp_min(rate(imagevault_processing_duration_seconds_count[5m]), 0.0001)", "legendFormat": "average processing", "refId": "B"}],
+      "title": "AI and processing duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 14},
+      "id": 8,
+      "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"expr": "sum(imagevault_processing_failures_total)", "legendFormat": "processing failures", "refId": "A"}, {"expr": "sum(imagevault_similar_images_total)", "legendFormat": "similar matches", "refId": "B"}, {"expr": "imagevault_embedding_model_loaded", "legendFormat": "model loaded", "refId": "C"}],
+      "title": "Worker outcomes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "unit": "percentunit"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 22},
+      "id": 9,
+      "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"expr": "sum by (name) (rate(container_cpu_usage_seconds_total{name=~\"imagevault-ai.*\"}[5m]))", "legendFormat": "{{name}}", "refId": "A"}],
+      "title": "Container CPU (optional cAdvisor profile)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "unit": "bytes"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 22},
+      "id": 10,
+      "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"expr": "sum by (name) (container_memory_working_set_bytes{name=~\"imagevault-ai.*\"})", "legendFormat": "{{name}}", "refId": "A"}],
+      "title": "Container memory (optional cAdvisor profile)",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 40,
+  "tags": ["imagevault", "cloud-devops", "college-project"],
+  "templating": {"list": []},
+  "time": {"from": "now-1h", "to": "now"},
+  "timezone": "browser",
+  "title": "ImageVault AI · Platform Overview",
+  "uid": "imagevault-overview",
+  "version": 1
+}

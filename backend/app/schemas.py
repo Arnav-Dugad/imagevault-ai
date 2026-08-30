@@ -1,0 +1,152 @@
+from datetime import datetime
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
+
+from app.models import DuplicateType, ProcessingStatus
+
+
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    display_name: str = Field(min_length=2, max_length=100)
+    password: str = Field(min_length=8, max_length=128)
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class UserResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    email: EmailStr
+    display_name: str
+    created_at: datetime
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    user: UserResponse
+
+
+class ImageSummary(BaseModel):
+    id: UUID
+    original_filename: str
+    mime_type: str
+    file_size: int
+    width: int | None
+    height: int | None
+    sha256: str
+    perceptual_hash: str | None
+    status: ProcessingStatus
+    exact_duplicate_of_id: UUID | None
+    created_at: datetime
+    processed_at: datetime | None
+    thumbnail_url: str | None = None
+    original_url: str | None = None
+    best_similarity: float | None = None
+
+
+class SimilarImage(BaseModel):
+    image: ImageSummary
+    similarity_score: float
+    classification: str
+    match_type: DuplicateType
+    phash_distance: int | None = None
+
+
+class ImageDetail(ImageSummary):
+    object_key: str
+    thumbnail_key: str | None
+    error_message: str | None
+    exif_timestamp: datetime | None
+    camera_model: str | None
+    exact_duplicate_of: ImageSummary | None = None
+    similar_images: list[SimilarImage] = Field(default_factory=list)
+
+
+class ImageListResponse(BaseModel):
+    items: list[ImageSummary]
+    total: int
+    page: int
+    page_size: int
+    pages: int
+
+
+class UploadItem(BaseModel):
+    image: ImageSummary
+    exact_duplicate: bool
+    matched_filename: str | None = None
+    message: str
+
+
+class UploadResponse(BaseModel):
+    items: list[UploadItem]
+
+
+class DuplicateCandidate(BaseModel):
+    image: ImageSummary
+    similarity_score: float
+    match_type: DuplicateType
+    classification: str
+
+
+class DuplicateGroup(BaseModel):
+    group_id: str
+    original: ImageSummary
+    candidates: list[DuplicateCandidate]
+    recoverable_bytes: int
+
+
+class DashboardMetric(BaseModel):
+    value: int
+    change_percent: float | None = None
+
+
+class TimeSeriesPoint(BaseModel):
+    label: str
+    uploads: int
+    duplicates: int
+
+
+class DistributionPoint(BaseModel):
+    name: str
+    value: int
+
+
+class DashboardResponse(BaseModel):
+    total_images: int
+    unique_images: int
+    exact_duplicates: int
+    similar_images: int
+    storage_used: int
+    potential_savings: int
+    processing_images: int
+    uploads_over_time: list[TimeSeriesPoint]
+    format_distribution: list[DistributionPoint]
+    recent_images: list[ImageSummary]
+
+
+class ComponentHealth(BaseModel):
+    status: str
+    detail: str | None = None
+
+
+class SystemStatusResponse(BaseModel):
+    status: str
+    version: str
+    api: ComponentHealth
+    database: ComponentHealth
+    object_storage: ComponentHealth
+    worker: ComponentHealth
+    embedding_model: ComponentHealth
+    pending_jobs: int
+    queue_size: int | None = None
+
+
+class MessageResponse(BaseModel):
+    message: str

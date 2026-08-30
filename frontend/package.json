@@ -1,0 +1,46 @@
+{
+  "name": "imagevault-web",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc -b && vite build",
+    "lint": "eslint . --max-warnings=0",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@fontsource-variable/dm-sans": "5.2.5",
+    "@fontsource/ibm-plex-mono": "5.2.5",
+    "clsx": "2.1.1",
+    "framer-motion": "13.1.1",
+    "lucide-react": "0.511.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-router-dom": "7.18.3",
+    "recharts": "3.10.1",
+    "tailwind-merge": "3.3.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@testing-library/jest-dom": "6.6.3",
+    "@testing-library/react": "16.3.0",
+    "@types/node": "22.15.21",
+    "@types/react": "18.3.21",
+    "@types/react-dom": "18.3.7",
+    "@vitejs/plugin-react": "4.5.0",
+    "autoprefixer": "10.4.21",
+    "eslint": "10.9.1",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "eslint-plugin-react-refresh": "0.5.5",
+    "globals": "16.1.0",
+    "jsdom": "26.1.0",
+    "postcss": "8.5.26",
+    "tailwindcss": "3.4.17",
+    "typescript": "5.8.3",
+    "typescript-eslint": "8.68.0",
+    "vite": "6.4.3",
+    "vitest": "3.2.7"
+  }
+}

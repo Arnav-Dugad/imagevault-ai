@@ -1,0 +1,68 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+infra/kubernetes/secret.yaml
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# JavaScript
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+
+# Runtime data and uploaded content
+data/
+uploads/
+postgres-data/
+minio-data/
+redis-data/
+grafana-data/
+prometheus-data/
+model-cache/
+.cache/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+!*.tfvars.example
+crash.log
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+
+# Logs and temporary files
+*.log
+tmp/
+temp/
+*.tmp
+
+# Generated demo and benchmark outputs
+demo-images/
+benchmark-results*.json
+
+# Local certificates
+infra/nginx/certs/
