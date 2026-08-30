@@ -19,6 +19,7 @@ class Settings(BaseSettings):
 
     minio_endpoint: str = "minio:9000"
     minio_public_endpoint: str = "localhost:9000"
+    minio_region: str = "us-east-1"
     minio_access_key: str = "imagevault"
     minio_secret_key: str = "change-me-in-env"
     minio_bucket: str = "imagevault"

@@ -21,6 +21,10 @@ class ObjectStorage:
             access_key=settings.minio_access_key,
             secret_key=settings.minio_secret_key,
             secure=settings.minio_public_secure,
+            # MinIO defaults to us-east-1. Supplying the configured region keeps URL
+            # signing local instead of querying the browser-facing endpoint, which is
+            # intentionally unreachable from inside the backend container.
+            region=settings.minio_region,
         )
         self.expiry = timedelta(minutes=settings.presigned_url_expire_minutes)
 
