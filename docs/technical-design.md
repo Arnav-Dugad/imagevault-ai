@@ -12,7 +12,7 @@
 
 The system manages private image collections and highlights waste caused by exact and near-duplicate content. It is also a demonstrable local cloud platform: services are containerized, orchestrated, declared as code, continuously validated, health checked, and observed.
 
-In scope: self-hosted accounts, multi-image upload, MinIO objects, metadata, thumbnails, SHA-256, pHash, OpenCLIP embeddings, pgvector retrieval, gallery, details, duplicate review, storage analytics, explicit deletion, service status, Compose, Minikube, Terraform, CI, metrics, logs, and documentation.
+In scope: self-hosted accounts, batch-aware multi-image upload, MinIO objects, metadata, thumbnails, SHA-256, three perceptual hashes, color/frame evidence, multi-view OpenCLIP embeddings, pgvector retrieval, gallery, explainable duplicate review, storage analytics, explicit deletion, service status, Compose, Minikube, Terraform, CI, metrics, logs, and documentation.
 
 Out of scope for the first release: public internet hosting, high availability, cross-region replication, automatic deletion, facial recognition, OCR, video, email verification, password recovery, and mobile clients.
 
@@ -45,11 +45,11 @@ Before queueing expensive inference, the API searches `(user_id, sha256)`. A hit
 
 ### AI processing module
 
-One Celery worker reads the original, extracts safe dimensions/optional EXIF fields, computes pHash, writes a 640×640 maximum WebP thumbnail, and lazily loads OpenCLIP ViT-B/32. It normalizes the 512-dimensional image vector, persists it with pgvector, and queries ten nearest vectors using cosine distance. CUDA is selected only when PyTorch reports it available.
+One Celery worker reads the original, extracts safe dimensions/optional EXIF fields, computes pHash, dHash, wHash, and a normalized color histogram, then writes a 640×640 maximum WebP thumbnail. It lazily loads OpenCLIP ViT-B/32 and averages embeddings from a normal crop, padded full-frame view, and mirrored view. The normalized 512-dimensional result is persisted with pgvector and used to retrieve up to 60 semantic candidates. A perceptual prefilter adds candidates that vector retrieval may miss. The final gate combines AI, hash consensus, color, and aspect evidence while keeping near-duplicate and semantic decisions distinct. CUDA is selected only when PyTorch reports it available.
 
 ### Duplicate review module
 
-Exact references and `duplicate_matches` rows become review groups. pHash distance and CLIP cosine similarity remain distinct. The UI requires explicit selection and a confirmation dialog; the API additionally requires `confirm=true`.
+Exact references and `duplicate_matches` rows become an undirected graph. Connected components produce complete, non-overlapping visual families instead of fragmented pairs. A batch-scoped report includes relationships inside one upload plus its direct library matches. Each candidate exposes the individual AI, perceptual, color, and frame signals with plain-language reasons. The UI recommends a high-resolution non-duplicate keeper, supports exact/high-confidence selection, and still requires an explicit confirmation dialog; the API additionally requires `confirm=true`.
 
 ### Analytics and operations modules
 
@@ -77,6 +77,7 @@ erDiagram
     IMAGES {
         uuid id PK
         uuid user_id FK
+        uuid batch_id
         string original_filename
         string object_key UK
         string thumbnail_key
@@ -86,6 +87,9 @@ erDiagram
         int height
         string sha256
         string perceptual_hash
+        string difference_hash
+        string wavelet_hash
+        json color_signature
         vector_512 embedding
         string status
         uuid exact_duplicate_of_id FK
@@ -100,6 +104,11 @@ erDiagram
         string match_type
         float similarity_score
         int phash_distance
+        float clip_score
+        float perceptual_score
+        float color_score
+        float aspect_score
+        json evidence
     }
     PROCESSING_JOBS {
         uuid id PK

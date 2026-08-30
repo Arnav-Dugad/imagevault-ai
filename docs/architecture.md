@@ -78,9 +78,9 @@ sequenceDiagram
     API-->>UI: 202 Accepted + exact-match result
     Q->>W: Deliver job
     W->>S3: Read original
-    W->>W: Thumbnail, metadata, pHash
+    W->>W: Thumbnail, metadata, pHash + dHash + wHash, color/frame evidence
     alt non-exact image
-        W->>W: OpenCLIP embedding on CPU or CUDA
+        W->>W: Multi-view OpenCLIP embedding on CPU or CUDA
         W->>DB: pgvector cosine nearest-neighbour query
         W->>DB: Store vector and advisory matches
     else exact duplicate

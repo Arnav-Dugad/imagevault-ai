@@ -17,6 +17,7 @@ export interface TokenResponse {
 
 export interface VaultImage {
   id: string;
+  batch_id: string | null;
   original_filename: string;
   mime_type: string;
   file_size: number;
@@ -39,6 +40,11 @@ export interface SimilarImage {
   classification: string;
   match_type: DuplicateType;
   phash_distance: number | null;
+  clip_score: number | null;
+  perceptual_score: number | null;
+  color_score: number | null;
+  aspect_score: number | null;
+  reasons: string[];
 }
 
 export interface ImageDetail extends VaultImage {
@@ -80,8 +86,38 @@ export interface DuplicateGroup {
     similarity_score: number;
     match_type: DuplicateType;
     classification: string;
+    phash_distance: number | null;
+    clip_score: number | null;
+    perceptual_score: number | null;
+    color_score: number | null;
+    aspect_score: number | null;
+    reasons: string[];
+    same_batch: boolean;
   }[];
   recoverable_bytes: number;
+  highest_similarity: number;
+  all_same_batch: boolean;
+}
+
+export interface DuplicateReview {
+  groups: DuplicateGroup[];
+  batch_id: string | null;
+  total_groups: number;
+  exact_duplicates: number;
+  similar_images: number;
+  recoverable_bytes: number;
+  processing_images: number;
+  total_images_scanned: number;
+}
+
+export interface UploadResponse {
+  batch_id: string;
+  items: {
+    image: VaultImage;
+    exact_duplicate: boolean;
+    matched_filename: string | null;
+    message: string;
+  }[];
 }
 
 export interface SystemStatus {

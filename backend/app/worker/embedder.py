@@ -3,7 +3,7 @@ import time
 from io import BytesIO
 from threading import Lock
 
-from PIL import Image as PillowImage
+from PIL import Image as PillowImage, ImageOps
 from redis import Redis
 
 from app.core.config import get_settings
@@ -60,9 +60,21 @@ class ClipEmbedder:
         started = time.perf_counter()
         with PillowImage.open(BytesIO(data)) as source:
             image = source.convert("RGB")
-            tensor = self.preprocess(image).unsqueeze(0).to(self.device)
+            # Combine a normal CLIP crop with a full-frame padded view and its
+            # mirror. This retains edge content and makes near-duplicate search
+            # more robust to crops, borders, screenshots, and horizontal flips.
+            full_frame = ImageOps.pad(
+                image,
+                (384, 384),
+                method=PillowImage.Resampling.LANCZOS,
+                color=(127, 127, 127),
+            )
+            views = [image, full_frame, ImageOps.mirror(full_frame)]
+            tensor = self.torch.stack([self.preprocess(view) for view in views]).to(self.device)
         with self.torch.no_grad():
-            embedding = self.model.encode_image(tensor)
+            view_embeddings = self.model.encode_image(tensor)
+            view_embeddings /= view_embeddings.norm(dim=-1, keepdim=True)
+            embedding = view_embeddings.mean(dim=0, keepdim=True)
             embedding /= embedding.norm(dim=-1, keepdim=True)
         duration = time.perf_counter() - started
         INFERENCE_DURATION.observe(duration)

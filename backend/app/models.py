@@ -71,6 +71,7 @@ class Image(Base):
         Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     original_filename: Mapped[str] = mapped_column(String(255))
+    batch_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True, index=True)
     object_key: Mapped[str] = mapped_column(String(500), unique=True)
     thumbnail_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
     mime_type: Mapped[str] = mapped_column(String(100))
@@ -79,6 +80,9 @@ class Image(Base):
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sha256: Mapped[str] = mapped_column(String(64), index=True)
     perceptual_hash: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    difference_hash: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    wavelet_hash: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    color_signature: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
     embedding: Mapped[list[float] | None] = mapped_column(
         Vector(512).with_variant(JSON(), "sqlite"), nullable=True
     )
@@ -133,6 +137,11 @@ class DuplicateMatch(Base):
     match_type: Mapped[DuplicateType] = mapped_column(Enum(DuplicateType, native_enum=False))
     similarity_score: Mapped[float] = mapped_column(Float)
     phash_distance: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    clip_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    perceptual_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    color_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    aspect_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    evidence: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     source: Mapped[Image] = relationship(foreign_keys=[source_image_id])

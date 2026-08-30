@@ -18,7 +18,7 @@
 
 ## Implemented tests awaiting a Python runtime
 
-The backend pytest suite contains 12 test functions covering registration/login, duplicate accounts, protected routes, liveness, validated upload, exact SHA-256 duplicates, cross-user isolation, corrupt files, MIME/content mismatch, vector normalization, similarity labels, pHash distance, and thumbnail output. Some test functions contain multiple assertions; the precise assertion-level evidence must be recorded by pytest in the target environment.
+The backend pytest suite contains 19 test functions covering registration/login, duplicate accounts, protected routes, liveness, validated upload, exact SHA-256 duplicates, same-batch grouping, smart reindex queueing, cross-user isolation, corrupt files, MIME/content mismatch, vector normalization, similarity labels, multi-hash consensus, multi-signal evidence gates, worker loop reuse, and thumbnail output. Some test functions contain multiple assertions; the precise assertion-level evidence is recorded by pytest in the target environment.
 
 ## Not executable in this workspace
 

@@ -9,8 +9,9 @@ ImageVault AI stores original images in private S3-compatible MinIO object stora
 - Local account registration and JWT login with Argon2 password hashing.
 - User-isolated batch upload for JPG, PNG, and WebP files, with progress and cancellation.
 - Byte-for-byte duplicate detection through SHA-256 before expensive AI inference.
-- Perceptual pHash and local OpenCLIP ViT-B/32 similarity, indexed with pgvector cosine distance.
-- Private MinIO originals, generated WebP thumbnails, metadata, gallery filters, image details, explicit deletion, and duplicate review.
+- Multi-signal matching with pHash, dHash, wHash, color histograms, frame geometry, and multi-view local OpenCLIP ViT-B/32 embeddings.
+- Batch intelligence reports, connected duplicate families, explainable evidence, recommended keepers, confidence filters, and guarded bulk cleanup.
+- Private MinIO originals, generated WebP thumbnails, metadata, gallery filters, image details, and explicit deletion.
 - Live storage analytics, health/readiness/liveness endpoints, Prometheus metrics, and an automatically provisioned Grafana dashboard.
 - A multi-service Docker Compose deployment plus Minikube/Kubernetes and Terraform alternatives.
 - Free GitHub Actions validation for Python, React, container definitions, Kubernetes, and Terraform.
@@ -34,7 +35,7 @@ flowchart LR
     G[Grafana] --> PR
 ```
 
-The upload request stores the object and returns `202 Accepted`. SHA-256 identifies exact content immediately. A single worker then generates the thumbnail, safe metadata, pHash, normalized OpenCLIP vector, and pgvector nearest-neighbour matches. AI similarity is advisory; deletion is never automatic.
+The upload request assigns one batch ID, stores each object, and returns `202 Accepted`. SHA-256 identifies exact content immediately. A single worker then generates the thumbnail, safe metadata, three perceptual hashes, a normalized multi-view OpenCLIP vector, color evidence, and pgvector nearest-neighbour matches. An explainable scoring gate combines those signals, while a connected-component pass turns pairwise edges into complete visual families. AI similarity is advisory; deletion is never automatic.
 
 See [architecture.md](docs/architecture.md) and [technical-design.md](docs/technical-design.md) for the deployment, sequence, schema, security, and failure-mode designs.
 
@@ -218,11 +219,13 @@ The workflow validates a local deployment artifact. It does not publish images, 
 | `POST` | `/api/auth/login` | Authenticate |
 | `GET` | `/api/auth/me` | Current user |
 | `POST` | `/api/images/upload` | Validated multi-image upload |
+| `POST` | `/api/images/reindex` | Upgrade existing images to the latest smart index |
 | `GET` | `/api/images` | User-scoped search, filter, sort, pagination |
 | `GET` | `/api/images/{id}` | Metadata, preview, duplicate and similarity evidence |
 | `GET` | `/api/images/{id}/similar` | Similar images |
 | `DELETE` | `/api/images/{id}?confirm=true` | Explicit object/thumbnail/vector deletion |
 | `GET` | `/api/duplicates` | Duplicate review groups |
+| `GET` | `/api/duplicates/review?batch_id=...` | Premium report for the whole library or one upload batch |
 | `GET` | `/api/dashboard` | Storage analytics |
 | `GET` | `/api/system/status` | Authenticated service status |
 | `GET` | `/health`, `/health/live`, `/health/ready` | Orchestrator checks |
@@ -233,8 +236,11 @@ Interactive schemas and examples are available at `/docs`.
 ## How duplicate intelligence works
 
 - **SHA-256:** equality means the bytes are identical. Confidence is shown as 100%. It does not identify a resized or recompressed version.
-- **pHash:** compares visual frequency patterns and is useful for modest resizing/recompression. Its Hamming distance is stored separately.
-- **OpenCLIP + pgvector:** a normalized 512-dimensional embedding represents semantic/visual content. PostgreSQL uses cosine distance to retrieve neighbours. Initial UI classes are `Very Similar` at ≥0.95, `Similar` at ≥0.85, and `Possibly Related` at ≥0.75. These thresholds are configurable demonstrations, not universal scientific guarantees.
+- **Three perceptual hashes:** pHash captures frequency structure, dHash captures edge gradients, and wHash captures wavelet structure. Consensus is more robust to resize, recompression, format changes, and modest edits than one hash alone.
+- **Multi-view OpenCLIP + pgvector:** the worker averages a normal crop, full-frame padded view, and mirrored view into one normalized 512-dimensional embedding. PostgreSQL retrieves semantic neighbours with cosine distance.
+- **Color + geometry:** normalized color histograms and aspect-ratio agreement help reject weak semantic false positives.
+- **Explainable fusion:** near-duplicate and semantic matches use separate confidence gates, then expose AI, structure, color, frame, and plain-language reasons in the UI. Thresholds are configurable demonstrations, not universal scientific guarantees.
+- **Connected visual families:** pairwise matches are merged into non-overlapping groups, including every relevant image from the same upload batch and direct matches from the existing library.
 
 The worker chooses CUDA when PyTorch reports it available; otherwise it uses CPU. CUDA is never required for correctness.
 
@@ -272,7 +278,7 @@ npm test
 npm run build
 ```
 
-The backend suite covers authentication, authorization isolation, upload validation, SHA-256 exact duplicates, liveness, pHash, thumbnails, and vector normalization. The frontend suite covers deterministic formatting utilities; primary product compilation is enforced by TypeScript and the production build.
+The backend suite covers authentication, authorization isolation, upload validation, SHA-256 and same-batch grouping, liveness, multi-hash scoring, evidence gates, thumbnails, and vector normalization. The frontend suite covers deterministic formatting utilities; primary product compilation is enforced by TypeScript, ESLint, and the production build.
 
 Benchmark real measurements—never sample numbers—with:
 

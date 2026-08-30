@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     embedding_dimension: int = 512
     visual_similarity_threshold: float = 0.85
     perceptual_hash_threshold: int = 8
+    similarity_candidate_limit: int = 60
+    perceptual_prefilter_distance: int = 18
     presigned_url_expire_minutes: int = 30
     metrics_port: int = 9101
 

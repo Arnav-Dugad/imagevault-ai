@@ -35,6 +35,7 @@ class TokenResponse(BaseModel):
 
 class ImageSummary(BaseModel):
     id: UUID
+    batch_id: UUID | None
     original_filename: str
     mime_type: str
     file_size: int
@@ -57,6 +58,11 @@ class SimilarImage(BaseModel):
     classification: str
     match_type: DuplicateType
     phash_distance: int | None = None
+    clip_score: float | None = None
+    perceptual_score: float | None = None
+    color_score: float | None = None
+    aspect_score: float | None = None
+    reasons: list[str] = Field(default_factory=list)
 
 
 class ImageDetail(ImageSummary):
@@ -85,7 +91,13 @@ class UploadItem(BaseModel):
 
 
 class UploadResponse(BaseModel):
+    batch_id: UUID
     items: list[UploadItem]
+
+
+class ReindexResponse(BaseModel):
+    queued: int
+    message: str
 
 
 class DuplicateCandidate(BaseModel):
@@ -93,6 +105,13 @@ class DuplicateCandidate(BaseModel):
     similarity_score: float
     match_type: DuplicateType
     classification: str
+    phash_distance: int | None = None
+    clip_score: float | None = None
+    perceptual_score: float | None = None
+    color_score: float | None = None
+    aspect_score: float | None = None
+    reasons: list[str] = Field(default_factory=list)
+    same_batch: bool = False
 
 
 class DuplicateGroup(BaseModel):
@@ -100,6 +119,19 @@ class DuplicateGroup(BaseModel):
     original: ImageSummary
     candidates: list[DuplicateCandidate]
     recoverable_bytes: int
+    highest_similarity: float = 0
+    all_same_batch: bool = False
+
+
+class DuplicateReviewResponse(BaseModel):
+    groups: list[DuplicateGroup]
+    batch_id: UUID | None = None
+    total_groups: int
+    exact_duplicates: int
+    similar_images: int
+    recoverable_bytes: int
+    processing_images: int
+    total_images_scanned: int
 
 
 class DashboardMetric(BaseModel):

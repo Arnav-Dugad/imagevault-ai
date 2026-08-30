@@ -22,6 +22,7 @@ from app.schemas import (
     ImageDetail,
     ImageListResponse,
     MessageResponse,
+    ReindexResponse,
     SimilarImage,
     UploadItem,
     UploadResponse,
@@ -89,6 +90,7 @@ async def upload_images(
         )
 
     response_items: list[UploadItem] = []
+    batch_id = uuid4()
     queued_ids: list[UUID] = []
     stored_keys: list[str] = []
     try:
@@ -110,6 +112,7 @@ async def upload_images(
             image = Image(
                 id=image_id,
                 user_id=user.id,
+                batch_id=batch_id,
                 original_filename=filename,
                 object_key=original_key,
                 thumbnail_key=thumbnail_key,
@@ -167,7 +170,7 @@ async def upload_images(
             cast(Any, process_image).delay(str(image_id))
         except Exception:
             logger.exception("Unable to enqueue image", extra={"image_id": str(image_id)})
-    return UploadResponse(items=response_items)
+    return UploadResponse(batch_id=batch_id, items=response_items)
 
 
 @router.get("", response_model=ImageListResponse)
@@ -230,6 +233,65 @@ async def list_images(
     )
 
 
+@router.post("/reindex", response_model=ReindexResponse, status_code=status.HTTP_202_ACCEPTED)
+async def reindex_images(
+    user: CurrentUser,
+    db: Database,
+    missing_only: Annotated[
+        bool,
+        Query(description="Only rebuild images that do not have the premium multi-signal index"),
+    ] = True,
+) -> ReindexResponse:
+    images = list(
+        (
+            await db.scalars(
+                select(Image)
+                .where(Image.user_id == user.id)
+                .order_by(asc(Image.created_at))
+            )
+        ).all()
+    )
+    queued: list[UUID] = []
+    for image in sorted(images, key=lambda item: item.exact_duplicate_of_id is not None):
+        has_smart_index = bool(
+            image.difference_hash and image.wavelet_hash and image.color_signature
+        )
+        if missing_only and has_smart_index:
+            continue
+        if image.status in (ProcessingStatus.PENDING, ProcessingStatus.PROCESSING):
+            continue
+        image.status = (
+            ProcessingStatus.EXACT_DUPLICATE
+            if image.exact_duplicate_of_id
+            else ProcessingStatus.PENDING
+        )
+        image.error_message = None
+        job = await db.scalar(select(ProcessingJob).where(ProcessingJob.image_id == image.id))
+        if job:
+            job.status = JobStatus.PENDING
+            job.error_message = None
+            job.started_at = None
+            job.completed_at = None
+        else:
+            db.add(ProcessingJob(image_id=image.id, status=JobStatus.PENDING))
+        queued.append(image.id)
+    await db.commit()
+
+    for image_id in queued:
+        try:
+            cast(Any, process_image).delay(str(image_id))
+        except Exception:
+            logger.exception("Unable to enqueue reindex", extra={"image_id": str(image_id)})
+    return ReindexResponse(
+        queued=len(queued),
+        message=(
+            f"Queued {len(queued)} image{'s' if len(queued) != 1 else ''} for smart re-analysis"
+            if queued
+            else "Every image already has the latest smart index"
+        ),
+    )
+
+
 async def similar_for(image: Image, db: Database) -> list[SimilarImage]:
     matches = list(
         (
@@ -269,6 +331,11 @@ async def similar_for(image: Image, db: Database) -> list[SimilarImage]:
                     classification=similarity_classification(match.similarity_score),
                     match_type=match.match_type,
                     phash_distance=match.phash_distance,
+                    clip_score=match.clip_score,
+                    perceptual_score=match.perceptual_score,
+                    color_score=match.color_score,
+                    aspect_score=match.aspect_score,
+                    reasons=match.evidence or [],
                 )
             )
     return result

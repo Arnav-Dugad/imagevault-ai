@@ -95,6 +95,7 @@ def similarity_classification(score: float) -> str:
 def image_summary(image: Image, best_similarity: float | None = None) -> ImageSummary:
     return ImageSummary(
         id=image.id,
+        batch_id=image.batch_id,
         original_filename=image.original_filename,
         mime_type=image.mime_type,
         file_size=image.file_size,
