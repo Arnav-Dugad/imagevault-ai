@@ -28,15 +28,15 @@ resource "kubernetes_secret_v1" "imagevault" {
   }
   type = "Opaque"
   data = {
-    POSTGRES_USER                    = var.postgres_user
-    POSTGRES_DB                      = var.postgres_database
-    POSTGRES_PASSWORD                = var.postgres_password
-    DATABASE_URL                     = "postgresql+asyncpg://${var.postgres_user}:${urlencode(var.postgres_password)}@postgres:5432/${var.postgres_database}"
-    MINIO_ACCESS_KEY                 = var.minio_access_key
-    MINIO_SECRET_KEY                 = var.minio_secret_key
-    JWT_SECRET                       = var.jwt_secret
-    GF_SECURITY_ADMIN_USER           = var.grafana_admin_user
-    GF_SECURITY_ADMIN_PASSWORD       = var.grafana_admin_password
+    POSTGRES_USER              = var.postgres_user
+    POSTGRES_DB                = var.postgres_database
+    POSTGRES_PASSWORD          = var.postgres_password
+    DATABASE_URL               = "postgresql+asyncpg://${var.postgres_user}:${urlencode(var.postgres_password)}@postgres:5432/${var.postgres_database}"
+    MINIO_ACCESS_KEY           = var.minio_access_key
+    MINIO_SECRET_KEY           = var.minio_secret_key
+    JWT_SECRET                 = var.jwt_secret
+    GF_SECURITY_ADMIN_USER     = var.grafana_admin_user
+    GF_SECURITY_ADMIN_PASSWORD = var.grafana_admin_password
   }
 }
 
