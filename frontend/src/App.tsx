@@ -9,6 +9,7 @@ const DashboardPage = lazy(() => import("./pages/DashboardPage").then((module) =
 const DuplicatesPage = lazy(() => import("./pages/DuplicatesPage").then((module) => ({ default: module.DuplicatesPage })));
 const GalleryPage = lazy(() => import("./pages/GalleryPage").then((module) => ({ default: module.GalleryPage })));
 const ImageDetailPage = lazy(() => import("./pages/ImageDetailPage").then((module) => ({ default: module.ImageDetailPage })));
+const AlbumsPage = lazy(() => import("./pages/AlbumsPage").then((module) => ({ default: module.AlbumsPage })));
 const SettingsPage = lazy(() => import("./pages/SettingsPage").then((module) => ({ default: module.SettingsPage })));
 const SystemPage = lazy(() => import("./pages/SystemPage").then((module) => ({ default: module.SystemPage })));
 const UploadPage = lazy(() => import("./pages/UploadPage").then((module) => ({ default: module.UploadPage })));
@@ -31,6 +32,7 @@ export default function App() {
     <Route element={<ProtectedLayout />}>
       <Route index element={<DashboardPage />} />
       <Route path="gallery" element={<GalleryPage />} />
+      <Route path="albums" element={<AlbumsPage />} />
       <Route path="upload" element={<UploadPage />} />
       <Route path="duplicates" element={<DuplicatesPage />} />
       <Route path="images/:id" element={<ImageDetailPage />} />

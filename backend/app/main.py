@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app import __version__
-from app.api import analytics, auth, health, images
+from app.api import albums, analytics, auth, health, images
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.metrics import HTTP_LATENCY, HTTP_REQUESTS
@@ -88,3 +88,4 @@ app.include_router(health.router)
 app.include_router(auth.router, prefix=settings.api_prefix)
 app.include_router(images.router, prefix=settings.api_prefix)
 app.include_router(analytics.router, prefix=settings.api_prefix)
+app.include_router(albums.router, prefix=settings.api_prefix)

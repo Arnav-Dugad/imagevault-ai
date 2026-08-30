@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     perceptual_prefilter_distance: int = 18
     presigned_url_expire_minutes: int = 30
     metrics_port: int = 9101
+    semantic_search_timeout_seconds: int = 30
+    semantic_search_min_score: float = 0.16
+    face_cluster_threshold: float = 0.87
+    event_gap_hours: int = 12
+    burst_gap_seconds: int = 12
 
     @property
     def cors_origin_list(self) -> list[str]:

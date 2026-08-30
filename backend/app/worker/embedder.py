@@ -2,6 +2,7 @@ import math
 import time
 from io import BytesIO
 from threading import Lock
+from collections.abc import Sequence
 
 from PIL import Image as PillowImage, ImageOps
 from redis import Redis
@@ -45,6 +46,7 @@ class ClipEmbedder:
             device=self.device,
         )
         self.model.eval()
+        self.tokenizer = open_clip.get_tokenizer(settings.clip_model)
         self.torch = torch
         self._loaded = True
         MODEL_LOADED.set(1)
@@ -80,6 +82,31 @@ class ClipEmbedder:
         INFERENCE_DURATION.observe(duration)
         vector = normalize_vector(embedding[0].cpu().float().tolist())
         return vector, duration, self.device
+
+    def image_embeddings(self, images: Sequence[PillowImage.Image]) -> list[list[float]]:
+        if not images:
+            return []
+        self._load()
+        tensor = self.torch.stack([self.preprocess(image.convert("RGB")) for image in images]).to(
+            self.device
+        )
+        with self.torch.no_grad():
+            embeddings = self.model.encode_image(tensor)
+            embeddings /= embeddings.norm(dim=-1, keepdim=True)
+        return [normalize_vector(row) for row in embeddings.cpu().float().tolist()]
+
+    def text_embeddings(self, texts: Sequence[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        self._load()
+        tokens = self.tokenizer(list(texts)).to(self.device)
+        with self.torch.no_grad():
+            embeddings = self.model.encode_text(tokens)
+            embeddings /= embeddings.norm(dim=-1, keepdim=True)
+        return [normalize_vector(row) for row in embeddings.cpu().float().tolist()]
+
+    def text_embedding(self, text: str) -> list[float]:
+        return self.text_embeddings([text])[0]
 
 
 embedder = ClipEmbedder()

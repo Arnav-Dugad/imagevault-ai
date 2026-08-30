@@ -1,6 +1,6 @@
 from io import BytesIO
 from types import SimpleNamespace
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from PIL import Image as PillowImage
@@ -176,3 +176,56 @@ async def test_declared_mime_must_match_decoded_content(client):
         headers={"Authorization": f"Bearer {auth['access_token']}"},
     )
     assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_removes_multiple_owned_images(client, monkeypatch):
+    auth = await create_user(client, "bulk@example.com")
+    headers = {"Authorization": f"Bearer {auth['access_token']}"}
+    fake = FakeStorage()
+    monkeypatch.setattr(image_routes, "storage", fake)
+    monkeypatch.setattr(image_service, "storage", fake)
+    monkeypatch.setattr(image_routes, "process_image", SimpleNamespace(delay=lambda _: None))
+    upload = await client.post(
+        "/api/images/upload",
+        files=[
+            ("files", ("first.png", png_bytes((20, 30, 40)), "image/png")),
+            ("files", ("second.png", png_bytes((80, 90, 100)), "image/png")),
+        ],
+        headers=headers,
+    )
+    image_ids = [item["image"]["id"] for item in upload.json()["items"]]
+
+    response = await client.post(
+        "/api/images/bulk-delete",
+        json={"image_ids": image_ids, "confirm": True},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["deleted"] == 2
+    assert fake.objects == {}
+    assert (await client.get("/api/images", headers=headers)).json()["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_rejects_partial_or_unowned_sets(client, monkeypatch):
+    auth = await create_user(client, "atomic@example.com")
+    headers = {"Authorization": f"Bearer {auth['access_token']}"}
+    fake = FakeStorage()
+    monkeypatch.setattr(image_routes, "storage", fake)
+    monkeypatch.setattr(image_service, "storage", fake)
+    monkeypatch.setattr(image_routes, "process_image", SimpleNamespace(delay=lambda _: None))
+    upload = await client.post(
+        "/api/images/upload",
+        files=[("files", ("keep.png", png_bytes(), "image/png"))],
+        headers=headers,
+    )
+    image_id = upload.json()["items"][0]["image"]["id"]
+
+    response = await client.post(
+        "/api/images/bulk-delete",
+        json={"image_ids": [image_id, str(uuid4())], "confirm": True},
+        headers=headers,
+    )
+    assert response.status_code == 404
+    assert (await client.get("/api/images", headers=headers)).json()["total"] == 1

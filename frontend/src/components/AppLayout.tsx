@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { Activity, Boxes, CloudUpload, Copy, Gauge, Images, LogOut, Menu, Settings, ShieldCheck, X } from "lucide-react";
+import { Activity, Boxes, CloudUpload, Copy, FolderHeart, Gauge, Images, LogOut, Menu, Settings, ShieldCheck, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "../lib/utils";
@@ -9,6 +9,7 @@ import { Button } from "./ui";
 const nav = [
   { to: "/", label: "Overview", icon: Gauge },
   { to: "/gallery", label: "Gallery", icon: Images },
+  { to: "/albums", label: "Smart albums", icon: FolderHeart },
   { to: "/upload", label: "Upload", icon: CloudUpload },
   { to: "/duplicates", label: "Duplicate review", icon: Copy },
   { to: "/system", label: "System status", icon: Activity },

@@ -117,8 +117,8 @@ export function DuplicatesPage() {
   async function removeSelected() {
     setDeleting(true); setError("");
     try {
-      await Promise.all([...selected].map((id) => api(`/images/${id}?confirm=true`, { method: "DELETE" })));
-      setSelected(new Set()); setConfirming(false); setNotice("Selected copies were removed from your private vault."); await load();
+      await api("/images/bulk-delete", { method: "POST", body: JSON.stringify({ image_ids: [...selected], confirm: true }) });
+      setSelected(new Set()); setConfirming(false); setNotice("Selected images deleted."); await load();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not delete selected images"); }
     finally { setDeleting(false); }
   }
@@ -134,9 +134,8 @@ export function DuplicatesPage() {
 
   return <>
     <PageHeading
-      eyebrow={batchId ? "Batch intelligence report" : "Similarity command center"}
-      title={batchId ? "Your upload, analyzed as one family." : "Every duplicate. One confident decision."}
-      description={batchId ? "This focused report follows the images from your latest upload and includes matches against the rest of your private library." : "Multi-signal AI combines exact bytes, three visual fingerprints, color composition, frame geometry, and local OpenCLIP intelligence."}
+      eyebrow={batchId ? "Upload batch" : "Duplicate review"}
+      title={batchId ? "Batch matches" : "Duplicates and similar images"}
       action={<div className="flex flex-wrap gap-2">{batchId && <Link to="/duplicates"><Button variant="secondary"><Layers3 className="h-4 w-4" />All library</Button></Link>}<Button variant="secondary" loading={reindexing} onClick={rebuildIndex}><WandSparkles className="h-4 w-4" />Upgrade smart index</Button></div>}
     />
 

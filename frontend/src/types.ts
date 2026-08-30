@@ -32,6 +32,14 @@ export interface VaultImage {
   thumbnail_url: string | null;
   original_url: string | null;
   best_similarity: number | null;
+  blur_score: number | null;
+  exposure_score: number | null;
+  resolution_score: number | null;
+  screenshot_quality_score: number | null;
+  quality_score: number | null;
+  is_screenshot: boolean;
+  smart_labels: string[];
+  face_count: number;
 }
 
 export interface SimilarImage {
@@ -53,6 +61,7 @@ export interface ImageDetail extends VaultImage {
   error_message: string | null;
   exif_timestamp: string | null;
   camera_model: string | null;
+  ocr_text: string | null;
   exact_duplicate_of: VaultImage | null;
   similar_images: SimilarImage[];
 }
@@ -133,3 +142,18 @@ export interface SystemStatus {
 }
 
 export interface ComponentStatus { status: string; detail: string | null }
+
+export interface SmartAlbum {
+  id: string;
+  title: string;
+  subtitle: string;
+  cover: VaultImage;
+  images: VaultImage[];
+  image_count: number;
+  best_image_id: string | null;
+}
+
+export interface SmartAlbums {
+  items: SmartAlbum[];
+  total: number;
+}

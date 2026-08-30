@@ -83,6 +83,15 @@ class Image(Base):
     difference_hash: Mapped[str | None] = mapped_column(String(32), nullable=True)
     wavelet_hash: Mapped[str | None] = mapped_column(String(32), nullable=True)
     color_signature: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
+    blur_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    exposure_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    resolution_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    screenshot_quality_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    quality_score: Mapped[float | None] = mapped_column(Float, nullable=True, index=True)
+    is_screenshot: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    smart_labels: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    ocr_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    face_count: Mapped[int] = mapped_column(Integer, default=0)
     embedding: Mapped[list[float] | None] = mapped_column(
         Vector(512).with_variant(JSON(), "sqlite"), nullable=True
     )
@@ -110,12 +119,46 @@ class Image(Base):
     job: Mapped["ProcessingJob | None"] = relationship(
         back_populates="image", cascade="all, delete-orphan", uselist=False
     )
+    detected_faces: Mapped[list["DetectedFace"]] = relationship(
+        back_populates="image", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         Index("ix_images_user_sha256", "user_id", "sha256"),
         Index("ix_images_user_created", "user_id", "created_at"),
         Index(
             "ix_images_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )
+
+
+class DetectedFace(Base):
+    __tablename__ = "detected_faces"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    image_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("images.id", ondelete="CASCADE"), index=True
+    )
+    face_index: Mapped[int] = mapped_column(Integer)
+    bounding_box: Mapped[dict[str, int]] = mapped_column(JSON)
+    embedding: Mapped[list[float]] = mapped_column(
+        Vector(512).with_variant(JSON(), "sqlite")
+    )
+    confidence: Mapped[float] = mapped_column(Float, default=1.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    image: Mapped[Image] = relationship(back_populates="detected_faces")
+
+    __table_args__ = (
+        UniqueConstraint("image_id", "face_index", name="uq_detected_face_index"),
+        Index(
+            "ix_detected_faces_embedding_hnsw",
             "embedding",
             postgresql_using="hnsw",
             postgresql_ops={"embedding": "vector_cosine_ops"},

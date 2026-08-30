@@ -21,12 +21,21 @@ from app.metrics import (
     SIMILAR_IMAGES,
 )
 from app.models import (
+    DetectedFace,
     DuplicateMatch,
     DuplicateType,
     Image,
     JobStatus,
     ProcessingJob,
     ProcessingStatus,
+)
+from app.services.intelligence import (
+    SEMANTIC_LABELS,
+    detect_faces,
+    extract_ocr,
+    looks_like_screenshot,
+    merge_smart_labels,
+    quality_metrics,
 )
 from app.services.similarity import cosine_similarity, evaluate_similarity, hash_distance
 from app.services.storage import storage
@@ -36,6 +45,7 @@ from app.worker.embedder import embedder
 logger = structlog.get_logger("imagevault.worker")
 settings = get_settings()
 _worker_runner: asyncio.Runner | None = None
+_label_vectors: dict[str, list[float]] | None = None
 
 
 def _get_worker_runner() -> asyncio.Runner:
@@ -152,6 +162,23 @@ def _phash_distance(first: str | None, second: str | None) -> int | None:
     return hash_distance(first, second)
 
 
+def _semantic_labels(embedding: list[float]) -> list[str]:
+    global _label_vectors
+    if _label_vectors is None:
+        names = list(SEMANTIC_LABELS)
+        vectors = embedder.text_embeddings([SEMANTIC_LABELS[name] for name in names])
+        _label_vectors = dict(zip(names, vectors, strict=True))
+    ranked = sorted(
+        (
+            (label, cosine_similarity(embedding, vector))
+            for label, vector in _label_vectors.items()
+        ),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+    return [label for label, score in ranked[:3] if score >= 0.16]
+
+
 async def _set_running(image_id: UUID) -> Image | None:
     async with SessionLocal() as db:
         image = await db.get(Image, image_id)
@@ -183,6 +210,15 @@ async def _save_result(
     exif_timestamp: datetime | None,
     camera_model: str | None,
     embedding: list[float] | None,
+    blur_score: float,
+    exposure_score: float,
+    resolution_score: float,
+    screenshot_quality_score: float | None,
+    quality_score: float,
+    is_screenshot: bool,
+    smart_labels: list[str],
+    ocr_text: str,
+    faces: list[tuple[dict[str, int], float, list[float]]],
 ) -> int:
     matches_created = 0
     async with SessionLocal() as db:
@@ -198,7 +234,29 @@ async def _save_result(
         image.exif_timestamp = exif_timestamp
         image.camera_model = camera_model
         image.embedding = embedding
+        image.blur_score = blur_score
+        image.exposure_score = exposure_score
+        image.resolution_score = resolution_score
+        image.screenshot_quality_score = screenshot_quality_score
+        image.quality_score = quality_score
+        image.is_screenshot = is_screenshot
+        image.smart_labels = smart_labels
+        image.ocr_text = ocr_text or None
+        image.face_count = len(faces)
         image.processed_at = datetime.now(UTC)
+
+        await db.execute(delete(DetectedFace).where(DetectedFace.image_id == image.id))
+        for face_index, (bounding_box, confidence, face_embedding) in enumerate(faces):
+            db.add(
+                DetectedFace(
+                    user_id=image.user_id,
+                    image_id=image.id,
+                    face_index=face_index,
+                    bounding_box=bounding_box,
+                    embedding=face_embedding,
+                    confidence=confidence,
+                )
+            )
 
         if image.exact_duplicate_of_id:
             original = await db.get(Image, image.exact_duplicate_of_id)
@@ -358,11 +416,29 @@ async def _process(image_id: UUID) -> dict[str, object]:
             camera,
         ) = _thumbnail_and_metadata(data)
         storage.put_bytes(image.thumbnail_key, thumbnail, "image/webp")
-        embedding: list[float] | None = None
-        device = "reused"
-        inference_seconds = 0.0
-        if not image.exact_duplicate_of_id:
-            embedding, inference_seconds, device = embedder.image_embedding(data)
+        embedding, inference_seconds, device = embedder.image_embedding(data)
+        with PillowImage.open(BytesIO(data)) as source:
+            rgb = source.convert("RGB")
+            ocr_text = extract_ocr(rgb)
+            screenshot = looks_like_screenshot(
+                rgb,
+                filename=image.original_filename,
+                camera_model=camera,
+                ocr_text=ocr_text,
+            )
+            quality = quality_metrics(rgb, is_screenshot=screenshot, ocr_text=ocr_text)
+            face_crops = detect_faces(rgb)
+        face_vectors = embedder.image_embeddings([face.image for face in face_crops])
+        faces = [
+            (face.bounding_box, face.confidence, vector)
+            for face, vector in zip(face_crops, face_vectors, strict=True)
+        ]
+        labels = merge_smart_labels(
+            _semantic_labels(embedding),
+            is_screenshot=screenshot,
+            ocr_text=ocr_text,
+            face_count=len(faces),
+        )
         matches = await _save_result(
             image_id,
             width=width,
@@ -374,6 +450,15 @@ async def _process(image_id: UUID) -> dict[str, object]:
             exif_timestamp=exif_time,
             camera_model=camera,
             embedding=embedding,
+            blur_score=quality.blur,
+            exposure_score=quality.exposure,
+            resolution_score=quality.resolution,
+            screenshot_quality_score=quality.screenshot,
+            quality_score=quality.overall,
+            is_screenshot=screenshot,
+            smart_labels=labels,
+            ocr_text=ocr_text,
+            faces=faces,
         )
         duration = time.perf_counter() - started
         IMAGES_PROCESSED.inc()
@@ -413,3 +498,11 @@ async def _process(image_id: UUID) -> dict[str, object]:
 def process_image(self, image_id: str) -> dict[str, object]:
     del self
     return _get_worker_runner().run(_process(UUID(image_id)))
+
+
+@celery_app.task(name="imagevault.embed_text")
+def embed_text(query: str) -> list[float]:
+    cleaned = " ".join(query.split())[:500]
+    if not cleaned:
+        raise ValueError("Search text cannot be empty")
+    return embedder.text_embedding(cleaned)

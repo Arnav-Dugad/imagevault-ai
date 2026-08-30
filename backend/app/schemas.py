@@ -50,6 +50,14 @@ class ImageSummary(BaseModel):
     thumbnail_url: str | None = None
     original_url: str | None = None
     best_similarity: float | None = None
+    blur_score: float | None = None
+    exposure_score: float | None = None
+    resolution_score: float | None = None
+    screenshot_quality_score: float | None = None
+    quality_score: float | None = None
+    is_screenshot: bool = False
+    smart_labels: list[str] = Field(default_factory=list)
+    face_count: int = 0
 
 
 class SimilarImage(BaseModel):
@@ -71,6 +79,7 @@ class ImageDetail(ImageSummary):
     error_message: str | None
     exif_timestamp: datetime | None
     camera_model: str | None
+    ocr_text: str | None
     exact_duplicate_of: ImageSummary | None = None
     similar_images: list[SimilarImage] = Field(default_factory=list)
 
@@ -98,6 +107,32 @@ class UploadResponse(BaseModel):
 class ReindexResponse(BaseModel):
     queued: int
     message: str
+
+
+class BulkDeleteRequest(BaseModel):
+    image_ids: list[UUID] = Field(min_length=1, max_length=100)
+    confirm: bool = False
+
+
+class BulkDeleteResponse(BaseModel):
+    deleted: int
+    recovered_bytes: int
+    message: str
+
+
+class SmartAlbum(BaseModel):
+    id: str
+    title: str
+    subtitle: str
+    cover: ImageSummary
+    images: list[ImageSummary]
+    image_count: int
+    best_image_id: UUID | None = None
+
+
+class SmartAlbumsResponse(BaseModel):
+    items: list[SmartAlbum]
+    total: int
 
 
 class DuplicateCandidate(BaseModel):

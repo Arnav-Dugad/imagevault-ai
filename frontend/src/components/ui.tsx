@@ -27,9 +27,9 @@ export function StatusBadge({ status }: { status: ProcessingStatus }) {
   return <span className={cn("inline-flex rounded-full border px-2.5 py-1 font-mono text-[10px] font-medium uppercase tracking-wider", styles[status])}>{label}</span>;
 }
 
-export function PageHeading({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: ReactNode }) {
+export function PageHeading({ eyebrow, title, description, action }: { eyebrow: string; title: string; description?: string; action?: ReactNode }) {
   return <div className="mb-7 flex flex-col justify-between gap-5 md:flex-row md:items-end">
-    <div><p className="eyebrow mb-3">{eyebrow}</p><h1 className="text-3xl font-semibold tracking-[-.04em] md:text-4xl">{title}</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-muted">{description}</p></div>
+    <div><p className="eyebrow mb-3">{eyebrow}</p><h1 className="text-3xl font-semibold tracking-[-.04em] md:text-4xl">{title}</h1>{description && <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">{description}</p>}</div>
     {action}
   </div>;
 }

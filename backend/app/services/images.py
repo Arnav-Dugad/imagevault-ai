@@ -110,6 +110,14 @@ def image_summary(image: Image, best_similarity: float | None = None) -> ImageSu
         thumbnail_url=storage.presigned_get(image.thumbnail_key or image.object_key),
         original_url=storage.presigned_get(image.object_key),
         best_similarity=best_similarity,
+        blur_score=image.blur_score,
+        exposure_score=image.exposure_score,
+        resolution_score=image.resolution_score,
+        screenshot_quality_score=image.screenshot_quality_score,
+        quality_score=image.quality_score,
+        is_screenshot=image.is_screenshot,
+        smart_labels=image.smart_labels or [],
+        face_count=image.face_count,
     )
 
 

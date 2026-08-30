@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal, cast
@@ -19,6 +20,8 @@ from app.models import (
     ProcessingStatus,
 )
 from app.schemas import (
+    BulkDeleteRequest,
+    BulkDeleteResponse,
     ImageDetail,
     ImageListResponse,
     MessageResponse,
@@ -36,7 +39,7 @@ from app.services.images import (
     similarity_classification,
 )
 from app.services.storage import storage
-from app.worker.tasks import process_image
+from app.worker.tasks import embed_text, process_image
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/images", tags=["Images"])
@@ -181,7 +184,7 @@ async def list_images(
     page_size: Annotated[int, Query(ge=1, le=100)] = 24,
     search: Annotated[str | None, Query(max_length=100)] = None,
     filter_by: Literal["all", "originals", "exact", "similar", "recent"] = "all",
-    sort_by: Literal["newest", "oldest", "largest", "smallest", "filename"] = "newest",
+    sort_by: Literal["newest", "oldest", "largest", "smallest", "filename", "quality"] = "newest",
 ) -> ImageListResponse:
     predicates = [Image.user_id == user.id]
     if search:
@@ -209,6 +212,7 @@ async def list_images(
         "largest": desc(Image.file_size),
         "smallest": asc(Image.file_size),
         "filename": asc(Image.original_filename),
+        "quality": desc(Image.quality_score).nullslast(),
     }[sort_by]
     where = and_(*predicates)
     total = int(await db.scalar(select(func.count()).select_from(Image).where(where)) or 0)
@@ -254,7 +258,11 @@ async def reindex_images(
     queued: list[UUID] = []
     for image in sorted(images, key=lambda item: item.exact_duplicate_of_id is not None):
         has_smart_index = bool(
-            image.difference_hash and image.wavelet_hash and image.color_signature
+            image.difference_hash
+            and image.wavelet_hash
+            and image.color_signature
+            and image.quality_score is not None
+            and image.smart_labels
         )
         if missing_only and has_smart_index:
             continue
@@ -289,6 +297,144 @@ async def reindex_images(
             if queued
             else "Every image already has the latest smart index"
         ),
+    )
+
+
+@router.get("/smart-search", response_model=ImageListResponse)
+async def smart_search(
+    user: CurrentUser,
+    db: Database,
+    query: Annotated[str, Query(min_length=2, max_length=500)],
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 24,
+) -> ImageListResponse:
+    cleaned = " ".join(query.split())
+    task = cast(Any, embed_text).delay(cleaned)
+    try:
+        vector = await asyncio.to_thread(
+            task.get,
+            timeout=settings.semantic_search_timeout_seconds,
+            disable_sync_subtasks=False,
+        )
+    except Exception as exc:
+        logger.exception("Semantic search embedding failed")
+        raise HTTPException(
+            status_code=503,
+            detail="Smart search is warming up. Try again in a few seconds.",
+        ) from exc
+    finally:
+        try:
+            task.forget()
+        except Exception:
+            pass
+
+    result_scores: dict[UUID, float] = {}
+    result_images: dict[UUID, Image] = {}
+    bind = db.get_bind()
+    if bind.dialect.name == "postgresql":
+        distance = Image.embedding.cosine_distance(vector).label("distance")
+        rows = (
+            await db.execute(
+                select(Image, distance)
+                .where(
+                    Image.user_id == user.id,
+                    Image.embedding.is_not(None),
+                    Image.status.in_([ProcessingStatus.READY, ProcessingStatus.EXACT_DUPLICATE]),
+                )
+                .order_by(distance)
+                .limit(200)
+            )
+        ).all()
+        for image, cosine_distance in rows:
+            raw_score = max(-1.0, min(1.0, 1.0 - float(cosine_distance)))
+            if raw_score < settings.semantic_search_min_score:
+                continue
+            result_images[image.id] = image
+            result_scores[image.id] = max(0.01, min(1.0, (raw_score - 0.10) / 0.22))
+
+    tokens = [token for token in cleaned.split() if len(token) >= 3][:8]
+    text_predicates = [
+        Image.original_filename.ilike(f"%{cleaned}%"),
+        Image.ocr_text.ilike(f"%{cleaned}%"),
+    ]
+    text_predicates.extend(Image.ocr_text.ilike(f"%{token}%") for token in tokens)
+    text_matches = list(
+        (
+            await db.scalars(
+                select(Image)
+                .where(
+                    Image.user_id == user.id,
+                    Image.status.in_([ProcessingStatus.READY, ProcessingStatus.EXACT_DUPLICATE]),
+                    or_(*text_predicates),
+                )
+                .limit(200)
+            )
+        ).all()
+    )
+    query_folded = cleaned.casefold()
+    for image in text_matches:
+        filename_match = query_folded in image.original_filename.casefold()
+        ocr = (image.ocr_text or "").casefold()
+        complete_ocr_match = query_folded in ocr
+        token_ratio = sum(token.casefold() in ocr for token in tokens) / max(1, len(tokens))
+        text_score = 0.99 if filename_match else 0.94 if complete_ocr_match else 0.62 + token_ratio * 0.25
+        result_images[image.id] = image
+        result_scores[image.id] = max(result_scores.get(image.id, 0), text_score)
+
+    ranked = sorted(result_images.values(), key=lambda image: result_scores[image.id], reverse=True)
+    total = len(ranked)
+    start = (page - 1) * page_size
+    visible = ranked[start : start + page_size]
+    return ImageListResponse(
+        items=[image_summary(image, result_scores[image.id]) for image in visible],
+        total=total,
+        page=page,
+        page_size=page_size,
+        pages=page_count(total, page_size),
+    )
+
+
+@router.post("/bulk-delete", response_model=BulkDeleteResponse)
+async def bulk_delete_images(
+    request: BulkDeleteRequest,
+    user: CurrentUser,
+    db: Database,
+) -> BulkDeleteResponse:
+    if not request.confirm:
+        raise HTTPException(status_code=400, detail="Explicit deletion confirmation is required")
+    image_ids = list(dict.fromkeys(request.image_ids))
+    images = list(
+        (
+            await db.scalars(
+                select(Image).where(Image.user_id == user.id, Image.id.in_(image_ids))
+            )
+        ).all()
+    )
+    if len(images) != len(image_ids):
+        raise HTTPException(status_code=404, detail="One or more images were not found")
+
+    recovered_bytes = sum(image.file_size for image in images)
+    for image in images:
+        storage.delete(image.thumbnail_key)
+        storage.delete(image.object_key)
+    db.add(
+        ActivityLog(
+            user_id=user.id,
+            action="images.bulk_deleted",
+            details={
+                "count": len(images),
+                "recovered_bytes": recovered_bytes,
+                "filenames": [image.original_filename for image in images],
+            },
+        )
+    )
+    for image in images:
+        await db.delete(image)
+    await db.commit()
+    return BulkDeleteResponse(
+        deleted=len(images),
+        recovered_bytes=recovered_bytes,
+        message=f"Deleted {len(images)} image{'s' if len(images) != 1 else ''}",
     )
 
 
@@ -360,6 +506,7 @@ async def get_image(image_id: UUID, user: CurrentUser, db: Database) -> ImageDet
         error_message=image.error_message,
         exif_timestamp=image.exif_timestamp,
         camera_model=image.camera_model,
+        ocr_text=image.ocr_text,
         exact_duplicate_of=duplicate,
         similar_images=await similar_for(image, db),
     )
