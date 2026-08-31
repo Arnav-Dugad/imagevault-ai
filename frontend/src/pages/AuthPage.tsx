@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
 import { ArrowRight, Boxes, Eye, EyeOff } from "lucide-react";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "../components/ui";
 import { ApiError } from "../lib/api";
@@ -15,6 +15,13 @@ export function AuthPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    setForm({ name: "", email: "", password: "" });
+    setShowPassword(false);
+    setBusy(false);
+    setError("");
+  }, [pathname]);
 
   if (user) return <Navigate to="/" replace />;
   async function submit(event: FormEvent) {

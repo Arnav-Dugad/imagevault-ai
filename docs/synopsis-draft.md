@@ -1,8 +1,8 @@
-# Project synopsis draft
+# ImageVault AI project synopsis
 
 ## Project title
 
-**ImageVault AI — Intelligent Private Cloud Image Storage, Duplicate Detection & Visual Similarity Platform**
+**ImageVault AI — Intelligent Private-Cloud Media Storage, Duplicate Detection, Search, and Organization Platform**
 
 ## Student details
 
@@ -18,27 +18,43 @@
 
 ## Synopsis / abstract
 
-ImageVault AI is a self-hosted private-cloud image-management platform designed to reduce duplicate storage and improve organization of personal media. Users upload images to S3-compatible MinIO object storage while PostgreSQL stores user-scoped metadata, processing state, cryptographic hashes, and pgvector embeddings. SHA-256 identifies byte-identical files before a background worker performs more expensive thumbnail, perceptual-hash, and OpenCLIP visual-similarity processing locally.
+ImageVault AI is a self-hosted private-cloud platform for securely storing, searching, analyzing, and organizing personal media. It accepts batches of standard photographs, animated images, HEIC/HEIF files, common camera RAW formats, and videos. Originals are stored privately in S3-compatible MinIO object storage, while PostgreSQL stores account-scoped metadata, processing state, cryptographic hashes, quality measurements, OCR results, face information, and pgvector embeddings. SHA-256 identifies byte-identical files before a background Celery worker performs more expensive local analysis.
 
-The project emphasizes Cloud Computing and DevOps. The React client, FastAPI service, Redis job queue, AI worker, PostgreSQL/pgvector, MinIO, Nginx, Prometheus, and Grafana services are containerized with Docker. Docker Compose provides the primary laptop deployment, while Kubernetes on Minikube demonstrates orchestration, probes, persistent volumes, configuration, secrets, resource controls, and horizontal scaling. Terraform defines the local Kubernetes infrastructure, GitHub Actions validates changes, and Prometheus/Grafana provide monitoring and visualization. The required system uses only free/open-source software and needs no external AI API or public-cloud subscription.
+The intelligence pipeline combines pHash, dHash, wHash, color and geometry evidence, sampled-frame OpenCLIP embeddings, and pgvector cosine retrieval to identify exact copies, edited or recompressed near-duplicates, and semantically related media. Natural-language search allows queries such as “person wearing white near a car.” Local multilingual Tesseract OCR extracts searchable text and word-level layout from screenshots and documents. The system also calculates sharpness, exposure, resolution, screenshot readability, and overall quality scores; generates smart labels; selects the best photo from bursts; groups events; and builds private people albums using local YuNet face detection and SFace embeddings.
+
+People albums are persistent and user-controlled. Users can rename, merge, split, ignore, or restore people and provide private “same person” or “different person” feedback. This feedback remains in the local database, preserves explicit identity decisions across re-analysis, and adapts the account’s clustering threshold. The system does not contact a public face-recognition service and does not attempt to discover real-world identities.
+
+The project emphasizes Cloud Computing and DevOps as much as artificial intelligence. The React client, FastAPI API, Redis queue, Celery media worker, PostgreSQL/pgvector, MinIO, Nginx, Prometheus, and Grafana services are containerized with Docker. Docker Compose provides the primary laptop deployment, while Kubernetes on Minikube demonstrates orchestration, health probes, persistent volumes, configuration, secrets, resource controls, and horizontal API scaling. Terraform defines the local Kubernetes infrastructure, GitHub Actions validates changes, and Prometheus/Grafana provide metrics and operational dashboards. All required components use free/open-source software and no commercial AI API or paid public-cloud subscription is required.
 
 ## Problem statement
 
-People accumulate phone photographs, WhatsApp images, screenshots, downloads, edited versions, and repeated backups. This produces byte-identical copies, resized or recompressed versions, wasted capacity, and a manual cleanup problem. Filename comparison is insufficient: identical bytes can have different names, while visually equivalent images can have different bytes. Many storage products retain these copies without presenting clear exact-versus-near-duplicate evidence.
+Personal media collections grow through phone cameras, messaging applications, screenshots, downloads, burst photography, edited exports, and repeated backups. This creates byte-identical duplicates, resized or recompressed copies, visually similar shots, weak or blurry photographs, and large collections that are difficult to search manually. Filename comparison is unreliable because identical files can have different names, while visually equivalent files can have different bytes. Important text inside screenshots and documents is also invisible to ordinary filename search.
 
-ImageVault AI addresses the problem with cryptographic hashing and local visual embeddings inside a demonstrable private-cloud architecture. It does not claim perfect AI classification and never deletes content automatically.
+Existing organization methods often separate duplicate cleanup, visual search, OCR, face grouping, quality review, and infrastructure monitoring into unrelated tools or external services. This can increase privacy exposure, operating cost, and management complexity. ImageVault AI addresses these problems with local media intelligence inside a reproducible private-cloud architecture. AI results are advisory, user corrections are retained, and deletion always requires explicit confirmation.
 
-## Proposed solution
+## Objectives
 
-1. **Authentication module:** self-hosted registration/login and user isolation.
-2. **Image storage module:** validated batch intake, UUID object keys, MinIO originals/thumbnails, PostgreSQL metadata.
-3. **Exact duplicate module:** per-user SHA-256 lookup with 100% byte-equality evidence.
-4. **AI visual similarity module:** pHash, normalized OpenCLIP embeddings, pgvector cosine retrieval.
-5. **Duplicate review module:** grouped evidence and explicit deletion confirmation.
-6. **Analytics dashboard:** image, storage, savings, format, activity, and queue information.
-7. **Cloud infrastructure module:** Docker Compose and Minikube/Kubernetes.
-8. **DevOps automation module:** Terraform and GitHub Actions.
-9. **Monitoring module:** health probes, structured logging, Prometheus, and Grafana.
+1. Build a secure, account-isolated private media vault using PostgreSQL and MinIO.
+2. Detect byte-identical, perceptual, and visually related media using explainable multi-signal evidence.
+3. Support natural-language search, multilingual OCR, document understanding, smart labels, and quality scoring without external AI APIs.
+4. Organize collections into events, burst best-shots, and private user-correctable people albums.
+5. Index photographs, animated images, HEIC/HEIF, camera RAW files, and representative video frames.
+6. Process uploads asynchronously with automatic GPU use when supported and safe CPU fallback.
+7. Demonstrate containerization, orchestration, infrastructure as code, CI/CD, monitoring, health checks, and structured logging.
+8. Preserve user control through explainable results, guarded bulk actions, and no automatic deletion.
+
+## Proposed solution and modules
+
+1. **Authentication and isolation:** local registration/login, Argon2 password hashing, expiring JWT access, and ownership checks on every private query.
+2. **Media intake and object storage:** signature and size validation, batch upload, UUID object keys, private MinIO originals, generated WebP thumbnails, and separate limits for photos and large media.
+3. **Exact and visual duplicate intelligence:** SHA-256, three perceptual hashes, color histograms, frame geometry, multi-view/multi-frame OpenCLIP vectors, pgvector retrieval, connected duplicate families, and explainable confidence evidence.
+4. **Search and local understanding:** filename search, natural-language semantic search, multilingual OCR, positioned word layout, document-type inference, and smart labels.
+5. **Photo-quality intelligence:** sharpness, exposure, resolution, screenshot readability, overall quality, and burst best-photo selection.
+6. **Private people intelligence:** local face detection/embedding, persistent albums, rename, merge, split, ignore/restore, and private same/different-person feedback learning.
+7. **Smart albums:** automatic event albums using capture time and visual relationships, people albums, and burst groups with recommended keepers.
+8. **Gallery and review experience:** responsive gallery, media details, video playback, OCR details, similarity evidence, multi-selection, guarded bulk deletion, animated navigation, and accessible validation feedback.
+9. **Analytics and observability:** storage/savings/activity dashboards, health and readiness checks, queue/model state, structured logs, Prometheus metrics, and provisioned Grafana dashboards.
+10. **Cloud and DevOps platform:** Docker Compose, Nginx gateway, Kubernetes/Minikube manifests, Terraform, GitHub Actions, persistent volumes, secrets, probes, resource limits, and optional scaling.
 
 ## Tools and technologies
 
@@ -47,39 +63,70 @@ ImageVault AI addresses the problem with cryptographic hashing and local visual 
 | Private cloud / orchestration | Kubernetes, Minikube |
 | Containerization | Docker, Docker Compose |
 | Object storage | MinIO |
-| Database / vector search | PostgreSQL, pgvector |
-| Backend / queue | FastAPI, Celery, Redis |
-| Frontend | React, TypeScript, Vite |
-| Local AI / image processing | OpenCLIP, PyTorch, Pillow, ImageHash |
+| Database / vector search | PostgreSQL 16, pgvector |
+| Backend / asynchronous jobs | FastAPI, SQLAlchemy, Alembic, Celery, Redis |
+| Frontend | React, TypeScript, Vite, Tailwind CSS, Framer Motion |
+| Visual AI | OpenCLIP, PyTorch, OpenCV YuNet and SFace |
+| OCR / image processing | Tesseract OCR, Pillow, pillow-heif, ImageHash, rawpy/LibRaw |
+| Video processing | FFmpeg, FFprobe |
 | Infrastructure as Code | Terraform |
 | CI/CD | GitHub Actions |
 | Monitoring / visualization | Prometheus, Grafana OSS |
-| Reverse proxy | Nginx |
+| Gateway | Nginx |
 | Version control | Git, GitHub |
 
-## Expected outcomes
+## System workflow
 
-- A working private image vault with local authentication and user isolation.
-- Clear separation of byte-identical, perceptual, and embedding-based evidence.
-- Asynchronous CPU-compatible image processing with optional CUDA acceleration.
-- A reproducible multi-container platform and Minikube deployment.
-- Declarative infrastructure, CI validation, health checks, metrics, dashboards, and structured logs.
-- A repeatable live demonstration using copyright-safe generated images.
-- Actual measurements and screenshots to be collected after final deployment: `[results placeholder]`.
+1. The authenticated user selects one or more supported media files.
+2. The API validates content signatures and limits, generates private object keys, calculates SHA-256, and stores metadata and the original.
+3. Exact byte matches are identified immediately; other media is queued through Redis.
+4. The Celery worker decodes photos or representative animation/video frames and creates a safe thumbnail.
+5. Local OCR, quality analysis, smart labeling, face analysis, hashes, and OpenCLIP embeddings are generated.
+6. PostgreSQL/pgvector retrieves candidates and stores explainable similarity relationships.
+7. The UI refreshes gallery, duplicate review, search, smart albums, and status information.
+8. User feedback updates persistent people decisions; deletion occurs only after explicit confirmation.
+
+## Expected and achieved outcomes
+
+- A working private media vault with local authentication and strict account isolation.
+- Batch-aware exact, near-duplicate, and semantic media matching with understandable evidence.
+- Natural-language retrieval plus local multilingual OCR and document-layout data.
+- More honest photo-quality scoring and automatic best-shot selection.
+- Persistent, private, user-correctable people albums.
+- Support for standard/animated images, HEIC/HEIF, common RAW formats, and videos.
+- Asynchronous processing with optional CUDA acceleration and automatic CPU fallback.
+- A reproducible multi-container platform with Kubernetes and Terraform alternatives.
+- CI validation, health checks, Prometheus metrics, Grafana dashboards, and structured logs.
+- A zero-additional-software-cost academic deployment based on free/open-source components.
+- Current verification: 32 backend tests, frontend unit tests, strict lint/type checks, production builds, Compose validation, migration validation, generated GIF/HEIC/video/OCR runtime smoke tests, and direct Playwright MCP desktop/mobile workflow QA covering authentication, navigation, search, upload validation, batch duplicates, albums, guarded deletion, status, and settings.
+
+## Privacy, security, and limitations
+
+Images, OCR text, embeddings, and face feedback remain inside the self-hosted deployment. Passwords are stored as Argon2 hashes; objects use private UUID keys and time-limited signed links; all image, album, similarity, and deletion queries enforce ownership. Metrics and logs exclude image content, tokens, passwords, and embeddings.
+
+AI similarity, OCR, quality scores, labels, and face clustering can still make mistakes and should be treated as decision support. RAW compatibility depends on LibRaw support for the camera format, and video indexing uses representative frames rather than complete scene-by-scene transcription. The default local deployment uses HTTP and single-instance data services, so TLS, automated backups, secret rotation, malware scanning, and high availability would be required before public or production use.
 
 ## Tentative 12-week timeline
 
 | Week | Work |
 |---|---|
-| 1–2 | Requirements, literature/product research, scope and cost constraints |
-| 3–4 | Architecture, proof of concept, repository and Compose foundation |
-| 4–5 | System/database/API design and cloud architecture review |
-| 5–6 | UI/UX, authentication, backend APIs, PostgreSQL and MinIO integration |
-| 4–7 | Core implementation, tests, hashes, AI worker, containerization |
-| 7–8 | Full integration, error handling, security and performance checks |
-| 8–9 | Minikube, Kubernetes, Terraform, CI/CD, Prometheus and Grafana |
-| 9–10 | Release candidate, local deployment, debugging and demo rehearsal |
-| 11 | Documentation, screenshots, test evidence, measurements and slides |
-| 12 | Final demonstration and viva preparation |
+| 1–2 | Requirements, problem study, scope, privacy, and cost constraints |
+| 3–4 | Architecture, repository, database/object model, and Compose foundation |
+| 4–5 | Authentication, APIs, PostgreSQL/pgvector, MinIO, and queue integration |
+| 5–7 | UI/UX, duplicate intelligence, natural-language search, OCR, labels, and quality scoring |
+| 7–8 | Face clustering, feedback controls, smart albums, rich media, and GPU fallback |
+| 8–9 | Security review, error handling, automated tests, and performance checks |
+| 9–10 | Minikube, Kubernetes, Terraform, CI/CD, Prometheus, and Grafana |
+| 10–11 | Release hardening, browser QA, measurements, screenshots, and demo rehearsal |
+| 11–12 | Final report, presentation, deployment evidence, and viva preparation |
 
-Activities overlap deliberately so infrastructure and tests evolve alongside application code.
+Activities overlap deliberately so infrastructure, security, documentation, and tests evolve alongside application functionality.
+
+## Future scope
+
+- Undoable encrypted trash and scheduled retention policies.
+- Video scene segmentation and local speech transcription.
+- Larger offline OCR language packs and handwriting recognition.
+- Private geospatial/map albums from optional GPS metadata.
+- Encrypted backup/export and disaster-recovery automation.
+- A mobile client, multi-node workers, and production-grade GPU scheduling.
