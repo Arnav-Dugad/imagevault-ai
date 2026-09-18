@@ -1,5 +1,7 @@
 # ImageVault AI architecture
 
+> The original local deployment is described below. For Azure Blob/AWS S3, VM hosting, private access, migration and credit controls, see [cloud-deployment.md](cloud-deployment.md). Cloud mode stores media in your chosen provider and runs self-hosted AI on your laptop or VM.
+
 ## Architectural intent
 
 ImageVault AI is an intelligent image-management workload deployed on a self-hosted private-cloud platform. The boundary is intentionally local: the application does not send images or embeddings to an external AI or storage API. Services communicate over a private container/Kubernetes network and expose only the gateway, demonstration consoles, and monitoring interfaces.

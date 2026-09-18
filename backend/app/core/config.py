@@ -1,5 +1,7 @@
 from functools import lru_cache
+from typing import Literal
 
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,6 +18,14 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://imagevault:imagevault@postgres:5432/imagevault"
     redis_url: str = "redis://redis:6379/0"
+
+    storage_provider: Literal["minio", "azure", "s3"] = "minio"
+    azure_storage_account_url: str = ""
+    azure_storage_connection_string: str = ""
+    azure_storage_container: str = "imagevault"
+    s3_bucket: str = ""
+    s3_region: str = "us-east-1"
+    registration_enabled: bool = True
 
     minio_endpoint: str = "minio:9000"
     minio_public_endpoint: str = "localhost:9000"
@@ -60,7 +70,7 @@ class Settings(BaseSettings):
     perceptual_hash_threshold: int = 8
     similarity_candidate_limit: int = 60
     perceptual_prefilter_distance: int = 18
-    presigned_url_expire_minutes: int = 30
+    presigned_url_expire_minutes: int = Field(default=30, ge=1, le=60)
     metrics_port: int = 9101
     semantic_search_timeout_seconds: int = 30
     semantic_search_min_score: float = 0.16
@@ -77,6 +87,22 @@ class Settings(BaseSettings):
     face_cluster_threshold: float = 0.30
     event_gap_hours: int = 12
     burst_gap_seconds: int = 12
+
+    @model_validator(mode="after")
+    def validate_cloud_settings(self):
+        if self.storage_provider == "azure":
+            if not self.azure_storage_connection_string and not self.azure_storage_account_url:
+                raise ValueError("Azure storage requires an account URL or connection string")
+            if self.azure_storage_account_url and not self.azure_storage_account_url.startswith("https://"):
+                raise ValueError("Azure storage account URL must use HTTPS")
+        if self.storage_provider == "s3" and not self.s3_bucket:
+            raise ValueError("S3 storage requires S3_BUCKET")
+        if self.environment == "production":
+            if len(self.jwt_secret) < 32 or self.jwt_secret.startswith("REPLACE_"):
+                raise ValueError("Production requires a random JWT_SECRET of at least 32 characters")
+            if self.debug:
+                raise ValueError("DEBUG must be disabled in production")
+        return self
 
     @property
     def cors_origin_list(self) -> list[str]:

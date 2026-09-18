@@ -6,6 +6,7 @@ import structlog
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from starlette.concurrency import run_in_threadpool
 
 from app import __version__
 from app.api import albums, analytics, auth, health, images
@@ -22,10 +23,10 @@ logger = structlog.get_logger("imagevault.api")
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     try:
-        storage.ensure_bucket()
-        logger.info("object_storage_ready", bucket=settings.minio_bucket)
-    except Exception as exc:
-        logger.warning("object_storage_startup_failed", error=str(exc))
+        await run_in_threadpool(storage.ensure_bucket)
+        logger.info("object_storage_ready", provider=settings.storage_provider)
+    except Exception:
+        logger.warning("object_storage_startup_failed", provider=settings.storage_provider)
     yield
 
 

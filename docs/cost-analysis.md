@@ -1,5 +1,7 @@
 # Cost analysis
 
+> The original local deployment is described below. For Azure Blob/AWS S3, VM hosting, private access, migration and credit controls, see [cloud-deployment.md](cloud-deployment.md). Cloud mode stores media in your chosen provider and runs self-hosted AI on your laptop or VM.
+
 The required demonstration uses existing student hardware and local free/open-source software. “₹0” means no additional software license, AI API, database, object-storage, monitoring, or public-cloud bill. It does not claim that laptop hardware, electricity, or internet access are literally free.
 
 | Component | Product | Required project expenditure |

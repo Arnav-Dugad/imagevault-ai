@@ -1,8 +1,22 @@
 # ImageVault AI
 
-> Intelligent private-cloud image storage, exact duplicate detection, and local visual similarity—built as a Cloud Computing & DevOps mini-project with no additional software or cloud-service expenditure.
+> Intelligent private image storage with Azure Blob, AWS S3 or local MinIO, exact duplicate detection, and self-hosted visual similarity.
 
-ImageVault AI stores original images in private S3-compatible MinIO object storage, keeps metadata and 512-dimensional vectors in PostgreSQL/pgvector, and processes new images asynchronously with a CPU-compatible OpenCLIP worker. Docker, Kubernetes, Terraform, GitHub Actions, Nginx, Prometheus, and Grafana make the cloud platform—not the model alone—the academic contribution.
+ImageVault AI stores original images in private Azure Blob Storage, AWS S3, or S3-compatible MinIO object storage, keeps metadata and 512-dimensional vectors in PostgreSQL/pgvector, and processes new images asynchronously with a CPU-compatible OpenCLIP worker. Docker, Kubernetes, Terraform, GitHub Actions, Nginx, Prometheus, and Grafana make the cloud platform—not the model alone—the academic contribution.
+
+## Deploy with student cloud credits
+
+**Recommended: Azure for Students.** Use private Azure Blob Storage with processing on your laptop to conserve credits, or host the CPU stack on an Azure VM to run with your laptop off. AWS S3 and EC2 roles are also supported.
+
+Start with [the complete cloud setup guide](docs/cloud-deployment.md): account setup, private storage, secrets, managed identity, standalone Compose, optional HTTPS, existing-data migration, backups and shutdown. The dedicated cloud stack omits MinIO/monitoring servers, uses bounded logs, and closes registration by default. Cloud resources consume credits; they are not indefinitely free.
+
+```bash
+cp .env.cloud.example .env.cloud
+# Configure cloud credentials and independent database/JWT secrets as documented.
+docker compose --env-file .env.cloud -f docker-compose.cloud.yml up -d --build
+```
+
+The remaining quick-start instructions describe the original **local MinIO** option.
 
 ## What it demonstrates
 
@@ -182,7 +196,7 @@ kubectl get hpa -n imagevault
 
 ## Terraform Infrastructure as Code
 
-Terraform manages only the selected local Kubernetes context. There are no AWS, Azure, or Google providers.
+The Terraform files in `infra/terraform` manage the selected local Kubernetes context. Azure storage provisioning is available separately in `infra/cloud/storage.bicep`; see the cloud guide.
 
 ```powershell
 cd infra/terraform
@@ -266,7 +280,7 @@ If the CUDA wheel index is unsuitable for the installed driver, keep the support
 
 ## Security and privacy
 
-- Argon2 password hashes, expiring signed JWTs, private MinIO buckets, UUID object names, and signed time-limited previews.
+- Argon2 password hashes, expiring signed JWTs, private object storage, UUID object names, and signed time-limited previews.
 - Ownership filters on every image, dashboard, duplicate, similarity, and delete query.
 - MIME and image-decoder validation, upload and batch limits, request IDs, structured logs, CORS allowlists, and Nginx rate limits.
 - Kubernetes secrets and ignored local environment files; no committed runtime credential.
@@ -343,6 +357,8 @@ Add evidence after running the final environment; do not fabricate it:
 - `[Measurement placeholder: CPU/GPU embedding benchmark]`
 
 ## Cost
+
+The figures below apply only to the local MinIO deployment. Azure/AWS storage and VM deployments use credits or paid usage; see [cloud cost controls](docs/cloud-deployment.md#stop-costs-after-a-demo).
 
 Software cost: **₹0**  
 Required local cloud bill: **₹0**  

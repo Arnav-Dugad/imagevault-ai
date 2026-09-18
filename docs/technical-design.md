@@ -1,5 +1,7 @@
 # ImageVault AI technical design document
 
+> The original local deployment is described below. For Azure Blob/AWS S3, VM hosting, private access, migration and credit controls, see [cloud-deployment.md](cloud-deployment.md). Cloud mode stores media in your chosen provider and runs self-hosted AI on your laptop or VM.
+
 ## Document control
 
 - Version: 1.0 draft

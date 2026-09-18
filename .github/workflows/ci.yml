@@ -69,6 +69,12 @@ jobs:
         run: cp .env.example .env
       - name: Validate Docker Compose
         run: docker compose config --quiet
+      - name: Validate cloud Compose and HTTPS override
+        run: |
+          docker compose --env-file .env.cloud.example -f docker-compose.cloud.yml config --quiet
+          docker compose --env-file .env.cloud.example -f docker-compose.cloud.yml -f docker-compose.cloud-tls.yml config --quiet
+      - name: Validate Azure storage template
+        run: az bicep build --file infra/cloud/storage.bicep --outfile /tmp/imagevault-storage.json
       - name: Validate Dockerfiles
         run: |
           docker build --check -f backend/Dockerfile backend
