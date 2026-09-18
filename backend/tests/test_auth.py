@@ -39,3 +39,20 @@ async def test_duplicate_email_and_bad_password_are_rejected(client):
 async def test_protected_route_requires_token(client):
     response = await client.get("/api/images")
     assert response.status_code == 401
+
+
+
+async def test_closed_registration_still_allows_login(client, monkeypatch):
+    from app.core.config import get_settings
+    from tests.conftest import create_user
+
+    await create_user(client)
+    monkeypatch.setattr(get_settings(), "registration_enabled", False)
+    blocked = await client.post('/api/auth/register', json={
+        'email': 'new@example.com', 'display_name': 'New User', 'password': 'strong-password',
+    })
+    assert blocked.status_code == 403
+    login = await client.post('/api/auth/login', json={
+        'email': 'student@example.com', 'password': 'strong-password',
+    })
+    assert login.status_code == 200

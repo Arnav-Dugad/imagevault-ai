@@ -7,6 +7,8 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import and_, asc, desc, func, or_, select
 
+from starlette.concurrency import run_in_threadpool
+
 from app.api.dependencies import CurrentUser, Database
 from app.core.config import get_settings
 from app.metrics import EXACT_DUPLICATES, IMAGE_UPLOADS, UPLOADED_BYTES
@@ -109,7 +111,7 @@ async def upload_images(
             )
             image_id = uuid4()
             original_key, thumbnail_key = object_keys(user.id, image_id, mime_type)
-            storage.put_bytes(original_key, data, mime_type)
+            await run_in_threadpool(storage.put_bytes, original_key, data, mime_type)
             stored_keys.append(original_key)
 
             exact = duplicate is not None
@@ -165,7 +167,7 @@ async def upload_images(
         await db.rollback()
         for key in stored_keys:
             try:
-                storage.delete(key)
+                await run_in_threadpool(storage.delete, key)
             except Exception:
                 logger.exception("Failed to clean up object after upload rollback")
         raise
@@ -417,8 +419,8 @@ async def bulk_delete_images(
 
     recovered_bytes = sum(image.file_size for image in images)
     for image in images:
-        storage.delete(image.thumbnail_key)
-        storage.delete(image.object_key)
+        await run_in_threadpool(storage.delete, image.thumbnail_key)
+        await run_in_threadpool(storage.delete, image.object_key)
     db.add(
         ActivityLog(
             user_id=user.id,
@@ -533,8 +535,8 @@ async def delete_image(
     if not confirm:
         raise HTTPException(status_code=400, detail="Explicit deletion confirmation is required")
     image = await owned_image(image_id, user.id, db)
-    storage.delete(image.thumbnail_key)
-    storage.delete(image.object_key)
+    await run_in_threadpool(storage.delete, image.thumbnail_key)
+    await run_in_threadpool(storage.delete, image.object_key)
     db.add(
         ActivityLog(
             user_id=user.id,

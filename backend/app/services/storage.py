@@ -62,4 +62,15 @@ class ObjectStorage:
         return self.public_client.presigned_get_object(self.bucket, key, expires=self.expiry)
 
 
-storage = ObjectStorage()
+def create_storage():
+    provider = get_settings().storage_provider
+    if provider == "azure":
+        from app.services.cloud_storage import AzureBlobStorage
+        return AzureBlobStorage()
+    if provider == "s3":
+        from app.services.cloud_storage import S3Storage
+        return S3Storage()
+    return ObjectStorage()
+
+
+storage = create_storage()

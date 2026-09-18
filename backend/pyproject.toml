@@ -9,6 +9,9 @@ description = "Private-cloud image storage and local visual similarity API"
 requires-python = ">=3.11,<3.14"
 dependencies = [
   "alembic==1.15.2",
+  "azure-identity==1.21.0",
+  "azure-storage-blob==12.25.1",
+  "boto3==1.38.23",
   "asyncpg==0.30.0",
   "celery[redis]==5.5.2",
   "email-validator==2.2.0",

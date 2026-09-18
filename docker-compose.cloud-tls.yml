@@ -1,0 +1,26 @@
+# Optional override on a VM with DNS + ports 80/443 open.
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    environment:
+      PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME:?Set a DNS hostname pointing to your VM}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/cloud/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      nginx:
+        condition: service_healthy
+    networks: [vault]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+volumes:
+  caddy-data:
+  caddy-config:

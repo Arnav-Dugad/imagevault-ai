@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Response, status
 from redis.asyncio import Redis
 from sqlalchemy import func, select, text
+from starlette.concurrency import run_in_threadpool
 
 from app.api.dependencies import CurrentUser, Database
 from app.core.config import get_settings
@@ -22,10 +23,10 @@ async def component_status(db: Database) -> tuple[dict[str, ComponentHealth], in
         components["database"] = ComponentHealth(status="unhealthy", detail="Connection failed")
 
     try:
-        healthy = storage.healthy()
+        healthy = await run_in_threadpool(storage.healthy)
         components["object_storage"] = ComponentHealth(
             status="healthy" if healthy else "unhealthy",
-            detail="MinIO bucket available" if healthy else "Bucket unavailable",
+            detail=f"{settings.storage_provider.upper()} storage available" if healthy else "Storage unavailable",
         )
     except Exception:
         components["object_storage"] = ComponentHealth(status="unhealthy", detail="Connection failed")
