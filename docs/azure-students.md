@@ -192,6 +192,9 @@ Every successful `main` CI run publishes an immutable
 `vVERSION-build.RUN_NUMBER` release with ZIP, TAR.GZ, SHA256SUMS, and source metadata.
 Failed checks publish nothing. Re-running the same run uploads to the same release.
 Pull requests do not publish. Bump app versions together when making a feature release.
+The `codex/azure-student-website` review branch publishes a prerelease on passing
+push builds so the change can be downloaded before merge; it does not replace the
+latest stable release. To deploy a prerelease, pass its tag as the script's fourth argument.
 The direct [latest downloads](https://github.com/Arnav-Dugad/imagevault-ai/releases/latest)
 link is included in the website's System page and README. These are website/server
 bundles for people deploying their own copy; visitors only need a browser.

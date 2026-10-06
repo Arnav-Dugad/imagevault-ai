@@ -2,7 +2,7 @@ name: ImageVault CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, codex/azure-student-website]
   pull_request:
   workflow_dispatch:
 
@@ -99,7 +99,7 @@ jobs:
   release:
     name: Publish website/server downloads
     needs: [backend, frontend, infrastructure]
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/azure-student-website')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -124,6 +124,10 @@ jobs:
         run: |
           version=$(node -p "JSON.parse(require('fs').readFileSync('frontend/package.json')).version")
           tag="v${version}-build.${GITHUB_RUN_NUMBER}"
+          release_flags=(--latest)
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            release_flags=(--prerelease --latest=false)
+          fi
           cat > /tmp/release-notes.md <<'NOTES'
           Download **imagevault-ai.zip** or **imagevault-ai.tar.gz** to deploy your own ImageVault website.
           These are complete website/server bundles with compiled frontend, server source, Docker configuration, and Azure for Students deployment files. Visitors use the deployed HTTPS website in a browser; no desktop app is required.
@@ -135,5 +139,5 @@ jobs:
           if gh release view "$tag" > /dev/null 2>&1; then
             gh release upload "$tag" release-dist/* --clobber
           else
-            gh release create "$tag" release-dist/* --target "$GITHUB_SHA" --title "ImageVault AI ${version} · build ${GITHUB_RUN_NUMBER}" --notes-file /tmp/release-notes.md --latest
+            gh release create "$tag" release-dist/* --target "$GITHUB_SHA" --title "ImageVault AI ${version} · build ${GITHUB_RUN_NUMBER}" --notes-file /tmp/release-notes.md "${release_flags[@]}"
           fi
