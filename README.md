@@ -1,383 +1,85 @@
 # ImageVault AI
 
-> Private image and video storage, duplicate detection, people albums, OCR, and visual search — deploy on Azure for Students or run your own local copy.
+Private photo storage and duplicate review, built for a simple classroom demonstration.
+Use the deployed website in any modern browser.
 
-**[Download website/server bundle](https://github.com/Arnav-Dugad/imagevault-ai/releases/latest)** · **[Deployment guide](INSTALL.md)** · **[Azure for Students setup](docs/azure-students.md)**
+**[Download website/server bundle](https://github.com/Arnav-Dugad/imagevault-ai/releases/latest)** · **[Azure setup](docs/azure-students.md)** · **[Five-minute presentation](docs/demo-script.md)**
 
-## Azure for Students
+## One primary deployment
 
-The Azure deployment runs the entire app on an Ubuntu VM with private **Azure Blob Storage**.
-Your laptop can be turned off. It includes managed identity (no storage account keys),
-short-lived read-only signed previews, HTTPS, invitation-based signup, per-account
-upload quotas, and daily VM shutdown. PostgreSQL/pgvector, Redis, and one CPU AI
-worker stay on the VM to avoid extra managed-service costs. Cloud monitoring
-containers and MinIO are omitted from this deployment.
+Azure for Students hosts an Ubuntu VM and private Azure Blob Storage. Five containers
+run Caddy (HTTPS and the React website), FastAPI, a Celery worker, PostgreSQL/pgvector,
+and Redis. Managed identity avoids storage account keys. Signed previews expire;
+invitation-based signup and upload quotas control access and usage.
 
-Azure for Students offers $100 credit for 12 months and selected free allowances;
-the default 8 GiB VM **uses that credit**. It is not an unlimited free hosting plan.
-Keep your subscription spending limit enabled, check regional pricing/quota,
-and stop/deallocate the VM between demos. Follow the
-[step-by-step cloud guide](docs/azure-students.md) for deployment, migration, backups,
-and cost controls. No Azure account or live deployment is bundled with the source.
+The default 8 GiB CPU VM uses student credit. This is not unlimited free hosting.
+Keep your spending limit enabled, check regional pricing and quota, and deallocate
+compute between demos. Disks, public IP and stored data can still incur charges.
+See [cost controls](docs/cost-analysis.md). A live Azure account is not included.
 
-Every passing main-branch CI run publishes ZIP and TAR.GZ application bundles with
-the compiled frontend, server code, Docker setup, Azure templates, and SHA-256
-checksums. Visitors use the deployed website in their browser.
+Start with [INSTALL.md](INSTALL.md) and the [Azure deployment guide](docs/azure-students.md).
+Bicep provisions the infrastructure; Docker Compose runs the application. No Windows
+application is built or needed.
 
-ImageVault AI stores original images in private Azure Blob Storage or S3-compatible MinIO, keeps metadata and 512-dimensional vectors in PostgreSQL/pgvector, and processes new images asynchronously with a CPU-compatible OpenCLIP worker. Docker, Azure Bicep, Kubernetes, Terraform, GitHub Actions, Nginx, Prometheus, and Grafana support cloud deployment and local academic demonstrations.
+## Four main pages
 
-## What it demonstrates
+- **Upload:** validate and upload photos to private storage.
+- **Gallery:** browse originals, search, and inspect image details.
+- **Duplicate review:** compare evidence and confirm cleanup.
+- **Dashboard:** view uploads, storage and potential exact-copy savings.
 
-- Local account registration and JWT login with Argon2 password hashing.
-- User-isolated batch upload for JPG, PNG, WebP, GIF, HEIC/HEIF, common camera RAW, and common video files, with progress and cancellation.
-- Byte-for-byte duplicate detection through SHA-256 before expensive AI inference.
-- Multi-signal matching with pHash, dHash, wHash, color histograms, frame geometry, and multi-view local OpenCLIP ViT-B/32 embeddings.
-- Batch intelligence reports, connected duplicate families, explainable evidence, recommended keepers, confidence filters, and guarded bulk cleanup.
-- Persistent private people albums with rename, merge, split, ignore, and same-person/different-person feedback that tunes each account's matching threshold.
-- Local multilingual OCR with word-level layout, searchable text, document classification, smart labels, photo-quality scoring, events, and burst best-shot albums.
-- Private MinIO originals, generated WebP thumbnails, metadata, gallery filters, image details, and explicit deletion.
-- Live storage analytics, health/readiness/liveness endpoints, Prometheus metrics, and an automatically provisioned Grafana dashboard.
-- A multi-service Docker Compose deployment plus Minikube/Kubernetes and Terraform alternatives.
-- Free GitHub Actions validation for Python, React, container definitions, Kubernetes, and Terraform.
+**Advanced** contains smart albums, system status and settings. People albums, OCR,
+quality scores, semantic search and supported video/RAW formats remain available.
+The [architecture guide](docs/architecture.md) explains the services and pipeline.
 
-## Architecture
+## Reliable detection, with honest limits
 
-```mermaid
-flowchart LR
-    B[Browser] --> N[Nginx gateway]
-    N --> F[React + TypeScript]
-    N --> A[FastAPI]
-    A --> P[(PostgreSQL + pgvector)]
-    A --> M[(MinIO objects)]
-    A --> R[(Redis queue)]
-    R --> W[Celery AI worker]
-    W --> M
-    W --> P
-    W --> C[OpenCLIP CPU / optional CUDA]
-    PR[Prometheus] --> A
-    PR --> W
-    G[Grafana] --> PR
-```
-
-The upload request assigns one batch ID, stores each object, and returns `202 Accepted`. SHA-256 identifies exact content immediately. A single worker then generates the thumbnail, safe metadata, three perceptual hashes, a normalized multi-view OpenCLIP vector, color evidence, and pgvector nearest-neighbour matches. An explainable scoring gate combines those signals, while a connected-component pass turns pairwise edges into complete visual families. AI similarity is advisory; deletion is never automatic.
-
-See [architecture.md](docs/architecture.md) and [technical-design.md](docs/technical-design.md) for the deployment, sequence, schema, security, and failure-mode designs.
-
-## Technology stack
-
-| Concern | Free/open-source implementation |
-|---|---|
-| Web | React, TypeScript, Vite, Tailwind CSS, Framer Motion, Recharts, Lucide |
-| API | FastAPI, Pydantic, SQLAlchemy, Alembic |
-| Authentication | Self-hosted PostgreSQL accounts, Argon2, expiring JWT |
-| Metadata / vector search | PostgreSQL 16 + pgvector |
-| Object storage | Azure Blob Storage with managed identity; MinIO for local deployments |
-| Async jobs | Redis + Celery |
-| Local AI/media | OpenCLIP ViT-B/32, OpenCV YuNet + SFace, multilingual Tesseract OCR, Pillow/pillow-heif, rawpy/LibRaw, FFmpeg, ImageHash |
-| Gateway | Nginx |
-| Containers / orchestration | Docker Compose, Kubernetes, Minikube |
-| Infrastructure as Code | Azure Bicep; Terraform for the local Kubernetes demonstration |
-| CI/CD | GitHub Actions |
-| Observability | Prometheus and Grafana OSS |
-
-## Prerequisites
-
-Recommended demonstration laptop: Windows 11, 16 GB RAM, at least 12 GB free disk space, and Docker Desktop using WSL2. GPU access is optional. Install:
-
-1. Git.
-2. Docker Desktop with Linux containers and Compose v2.
-3. For orchestration only: Minikube and `kubectl`.
-4. For IaC only: Terraform 1.6 or newer.
-
-The local setup needs no cloud account or commercial AI key. Azure hosting needs
-an Azure for Students subscription; use the separate cloud guide above.
-
-## Quick start with Docker Compose
-
-From PowerShell in the repository:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\bootstrap_env.ps1
-powershell -ExecutionPolicy Bypass -File .\scripts\start_imagevault.ps1
-docker compose ps
-```
-
-On Linux/macOS, copy `.env.example` to `.env` and replace every `REPLACE_...` value with independent random values before running Compose.
-
-The start script detects a usable NVIDIA GPU, attempts the CUDA worker, and automatically rebuilds/runs the supported CPU worker if CUDA cannot start. The worker also falls back to CPU after a CUDA runtime error. It downloads the selected OpenCLIP weights on its first non-exact image; expect roughly 350–600 MB and several minutes on the first CPU run. Weights are cached in the `model-cache` Docker volume and never committed.
-
-After upgrading an existing installation, open **Settings** and select **Re-analyze all** once so older files receive the new OCR, media, quality, label, and face-clustering data.
-
-| Surface | Local URL |
-|---|---|
-| ImageVault | <http://localhost> |
-| FastAPI Swagger | <http://localhost/docs> |
-| MinIO console | <http://localhost:9001> |
-| Grafana | <http://localhost:3001> |
-| Prometheus | <http://localhost:9090> |
-
-Use the MinIO access key and Grafana credentials from your private `.env`. ImageVault accounts are created on the registration screen.
-
-Useful commands:
-
-```powershell
-docker compose logs -f backend worker
-docker compose ps
-docker compose down
-```
-
-## Demo data and visible monitoring traffic
-
-Run these inside the backend development environment or a Python environment with the backend dependencies installed:
-
-```powershell
-python .\scripts\generate_demo_images.py
-python .\scripts\generate_load.py --password "YOUR_LOCAL_DEMO_PASSWORD"
-```
-
-The generated set contains an original synthetic scene, an exact byte copy, resized/compressed/edited versions, and an unrelated image. It is legally reproducible and makes the exact-versus-visual distinction visible.
-
-The guarded reset utility deletes only the authenticated account’s images and requires a typed confirmation:
-
-```powershell
-python .\scripts\reset_demo.py --email demo@imagevault.local --password "YOUR_LOCAL_DEMO_PASSWORD"
-```
-
-It does not silently remove volumes, accounts, or other users’ data.
-
-## Local development without containers
-
-The complete platform is designed for Compose. For focused component development:
-
-```powershell
-# Backend (requires PostgreSQL, MinIO, and Redis configuration)
-cd backend
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
-uvicorn app.main:app --reload
-
-# Frontend, in a second shell
-cd frontend
-npm ci
-npm run dev
-```
-
-Vite proxies `/api`, `/health`, and `/metrics` to `localhost:8000`.
-
-## Minikube deployment
-
-Allocate enough memory for the model worker:
-
-```powershell
-minikube start --cpus=4 --memory=10240 --disk-size=30g
-minikube image build -t imagevault/backend:local -f backend/Dockerfile backend
-minikube image build -t imagevault/worker:local -f backend/Dockerfile.worker backend
-minikube image build -t imagevault/frontend:local -f frontend/Dockerfile frontend
-kubectl apply -f infra/kubernetes/namespace.yaml
-```
-
-Copy `infra/kubernetes/secret.yaml.example` to the ignored path `infra/kubernetes/secret.yaml`, replace all placeholders, and apply it:
-
-```powershell
-kubectl apply -f infra/kubernetes/secret.yaml
-kubectl apply -k infra/kubernetes
-kubectl get pods -n imagevault -w
-minikube service imagevault-gateway -n imagevault --url
-```
-
-Use `minikube service minio-nodeport -n imagevault --url` and `minikube service grafana -n imagevault --url` for the other interfaces. If the public MinIO API URL differs from `localhost:30090`, update `MINIO_PUBLIC_ENDPOINT` in `config.yaml` before deployment so browser preview links resolve.
-
-Horizontal scaling demonstration:
-
-```powershell
-kubectl scale deployment imagevault-backend -n imagevault --replicas=3
-kubectl get pods -n imagevault -l app=imagevault-backend
-```
-
-Optional autoscaling (requires Metrics Server):
-
-```powershell
-minikube addons enable metrics-server
-kubectl apply -f infra/kubernetes/hpa-optional.yaml
-kubectl get hpa -n imagevault
-```
-
-## Terraform Infrastructure as Code
-
-Terraform manages only the selected local Kubernetes context. There are no AWS, Azure, or Google providers.
-
-```powershell
-cd infra/terraform
-Copy-Item terraform.tfvars.example terraform.tfvars
-# Replace every placeholder in the ignored terraform.tfvars file.
-terraform init
-terraform fmt -check -recursive
-terraform validate
-terraform plan
-terraform apply
-```
-
-When finished, `terraform destroy` removes resources managed through this path. Persistent data is deleted only when the associated PVCs are destroyed; review the plan before confirming.
-
-## CI/CD
-
-`.github/workflows/ci.yml` runs on pushes and pull requests:
-
-1. Backend dependency install, Ruff lint, and pytest.
-2. Exact frontend dependency install, npm audit, ESLint, Vitest, and production build.
-3. Docker Compose resolution and Dockerfile build checks.
-4. Kubernetes Kustomize rendering.
-5. Terraform formatting, initialization, and validation.
-
-The workflow validates a local deployment artifact. It does not publish images, spend cloud credits, or require a paid registry.
-
-## API overview
-
-| Method | Endpoint | Purpose |
+| Result | Evidence | Cleanup behavior |
 |---|---|---|
-| `POST` | `/api/auth/register` | Create a local account and receive JWT |
-| `POST` | `/api/auth/login` | Authenticate |
-| `GET` | `/api/auth/me` | Current user |
-| `POST` | `/api/images/upload` | Validated multi-image upload |
-| `POST` | `/api/images/reindex` | Upgrade existing images to the latest smart index |
-| `GET` | `/api/images` | User-scoped search, filter, sort, pagination |
-| `GET` | `/api/images/{id}` | Metadata, preview, duplicate and similarity evidence |
-| `GET` | `/api/images/{id}/similar` | Similar images |
-| `POST` | `/api/images/bulk-delete` | Guarded multi-file deletion |
-| `DELETE` | `/api/images/{id}?confirm=true` | Explicit object/thumbnail/vector deletion |
-| `GET` | `/api/albums/events`, `/bursts`, `/people` | Automatic smart albums |
-| `POST` | `/api/albums/people/{id}/rename` | Rename a private person album |
-| `POST` | `/api/albums/people/merge` | Merge selected people |
-| `POST` | `/api/albums/people/{id}/split` | Move selected faces to a new person |
-| `POST` | `/api/albums/people/{id}/ignore` | Hide or restore a person |
-| `POST` | `/api/albums/people/feedback` | Store private same/different-person feedback |
-| `GET` | `/api/duplicates` | Duplicate review groups |
-| `GET` | `/api/duplicates/review?batch_id=...` | Premium report for the whole library or one upload batch |
-| `GET` | `/api/dashboard` | Storage analytics |
-| `GET` | `/api/system/status` | Authenticated service status |
-| `GET` | `/health`, `/health/live`, `/health/ready` | Orchestrator checks |
-| `GET` | `/metrics` | Prometheus exposition |
+| Exact copy | SHA-256 of identical file bytes | Included in “Select exact”; confirmation required |
+| Near duplicate | Multiple hashes, compatible colors/frame, and aligned pixels at two scales | Manual comparison |
+| Similar content | Strong CLIP content match | Manual review; different shots may resemble one another |
 
-Interactive schemas and examples are available at `/docs`.
+Families require direct evidence between every pair; matching through a chain is
+insufficient. Fingerprint processing survives unavailable AI/OCR/face models;
+image details explain incomplete analysis and **Upgrade smart index** retries it.
+Scores indicate resemblance, not deletion-safety probabilities.
 
-## How duplicate intelligence works
+After upgrading an existing library, click **Duplicate review → Upgrade smart index**
+and let version-6 processing finish. Older unverified visual families are hidden
+until rebuilt. Back up data before upgrading or deleting photos.
 
-- **SHA-256:** equality means the bytes are identical. Confidence is shown as 100%. It does not identify a resized or recompressed version.
-- **Three perceptual hashes:** pHash captures frequency structure, dHash captures edge gradients, and wHash captures wavelet structure. Consensus is more robust to resize, recompression, format changes, and modest edits than one hash alone.
-- **Multi-view OpenCLIP + pgvector:** the worker averages a normal crop, full-frame padded view, and mirrored view into one normalized 512-dimensional embedding. PostgreSQL retrieves semantic neighbours with cosine distance.
-- **Color + geometry:** normalized color histograms and aspect-ratio agreement help reject weak semantic false positives.
-- **Explainable fusion:** near-duplicate and semantic matches use separate confidence gates, then expose AI, structure, color, frame, and plain-language reasons in the UI. Thresholds are configurable demonstrations, not universal scientific guarantees.
-- **Connected visual families:** pairwise matches are merged into non-overlapping groups, including every relevant image from the same upload batch and direct matches from the existing library.
+No real-world accuracy percentage is claimed. Crops, heavy edits, low-detail images,
+changed document text and videos need particular care. Read the
+[reliability and evaluation guide](docs/detection-reliability.md).
 
-The worker chooses CUDA when PyTorch reports it available; otherwise it uses CPU. A CUDA inference failure triggers an in-process CPU retry and records the active device in system status. CUDA is never required for correctness.
+## Present it in class
 
-The default worker image installs the smaller CPU-only PyTorch wheel. Optional NVIDIA acceleration is isolated in an override so ordinary laptops never fail on a missing GPU:
+Each release includes six original synthetic demo images: an original, exact copy,
+resized copy, compressed copy, mirrored review case and unrelated document. Warm
+the model and rehearse before class. Follow the [five-minute demo](docs/demo-script.md).
+Source checkouts can generate the samples with `python scripts/generate_demo.py`
+after installing Pillow.
 
-```powershell
-# Automatic NVIDIA detection and CPU fallback:
-powershell -ExecutionPolicy Bypass -File .\scripts\start_imagevault.ps1
+Kubernetes, Terraform and Prometheus/Grafana remain optional academic extensions.
+Use them only when the course rubric requires them. The main Azure website uses
+Compose and Bicep; [local development](docs/local-development.md) uses MinIO.
 
-# Force CPU mode when troubleshooting:
-powershell -ExecutionPolicy Bypass -File .\scripts\start_imagevault.ps1 -CpuOnly
+## Tests and downloadable releases
 
-# Inspect the active PyTorch device:
-docker compose exec worker python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU')"
-```
+GitHub Actions checks Python lint/tests, frontend audit/lint/tests/build, Compose,
+Dockerfiles, Caddy, Bicep, Kubernetes and Terraform. Every passing `main` build
+publishes ZIP and TAR.GZ bundles with the compiled website, server source,
+deployment files, synthetic samples, SHA256SUMS and source metadata. Failed checks
+publish no release. Visitors only need the deployed website URL; the download is
+for someone deploying their own copy.
 
-If the CUDA wheel index is unsuitable for the installed driver, keep the supported CPU deployment or select a compatible official PyTorch wheel index in private `.env` as `TORCH_INDEX_URL`. GPU setup is an optimization and is outside the required demo path.
+Live Azure quota, managed identity and HTTPS must be verified on a real student
+subscription. Regression tests use generated image cases and storage fakes; they
+do not establish a production accuracy benchmark.
 
-## Security and privacy
+## License
 
-- Argon2 password hashes, expiring signed JWTs, private MinIO buckets, UUID object names, and signed time-limited previews.
-- Ownership filters on every image, dashboard, duplicate, similarity, and delete query.
-- MIME and image-decoder validation, upload and batch limits, request IDs, structured logs, CORS allowlists, and Nginx rate limits.
-- Kubernetes secrets and ignored local environment files; no committed runtime credential.
-- No password, JWT, object secret, image binary, or embedding appears in metrics or structured logs.
-- Local processing is a privacy advantage, not a claim of absolute security. TLS should be added before exposing the service beyond a trusted development machine.
-
-## Tests
-
-```powershell
-cd backend
-ruff check app tests
-pytest -q
-
-cd ..\frontend
-npm ci
-npm run lint
-npm test
-npm run build
-```
-
-The backend suite covers authentication, authorization isolation, upload validation, SHA-256 and same-batch grouping, liveness, multi-hash scoring, evidence gates, thumbnails, and vector normalization. The frontend suite covers deterministic formatting utilities; primary product compilation is enforced by TypeScript, ESLint, and the production build.
-
-Benchmark real measurements—never sample numbers—with:
-
-```powershell
-$env:PYTHONPATH="backend"
-python scripts/benchmark.py demo-images/01-mountain-house-original.jpg --repetitions 5
-```
-
-## Repository map
-
-```text
-backend/                 FastAPI, models, worker, Alembic, tests, images
-frontend/                React/Vite SaaS interface and tests
-infra/kubernetes/        Minikube resources, probes, limits, PVCs, HPA
-infra/terraform/         Local Kubernetes IaC
-infra/prometheus/        Scrape configuration
-infra/grafana/           Provisioned data source and dashboards
-infra/nginx/             Reverse proxy/API gateway
-scripts/                 Demo images, load, reset, benchmark, env bootstrap
-docs/                    Academic and operational deliverables
-.github/workflows/       Free CI validation
-docker-compose.yml       Primary laptop deployment
-```
-
-## Troubleshooting
-
-- **Worker says model is idle:** upload a non-exact image and watch `docker compose logs -f worker`; the first model download/inference is intentionally lazy.
-- **Images upload but thumbnails remain Processing:** verify `redis`, `worker`, PostgreSQL, and MinIO are healthy; retry after the worker is ready.
-- **Browser cannot open previews in Minikube:** set `MINIO_PUBLIC_ENDPOINT` to the reachable MinIO API host/port and restart backend/worker.
-- **Port 80 is occupied:** change the Nginx mapping in Compose to `8088:80`, then add that origin to `CORS_ORIGINS`.
-- **Docker Desktop is memory constrained:** allocate 10–12 GB and keep one worker.
-- **CUDA is unavailable:** no action is required; CPU is the supported default.
-- **Grafana has no data yet:** upload or browse a few images, then allow about 10 seconds for Prometheus to collect fresh API and worker metrics.
-
-## Known limitations
-
-- One MinIO instance, one PostgreSQL instance, and one AI worker are deliberate laptop-friendly defaults, not a high-availability production topology.
-- The local JWT flow has no email verification or password-recovery service.
-- Similarity thresholds need evaluation against the intended photo collection; AI results can be wrong.
-- RAW decoding depends on LibRaw's support for the specific camera model; unsupported proprietary codecs fail safely and retain a diagnostic.
-- Video indexing samples representative frames for search and duplicate intelligence; it is not full scene-by-scene transcription.
-- Direct exposure beyond a trusted laptop would require TLS, secret rotation, backups, and a formal security review.
-
-## Screenshots and measured results
-
-Add evidence after running the final environment; do not fabricate it:
-
-- `[Screenshot placeholder: dashboard]`
-- `[Screenshot placeholder: exact duplicate upload result]`
-- `[Screenshot placeholder: duplicate review visual match]`
-- `[Screenshot placeholder: Minikube pods]`
-- `[Screenshot placeholder: Grafana dashboard]`
-- `[Measurement placeholder: CPU/GPU embedding benchmark]`
-
-## Cost
-
-Software cost: **₹0**  
-Required local cloud bill: **₹0**  
-AI API cost: **₹0**  
-Database cost: **₹0**  
-Object-storage cost: **₹0**  
-Monitoring cost: **₹0**
-
-All required demo infrastructure runs locally with free/open-source software. Existing laptop hardware, electricity, and internet are not claimed to be literally free. See [cost-analysis.md](docs/cost-analysis.md).
-
-## Academic disclaimer and license
-
-This repository is a college mini-project and teaching platform. Validate it before using it for irreplaceable or sensitive personal media; maintain backups.
-
-Original project code is available under the [MIT License](LICENSE). Third-party software and model weights retain their own licenses and are not relicensed by this project.
+Original code is [MIT licensed](LICENSE). Dependencies and model weights retain
+their own licenses. This is a college teaching project with a single-VM deployment;
+maintain backups for important media.

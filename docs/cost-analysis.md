@@ -1,26 +1,19 @@
 # Cost analysis
 
-The required demonstration uses existing student hardware and local free/open-source software. “₹0” means no additional software license, AI API, database, object-storage, monitoring, or public-cloud bill. It does not claim that laptop hardware, electricity, or internet access are literally free.
+The main deployment uses Azure for Students credit, not unlimited free hosting. The offer and regional quotas can change: check the [current student offer](https://azure.microsoft.com/free/students/) and Azure pricing calculator before provisioning.
 
-| Component | Product | Required project expenditure |
-|---|---|---:|
-| Frontend | React, TypeScript, Vite, Tailwind CSS | ₹0 |
-| Backend | FastAPI, SQLAlchemy, Alembic | ₹0 |
-| Authentication | Argon2 + JWT in the self-hosted API | ₹0 |
-| AI model | OpenCLIP ViT-B/32, local inference | ₹0 |
-| Image processing | Pillow, ImageHash | ₹0 |
-| Database | PostgreSQL | ₹0 |
-| Vector search | pgvector | ₹0 |
-| Object storage | MinIO | ₹0 |
-| Job queue | Redis + Celery | ₹0 |
-| Containers | Docker / Docker Compose | ₹0 for the required local project setup |
-| Orchestration | Kubernetes + Minikube | ₹0 |
-| Infrastructure as Code | Terraform | ₹0 |
-| CI/CD | GitHub Actions within applicable free/public-repository usage | ₹0 for the project setup |
-| Metrics | Prometheus | ₹0 |
-| Visualization | Grafana OSS | ₹0 |
-| Reverse proxy | Nginx | ₹0 |
-| Required demo hosting | Existing student laptop | ₹0 additional cloud bill |
-| **Total software/cloud-service cost** |  | **₹0** |
+| Component | Cost consideration |
+|---|---|
+| Ubuntu VM, default 8 GiB | Consumes student credit while allocated; needed for CPU image models |
+| Managed OS disk | Billed while the VM is stopped/deallocated too |
+| Public IP | Can have ongoing charges even while compute is stopped |
+| Azure Blob Storage | Stored originals, thumbnails, transactions, download traffic and retained soft-deleted data |
+| PostgreSQL, Redis, Caddy, API, worker | Run on the same VM; no separate managed database/queue bill |
+| OpenCLIP, OCR, face recognition | Inference uses VM compute; no hosted AI API fee |
+| GitHub CI and release downloads | Subject to applicable repository usage limits |
 
-Optional conceptual AWS/Azure/GCP mappings are not deployed and are not included in the project’s required path. A future public-cloud migration would introduce usage-based charges and require a separate budget.
+Keep the spending limit enabled, inspect actual cost in the Azure portal, and deallocate compute between rehearsals. The template schedules daily shutdown; it does not restart the VM for class. To end ongoing disk/IP/storage charges, remove resources after taking necessary backups. Per-user upload quotas limit original file sizes, not the entire Azure bill.
+
+Five application containers replace the previous seven in the Azure deployment. PostgreSQL, Redis and the worker remain separate because this protects data integrity, background processing and responsiveness. Optional Kubernetes/Terraform/local monitoring examples do not need to run for the classroom website.
+
+The local MinIO alternative has no Azure usage bill when it runs solely on existing hardware; hardware, electricity and internet still have costs. It is a development or rubric extension, not the primary public website deployment.

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.0
+
+- Simplify Azure hosting to five containers with Caddy serving the website directly; preserve shared request limits.
+- Keep four primary pages and move advanced tools into expandable navigation.
+- Require multi-hash consensus and spatial pixel verification for still-image near duplicates; label semantic matches for review.
+- Stop transitive match chains from producing unsupported duplicate families; select only exact copies in bulk.
+- Keep fingerprint processing available when AI or enrichment fails, expose warnings, and support retries.
+- Rank fingerprint candidates before limiting; handle pgvector arrays and invalid vectors correctly.
+- Add reliability regressions, a six-image downloadable demonstration, and a focused classroom presentation guide.
+
+
 ## 1.1.0
 
 - Azure Blob Storage provider using VM managed identity and HTTPS-only read-only

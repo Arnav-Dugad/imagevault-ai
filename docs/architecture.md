@@ -1,152 +1,39 @@
 # ImageVault AI architecture
 
-## Architectural intent
-
-ImageVault AI is an intelligent image-management workload deployed on a self-hosted private-cloud platform. The boundary is intentionally local: the application does not send images or embeddings to an external AI or storage API. Services communicate over a private container/Kubernetes network and expose only the gateway, demonstration consoles, and monitoring interfaces.
-
-## Logical architecture
+The primary deployment is a website on an Azure VM, with private Azure Blob Storage. AI inference runs on the VM; images are not sent to a hosted AI API. The VM uses student credit. PostgreSQL, Redis and model caches persist in Docker volumes.
 
 ```mermaid
 flowchart TB
-    subgraph Client[User device]
-        Browser[Web browser]
-    end
-
-    subgraph Gateway[Presentation and gateway]
-        Nginx[Nginx reverse proxy]
-        React[React + TypeScript SPA]
-    end
-
-    subgraph Application[Application services]
-        API[FastAPI REST service]
-        Queue[(Redis job queue)]
-        Worker[Celery AI worker]
-    end
-
-    subgraph Data[Private data plane]
-        Postgres[(PostgreSQL)]
-        Vector[(pgvector index)]
-        MinIO[(MinIO S3-compatible objects)]
-        Cache[(Local model cache)]
-    end
-
-    subgraph Observability[Observability]
-        Prometheus[Prometheus]
-        Grafana[Grafana OSS]
-    end
-
-    Browser --> Nginx
-    Nginx --> React
-    Nginx --> API
-    API --> Postgres
-    Postgres --- Vector
-    API --> MinIO
-    API --> Queue
-    Queue --> Worker
-    Worker --> MinIO
-    Worker --> Postgres
-    Worker --> Cache
-    Prometheus --> API
-    Prometheus --> Worker
-    Grafana --> Prometheus
+    Browser[Browser] --> Caddy["Caddy: HTTPS and React website"]
+    Caddy --> API[FastAPI]
+    API --> DB[(PostgreSQL and pgvector)]
+    API --> Queue[(Redis)]
+    API --> Blob[(Private Azure Blob Storage)]
+    Queue --> Worker[Celery worker]
+    Worker --> Blob
+    Worker --> DB
 ```
 
-## Upload and processing sequence
+Caddy serves the compiled website, caches hashed assets, and forwards API requests. FastAPI keeps authentication, user isolation, upload quotas, and shared Redis rate limits. Only Caddy publishes public application ports. The private gateway subnet may supply the client address; visitor-supplied headers cannot bypass the limiter. Redis outages fail protected API requests with 503.
 
-```mermaid
-sequenceDiagram
-    actor User
-    participant UI as React UI
-    participant API as FastAPI
-    participant DB as PostgreSQL/pgvector
-    participant S3 as MinIO
-    participant Q as Redis
-    participant W as AI worker
+## Detection pipeline
 
-    User->>UI: Select photos, animations, RAW files, or videos
-    UI->>API: POST /api/images/upload + JWT
-    API->>API: Validate signature/type/size; calculate SHA-256
-    API->>DB: Query same user + SHA-256
-    alt exact bytes already exist
-        API->>S3: Store private UUID object
-        API->>DB: Save EXACT_DUPLICATE and original reference
-    else new byte content
-        API->>S3: Store private UUID object
-        API->>DB: Save PENDING metadata and processing job
-    end
-    API->>Q: Enqueue image UUID
-    API-->>UI: 202 Accepted + exact-match result
-    Q->>W: Deliver job
-    W->>S3: Read original
-    W->>W: Decode representative frames and safe metadata
-    W->>W: Thumbnail, OCR/layout, quality, faces, hashes, color/frame evidence
-    alt non-exact image
-        W->>W: Multi-frame OpenCLIP embedding on CPU or CUDA with CPU fallback
-        W->>DB: pgvector cosine nearest-neighbour query
-        W->>DB: Store vector and advisory matches
-    else exact duplicate
-        W->>DB: Reuse original vector when available
-    end
-    W->>S3: Store WebP thumbnail
-    W->>DB: Mark READY / EXACT_DUPLICATE
-    UI->>API: Poll gallery, albums, and dashboard
-    API-->>UI: Updated processing state
-```
+1. **Exact bytes:** SHA-256 identifies identical files within an account during upload. A copy can reuse successful analysis and a separately stored thumbnail, avoiding repeated model inference.
+2. **Candidate retrieval:** pgvector retrieves nearest normalized CLIP embeddings. The worker also ranks perceptual hash candidates across that account, so a semantically distant copy can still be checked. Candidate limits bound CPU and Blob reads; very large libraries need further tuning.
+3. **Verification:** two of pHash, dHash and wHash must agree, with compatible frame geometry and colors. Still-image thumbnails must also agree spatially at two scales before receiving a near-duplicate label. Low-detail inputs, missing verification, animations and video do not receive this label based on a single frame.
+4. **Similar content:** strong CLIP matches remain review suggestions. CLIP recognizes meaning and can confuse different shots of the same subject. This result is never selected automatically for cleanup.
+5. **Optional enrichment:** OCR, face recognition, labels and quality support advanced exploration. Their failures are recorded on the image and do not discard the duplicate fingerprint result. If the CLIP model is unavailable, fingerprint matching still runs and semantic results remain unavailable until a retry.
 
-## Kubernetes deployment
+All members in a displayed duplicate family must have direct pair evidence. A-B and B-C do not establish A-C. Greedy complete-link grouping favors conservative families and may split some genuinely related images into smaller groups. Bulk selection chooses exact copies only; every deletion still requires confirmation.
 
-```mermaid
-flowchart LR
-    Internet[Local browser] --> NP[Gateway NodePort]
-    NP --> NG[Nginx Deployment]
-    NG --> FE[Frontend Deployment]
-    NG --> BE[Backend Deployment 1..3]
-    BE --> PG[PostgreSQL StatefulSet + PVC]
-    BE --> MI[MinIO StatefulSet + PVC]
-    BE --> RD[Redis Deployment]
-    RD --> WK[Worker Deployment + model-cache PVC]
-    WK --> PG
-    WK --> MI
-    PM[Prometheus + PVC] --> BE
-    PM --> WK
-    GF[Grafana + PVC] --> PM
-    CM[ConfigMaps] -.-> NG
-    CM -.-> BE
-    KS[Kubernetes Secret] -.-> BE
-    KS -.-> PG
-    KS -.-> MI
-```
+## Security and deployment
 
-The backend is stateless and horizontally scalable. PostgreSQL, MinIO, and the one-worker default are deliberately single-instance for a 16 GB student laptop. The optional HPA scales only the backend; it is not required for the base demonstration.
+The VM's managed identity receives Blob Data Contributor access. The private container disallows public blobs and uses expiring, read-only HTTPS preview links. Invitation-based signup, original-file quotas, request limits, private database/queue ports, bounded logs and daily shutdown are configured in the Azure stack. Backups and operational availability still require the owner's attention; a single VM is not a highly available production service.
 
-## Trust boundaries
+## Optional academic extensions
 
-1. **Browser → gateway:** JWT is required for private API routes. Nginx sets request IDs, limits rates, and restricts request sizes.
-2. **Gateway → application network:** only internal service names are used. Database, Redis, and backend ports are not published in Compose.
-3. **Application → data plane:** database credentials and MinIO keys come from ignored environment files or Kubernetes Secrets.
-4. **Application → media:** MinIO buckets are private. The API returns time-limited signed URLs after an ownership-scoped database query.
-5. **Observability:** metrics contain counts and timings, not filenames, user IDs, tokens, image content, or secrets.
+The original local Compose stack uses MinIO and Nginx and includes Prometheus/Grafana. Kubernetes examples are in `infra/kubernetes`, with Terraform in `infra/terraform`. These remain available when required by the course rubric, but the Azure website uses Compose and Bicep as its main deployment path.
 
-## Storage mapping
+## Updating older libraries
 
-```text
-users/{user_uuid}/originals/{image_uuid}.{safe_extension}
-users/{user_uuid}/thumbnails/{image_uuid}.webp
-```
-
-The original filename is metadata only. UUID keys prevent path traversal, collisions, and accidental overwrite.
-
-## Conceptual public-cloud migration
-
-This is an explanation, not implemented paid infrastructure.
-
-| Current local component | Conceptual managed equivalent |
-|---|---|
-| MinIO | AWS S3 / Azure Blob Storage / Google Cloud Storage |
-| PostgreSQL container | Amazon RDS / Azure Database for PostgreSQL / Cloud SQL |
-| Minikube/Kubernetes | EKS / AKS / GKE |
-| Nginx gateway | Managed load balancer or API gateway |
-| Prometheus + Grafana | Cloud monitoring products or managed Prometheus/Grafana |
-| Local model worker | GPU/CPU Kubernetes node pool |
-
-The S3-style object service abstraction, environment configuration, stateless API, and Kubernetes resources reduce migration effort, but networking, IAM, backup, TLS, autoscaling, and cost controls would still require a new design review.
+Analysis version 6 hides older unverified visual matches from duplicate families. After upgrading, click **Duplicate review → Upgrade smart index**, let processing finish, and inspect any warning shown in image details. Warnings make those images eligible for a later retry. Originals are retained during re-analysis. Back up the database and Blob objects before upgrades.

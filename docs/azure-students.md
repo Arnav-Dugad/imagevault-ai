@@ -89,7 +89,7 @@ ssh -i "$HOME/.ssh/imagevault" imagevault@YOUR_RETURNED_HOSTNAME
 sudo cloud-init status --wait
 sudo tail -n 80 /var/log/cloud-init-output.log
 cd /opt/imagevault/app
-sudo docker compose -f docker-compose.azure.yml -f docker-compose.download.yml ps
+sudo docker compose -f docker-compose.azure.yml -f docker-compose.azure-download.yml ps
 sudo sed -n 's/^REGISTRATION_CODE=//p' .env
 ```
 
@@ -114,7 +114,7 @@ To close registration after creating accounts, edit `/opt/imagevault/app/.env` a
 set `REGISTRATION_ENABLED=false`, then recreate the backend and worker:
 
 ```bash
-sudo docker compose -f docker-compose.azure.yml -f docker-compose.download.yml up -d backend worker
+sudo docker compose -f docker-compose.azure.yml -f docker-compose.azure-download.yml up -d backend worker
 ```
 
 Existing local credentials and app data are **not migrated automatically**.
@@ -165,7 +165,7 @@ new release into the existing `/opt/imagevault/app` directory, preserving `.env`
 and Docker volumes. Update `APP_VERSION` to the release's version, then run:
 
 ```bash
-sudo docker compose -f docker-compose.azure.yml -f docker-compose.download.yml up -d --build
+sudo docker compose -f docker-compose.azure.yml -f docker-compose.azure-download.yml up -d --build
 ```
 
 The API applies Alembic migrations at startup. Old binary rollback may require
@@ -206,3 +206,17 @@ container definitions, Bicep compilation, deployment scripts, Kubernetes and Ter
 Blob provider tests use SDK fakes for private storage behavior and SAS signing.
 Live Azure deployment, region quota, certificate issuance, and managed-identity
 RBAC require a real student subscription and must be verified after deployment.
+
+## Simplified website and reliable matching (1.2)
+
+Caddy now serves the compiled React website and proxies FastAPI directly. The
+Azure stack has five containers; there is no separate frontend or Nginx container.
+Redis-backed API limits preserve login/upload protection. Downloaded bundles use
+`docker-compose.azure-download.yml`, while source builds use only
+`docker-compose.azure.yml`. The local download overlay remains separate.
+
+Back up data, update the release files, rebuild, then use **Upgrade smart index**
+in Duplicate review to recompute version-6 matching. Old unverified visual families
+are hidden until rebuilt. Check warning messages in image details and retry any
+incomplete AI enrichment later. See [detection reliability](detection-reliability.md)
+and [five-minute presentation](demo-script.md).

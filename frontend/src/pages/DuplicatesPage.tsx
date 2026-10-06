@@ -4,7 +4,6 @@ import {
   Check,
   ChevronRight,
   Copy,
-  Gauge,
   HardDrive,
   Images,
   Layers3,
@@ -44,7 +43,7 @@ function Signal({ label, value, accent = "acid" }: { label: string; value: numbe
 }
 
 function CandidateCard({ candidate, selected, onToggle }: { candidate: Candidate; selected: boolean; onToggle: (id: string) => void }) {
-  const typeLabel = candidate.match_type === "EXACT" ? "Exact copy" : candidate.match_type === "PERCEPTUAL" ? "Near duplicate" : "AI visual match";
+  const typeLabel = candidate.match_type === "EXACT" ? "Exact copy" : candidate.match_type === "PERCEPTUAL" ? "Near duplicate" : "Similar content · review";
   return <article className={`overflow-hidden rounded-2xl border bg-[#101318] transition ${selected ? "border-acid ring-1 ring-acid/70" : "border-line hover:border-[#3a414c]"}`}>
     <div className="relative aspect-[16/10] overflow-hidden bg-[#171b21]">
       {candidate.image.thumbnail_url ? <img src={candidate.image.thumbnail_url} alt={candidate.image.original_filename} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center"><Images className="h-7 w-7 text-muted/40" /></div>}
@@ -112,7 +111,7 @@ export function DuplicatesPage() {
   const selectedBytes = allCandidates.filter((item) => selected.has(item.image.id)).reduce((sum, item) => sum + item.image.file_size, 0);
   function toggle(id: string) { setSelected((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; }); }
   function selectExact() { setSelected(new Set(allCandidates.filter((item) => item.match_type === "EXACT").map((item) => item.image.id))); }
-  function selectRecommended() { setSelected(new Set(allCandidates.filter((item) => item.match_type === "EXACT" || (item.match_type === "PERCEPTUAL" && item.similarity_score >= .9)).map((item) => item.image.id))); }
+
 
   async function removeSelected() {
     setDeleting(true); setError("");
@@ -139,6 +138,8 @@ export function DuplicatesPage() {
       action={<div className="flex flex-wrap gap-2">{batchId && <Link to="/duplicates"><Button variant="secondary"><Layers3 className="h-4 w-4" />All library</Button></Link>}<Button variant="secondary" loading={reindexing} onClick={rebuildIndex}><WandSparkles className="h-4 w-4" />Upgrade smart index</Button></div>}
     />
 
+    <p className="mb-5 text-sm leading-6 text-muted">Exact copies match file bytes. Near duplicates pass fingerprint and pixel checks. Similar content needs manual review. Scores describe resemblance, not the probability that deletion is safe.</p>
+
     {report && <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
       <Metric icon={Layers3} label="Visual families" value={report.total_groups.toLocaleString()} />
       <Metric icon={Copy} label="Exact copies" value={report.exact_duplicates.toLocaleString()} tone="coral" />
@@ -153,13 +154,13 @@ export function DuplicatesPage() {
 
     <div className="panel mb-5 rounded-2xl p-3"><div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
       <div className="flex gap-2 overflow-x-auto">{([['all','All evidence'],['exact','Exact'],['perceptual','Near duplicates'],['visual','AI matches']] as const).map(([value, label]) => <button key={value} onClick={() => setFilter(value)} className={`focus-ring whitespace-nowrap rounded-xl px-3.5 py-2 text-xs font-semibold transition ${filter === value ? "bg-ink text-canvas" : "text-muted hover:bg-white/5 hover:text-ink"}`}>{label}</button>)}</div>
-      <div className="flex flex-wrap gap-2"><Button variant="ghost" onClick={selectExact} disabled={!allCandidates.some((item) => item.match_type === "EXACT")}><Zap className="h-4 w-4" />Select exact</Button><Button variant="ghost" onClick={selectRecommended}><Gauge className="h-4 w-4" />Select high confidence</Button><select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)} className="focus-ring h-10 rounded-xl border border-line bg-canvas px-3 text-xs"><option value="confidence">Highest confidence</option><option value="savings">Most space saved</option></select></div>
+      <div className="flex flex-wrap gap-2"><Button variant="ghost" onClick={selectExact} disabled={!allCandidates.some((item) => item.match_type === "EXACT")}><Zap className="h-4 w-4" />Select exact</Button><select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)} className="focus-ring h-10 rounded-xl border border-line bg-canvas px-3 text-xs"><option value="confidence">Highest match score</option><option value="savings">Most space saved</option></select></div>
     </div></div>
 
-    {!report ? <div className="space-y-4">{Array.from({ length: 2 }, (_, index) => <div key={index} className="skeleton h-80 rounded-[28px]" />)}</div> : visibleGroups.length === 0 ? <EmptyState icon={report.processing_images ? ScanSearch : Copy} title={report.processing_images ? "Analyzing your visual families" : "No matches in this view"} description={report.processing_images ? "The local intelligence worker is comparing every image. This page will update automatically." : filter === "all" ? "Your library is clean—no exact, near-duplicate, or strong AI visual matches were found." : "Try another evidence filter or upload more images."} /> : <div className="space-y-5">{visibleGroups.map((group, index) => <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} key={group.group_id} className="panel rounded-[28px] p-4 sm:p-6">
+    {!report ? <div className="space-y-4">{Array.from({ length: 2 }, (_, index) => <div key={index} className="skeleton h-80 rounded-[28px]" />)}</div> : visibleGroups.length === 0 ? <EmptyState icon={report.processing_images ? ScanSearch : Copy} title={report.processing_images ? "Analyzing your visual families" : "No matches in this view"} description={report.processing_images ? "The background worker is comparing every image. This page will update automatically." : filter === "all" ? "Your library is clean—no exact, near-duplicate, or strong Similar content · reviewes were found." : "Try another evidence filter or upload more images."} /> : <div className="space-y-5">{visibleGroups.map((group, index) => <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} key={group.group_id} className="panel rounded-[28px] p-4 sm:p-6">
       <div className="mb-5 flex flex-col justify-between gap-3 lg:flex-row lg:items-end"><div><div className="flex flex-wrap items-center gap-2"><p className="eyebrow">Visual family #{String(index + 1).padStart(2, "0")}</p>{group.all_same_batch && <span className="rounded-full border border-lilac/20 bg-lilac/[.08] px-2 py-1 font-mono text-[9px] uppercase text-lilac">same upload</span>}</div><h2 className="mt-2 text-lg font-semibold">{group.candidates.length + 1} related images · {percent(group.highest_similarity)} strongest match</h2></div><p className="font-mono text-[10px] uppercase tracking-wider text-coral">Up to {formatBytes(group.recoverable_bytes)} recoverable</p></div>
       <div className="grid gap-4 xl:grid-cols-[.72fr_2.28fr]">
-        <Link to={`/images/${group.original.id}`} className="focus-ring overflow-hidden rounded-2xl border border-acid/20 bg-acid/[.025]"><div className="relative aspect-[16/10] overflow-hidden bg-[#171b21]">{group.original.thumbnail_url ? <img src={group.original.thumbnail_url} alt={group.original.original_filename} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center"><Images className="h-7 w-7 text-muted/40" /></div>}<span className="absolute left-3 top-3 rounded-full bg-acid px-2.5 py-1 font-mono text-[9px] font-semibold uppercase text-canvas">Recommended keeper</span></div><div className="p-4"><p className="truncate text-sm font-semibold">{group.original.original_filename}</p><p className="mt-1 text-xs text-muted">Highest-quality original · {formatBytes(group.original.file_size)}</p></div></Link>
+        <Link to={`/images/${group.original.id}`} className="focus-ring overflow-hidden rounded-2xl border border-acid/20 bg-acid/[.025]"><div className="relative aspect-[16/10] overflow-hidden bg-[#171b21]">{group.original.thumbnail_url ? <img src={group.original.thumbnail_url} alt={group.original.original_filename} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center"><Images className="h-7 w-7 text-muted/40" /></div>}<span className="absolute left-3 top-3 rounded-full bg-acid px-2.5 py-1 font-mono text-[9px] font-semibold uppercase text-canvas">Recommended keeper</span></div><div className="p-4"><p className="truncate text-sm font-semibold">{group.original.original_filename}</p><p className="mt-1 text-xs text-muted">Suggested original · {formatBytes(group.original.file_size)}</p></div></Link>
         <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">{group.candidates.map((candidate) => <CandidateCard key={candidate.image.id} candidate={candidate} selected={selected.has(candidate.image.id)} onToggle={toggle} />)}</div>
       </div>
     </motion.section>)}</div>}

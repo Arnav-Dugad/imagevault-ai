@@ -21,7 +21,7 @@ build/
 *.egg-info/
 
 # JavaScript
-node_modules/
+node_modules
 dist/
 coverage/
 *.tsbuildinfo
@@ -69,3 +69,6 @@ release-dist/
 
 # Local certificates
 infra/nginx/certs/
+
+# Generated synthetic classroom samples
+demo-images/

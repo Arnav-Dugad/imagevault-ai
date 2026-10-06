@@ -2,7 +2,7 @@ name: ImageVault CI
 
 on:
   push:
-    branches: [main, codex/azure-student-website]
+    branches: [main, codex/azure-student-website, codex/classroom-reliable]
   pull_request:
   workflow_dispatch:
 
@@ -17,6 +17,19 @@ jobs:
   backend:
     name: Backend lint and tests
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: imagevault
+          POSTGRES_PASSWORD: ci-disposable-password
+          POSTGRES_DB: imagevault_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U imagevault -d imagevault_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_POSTGRES_URL: postgresql+asyncpg://imagevault:ci-disposable-password@localhost:5432/imagevault_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -81,6 +94,11 @@ jobs:
           docker build --check -f backend/Dockerfile backend
           docker build --check -f backend/Dockerfile.worker backend
           docker build --check -f frontend/Dockerfile frontend
+          docker build --check -f frontend/Dockerfile.azure frontend
+          docker build --check -f frontend/Dockerfile.azure-download frontend
+      - name: Validate Caddy website routes
+        run: |
+          APP_DOMAIN=website.example.com docker run --rm -e APP_DOMAIN=website.example.com -v "$PWD/infra/azure/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2.10-alpine caddy validate --config /etc/caddy/Caddyfile
       - name: Validate Kubernetes render
         run: kubectl kustomize infra/kubernetes > /tmp/imagevault-kubernetes.yaml
       - uses: hashicorp/setup-terraform@v3
@@ -116,8 +134,11 @@ jobs:
       - name: Build downloadable web app
         working-directory: frontend
         run: npm ci && npm run build
-      - name: Package complete application
-        run: python scripts/package_release.py
+      - name: Package complete application and classroom samples
+        run: |
+          pip install Pillow==11.2.1
+          python scripts/generate_demo.py
+          python scripts/package_release.py
       - name: Publish immutable release and downloads
         env:
           GH_TOKEN: ${{ github.token }}

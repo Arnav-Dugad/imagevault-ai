@@ -1,6 +1,7 @@
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from itertools import combinations
 from typing import Annotated
 from uuid import UUID
 
@@ -17,6 +18,7 @@ from app.schemas import (
     DuplicateReviewResponse,
     TimeSeriesPoint,
 )
+from app.core.config import get_settings
 from app.services.images import image_summary, similarity_classification
 
 router = APIRouter(tags=["Analytics"])
@@ -51,35 +53,26 @@ async def _duplicate_groups(
     images = list((await db.scalars(select(Image).where(Image.user_id == user_id))).all())
     by_id = {image.id: image for image in images}
     scoped_ids = {image.id for image in images if batch_id is None or image.batch_id == batch_id}
-    parent = {image.id: image.id for image in images}
     edges: dict[tuple[UUID, UUID], GroupEdge] = {}
-    active_ids: set[UUID] = set()
-
-    def find(image_id: UUID) -> UUID:
-        while parent[image_id] != image_id:
-            parent[image_id] = parent[parent[image_id]]
-            image_id = parent[image_id]
-        return image_id
 
     def connect(first: UUID, second: UUID, edge: GroupEdge) -> None:
-        if first not in by_id or second not in by_id:
+        if first == second or first not in by_id or second not in by_id:
             return
         if batch_id is not None and first not in scoped_ids and second not in scoped_ids:
             return
-        first_root, second_root = find(first), find(second)
-        if first_root != second_root:
-            parent[second_root] = first_root
         key = _pair(first, second)
         current = edges.get(key)
         if current is None or edge.match_type == DuplicateType.EXACT or edge.score > current.score:
             edges[key] = edge
-        active_ids.update((first, second))
 
+    exact_families: dict[str, list[Image]] = defaultdict(list)
     for image in images:
-        if image.exact_duplicate_of_id:
+        exact_families[image.sha256].append(image)
+    for family in exact_families.values():
+        for first, second in combinations(family, 2):
             connect(
-                image.id,
-                image.exact_duplicate_of_id,
+                first.id,
+                second.id,
                 GroupEdge(
                     match_type=DuplicateType.EXACT,
                     score=1.0,
@@ -102,24 +95,40 @@ async def _duplicate_groups(
         ).all()
     )
     for match in matches:
-        connect(
-            match.source_image_id,
-            match.target_image_id,
-            GroupEdge(
-                match_type=match.match_type,
-                score=match.similarity_score,
-                phash_distance=match.phash_distance,
-                clip_score=match.clip_score,
-                perceptual_score=match.perceptual_score,
-                color_score=match.color_score,
-                aspect_score=match.aspect_score,
-                reasons=tuple(match.evidence or ()),
-            ),
+        # Hide stale, unverified matches until the user upgrades the index.
+        if any(by_id.get(image_id) is None or by_id[image_id].analysis_version < get_settings().analysis_version
+               for image_id in (match.source_image_id, match.target_image_id)):
+            continue
+        evidence = GroupEdge(
+            match_type=match.match_type,
+            score=match.similarity_score,
+            phash_distance=match.phash_distance,
+            clip_score=match.clip_score,
+            perceptual_score=match.perceptual_score,
+            color_score=match.color_score,
+            aspect_score=match.aspect_score,
+            reasons=tuple(match.evidence or ()),
         )
+        # A byte-identical copy has the same visual evidence. Share only across
+        # SHA-256 equivalence, never across a merely similar-image chain.
+        for first in exact_families[by_id[match.source_image_id].sha256]:
+            for second in exact_families[by_id[match.target_image_id].sha256]:
+                connect(first.id, second.id, evidence)
 
-    components: dict[UUID, set[UUID]] = defaultdict(set)
-    for image_id in active_ids:
-        components[find(image_id)].add(image_id)
+    # Complete-link families: every member has direct evidence against every
+    # other member. A-B and B-C alone never establish an A-C duplicate.
+    active_ids = {image_id for pair in edges for image_id in pair}
+    components = {image_id: {image_id} for image_id in active_ids}
+    owner = {image_id: image_id for image_id in active_ids}
+    for (first, second), _ in sorted(edges.items(), key=lambda item: (-item[1].score, str(item[0]))):
+        left, right = owner[first], owner[second]
+        if left == right:
+            continue
+        if not all(_pair(a, b) in edges for a in components[left] for b in components[right]):
+            continue
+        components[left].update(components.pop(right))
+        for image_id in components[left]:
+            owner[image_id] = left
 
     groups: list[DuplicateGroup] = []
     for member_ids in components.values():
@@ -132,18 +141,8 @@ async def _duplicate_groups(
             (item for item in members if item.id != keeper.id),
             key=_keeper_key,
         ):
-            evidence = edges.get(_pair(keeper.id, candidate.id))
-            connected_through_family = evidence is None
-            if evidence is None:
-                related = [
-                    edge
-                    for pair, edge in edges.items()
-                    if candidate.id in pair and pair[0] in member_ids and pair[1] in member_ids
-                ]
-                evidence = max(related, key=lambda item: item.score)
+            evidence = edges[_pair(keeper.id, candidate.id)]
             reasons = list(evidence.reasons)
-            if connected_through_family:
-                reasons.append("Connected through this visual family")
             candidates.append(
                 DuplicateCandidate(
                     image=image_summary(candidate, evidence.score),

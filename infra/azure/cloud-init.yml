@@ -25,6 +25,6 @@ write_files:
         python3 scripts/configure_azure.py --domain '__APP_DOMAIN__' --storage-url '__STORAGE_ACCOUNT_URL__'
       fi
       systemctl enable --now docker
-      docker compose -f docker-compose.azure.yml -f docker-compose.download.yml up -d --build
+      docker compose -f docker-compose.azure.yml -f docker-compose.azure-download.yml up -d --build
 runcmd:
   - [bash, /usr/local/sbin/imagevault-bootstrap]

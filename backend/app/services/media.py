@@ -67,6 +67,11 @@ def _decode_pillow(data: bytes, mime_type: str) -> DecodedMedia:
         for index in _sample_indices(total, settings.media_sample_frames):
             source.seek(index)
             frame = ImageOps.exif_transpose(source.copy()).convert("RGB")
+            if not frames:
+                # Match dimensions to displayed orientation before downsampling.
+                # Otherwise a phone portrait and its exported copy have inverted
+                # aspect ratios even though their normalized pixels are identical.
+                width, height = frame.size
             frame.thumbnail((1600, 1600), PillowImage.Resampling.LANCZOS)
             frames.append(frame)
             duration_ms += int(source.info.get("duration", 0) or 0)
