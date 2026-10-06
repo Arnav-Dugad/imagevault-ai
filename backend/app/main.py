@@ -11,6 +11,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from app.api import albums, analytics, auth, health, images
 from app.core.config import get_settings
 from app.core.logging import configure_logging
+from app.core.rate_limit import rate_limiter
 from app.metrics import HTTP_LATENCY, HTTP_REQUESTS
 from app.services.storage import storage
 
@@ -27,14 +28,15 @@ async def lifespan(_: FastAPI):
     except Exception as exc:
         logger.warning("object_storage_startup_failed", error=str(exc))
     yield
+    await rate_limiter.redis.aclose()
 
 
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
     description=(
-        "Self-hosted private-cloud image storage with SHA-256 duplicate detection, "
-        "local OpenCLIP similarity, pgvector search, and observable asynchronous processing."
+        "Private cloud image storage with SHA-256 duplicate detection, "
+        "VM-hosted OpenCLIP similarity, pgvector search, and observable asynchronous processing."
     ),
     docs_url="/docs",
     redoc_url="/redoc",
@@ -56,7 +58,9 @@ async def request_context(request: Request, call_next):
     started = time.perf_counter()
     with structlog.contextvars.bound_contextvars(request_id=request_id):
         try:
-            response = await call_next(request)
+            response = await rate_limiter.check(request)
+            if response is None:
+                response = await call_next(request)
         except Exception:
             logger.exception("request_failed", method=request.method, path=request.url.path)
             raise

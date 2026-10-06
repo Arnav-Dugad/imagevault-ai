@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "ImageVault AI"
-    app_version: str = "1.1.0"
+    app_version: str = "1.2.0"
     environment: str = "development"
     debug: bool = False
     api_prefix: str = "/api"
@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     registration_code: str = ""
     # Original-file quota; thumbnails and Azure transactions are additional usage.
     max_user_storage_bytes: int = Field(default=0, ge=0)
+    rate_limit_enabled: bool = False
+    trusted_proxy_cidr: str = ""
     grafana_url: str = ""
     prometheus_url: str = ""
 
@@ -76,7 +78,7 @@ class Settings(BaseSettings):
     metrics_port: int = 9101
     semantic_search_timeout_seconds: int = 30
     semantic_search_min_score: float = 0.16
-    analysis_version: int = 5
+    analysis_version: int = 6
     ai_device: str = "auto"
     media_sample_frames: int = 6
     ocr_languages: str = "eng+hin+mar+ben+tam+tel+guj+pan"

@@ -11,6 +11,27 @@
 		max_size 320MB
 	}
 	@metrics path /metrics /metrics/*
-	respond @metrics 403
-	reverse_proxy nginx:80
+	handle @metrics {
+		respond 403
+	}
+	@api path /api /api/* /health/* /docs /docs/* /redoc /openapi.json
+	handle @api {
+		reverse_proxy backend:8000 {
+			# Overwrite this header; only the private gateway subnet is trusted.
+			header_up X-ImageVault-Client {http.request.remote.host}
+		}
+	}
+	handle /assets/* {
+		root * /srv
+		header Cache-Control "public, max-age=31536000, immutable"
+		file_server
+	}
+	handle {
+		root * /srv
+		route {
+			try_files {path} /index.html
+			header /index.html Cache-Control "public, max-age=0, must-revalidate"
+			file_server
+		}
+	}
 }

@@ -42,6 +42,7 @@ from app.services.faces import face_engine
 from app.services.media import DecodedMedia, decode_media
 from app.services.similarity import cosine_similarity, evaluate_similarity, hash_distance
 from app.services.storage import storage
+from app.services.verification import spatial_similarity
 from app.worker.celery_app import celery_app
 from app.worker.embedder import embedder
 
@@ -228,6 +229,8 @@ async def _save_result(
     duration_seconds: float | None,
     processing_device: str,
     faces: list[tuple[dict[str, int], float, list[float]]],
+    thumbnail: bytes | None = None,
+    warnings: list[str] | None = None,
 ) -> int:
     matches_created = 0
     async with SessionLocal() as db:
@@ -261,6 +264,7 @@ async def _save_result(
         image.face_count = len(faces)
         image.analysis_version = settings.analysis_version
         image.processed_at = datetime.now(UTC)
+        image.error_message = "; ".join(warnings or []) or None
 
         await db.execute(delete(DetectedFace).where(DetectedFace.image_id == image.id))
         for face_index, (bounding_box, confidence, face_embedding) in enumerate(faces):
@@ -284,6 +288,7 @@ async def _save_result(
         else:
             image.status = ProcessingStatus.READY
             await db.flush()
+            nearest = []
             if embedding:
                 distance = Image.embedding.cosine_distance(embedding).label("distance")
                 nearest = (
@@ -302,95 +307,113 @@ async def _save_result(
                     )
                 ).all()
 
-                candidate_map: dict[UUID, tuple[Image, float]] = {
-                    candidate.id: (candidate, max(-1.0, min(1.0, 1.0 - float(cosine_distance))))
-                    for candidate, cosine_distance in nearest
-                }
-                fingerprint_rows = (
-                    await db.execute(
-                        select(
-                            Image.id,
-                            Image.perceptual_hash,
-                            Image.difference_hash,
-                            Image.wavelet_hash,
-                        ).where(
-                            Image.user_id == image.user_id,
-                            Image.id != image.id,
-                            Image.status.in_(
-                                [ProcessingStatus.READY, ProcessingStatus.EXACT_DUPLICATE]
-                            ),
-                        )
-                    )
-                ).all()
-                perceptual_ids: list[UUID] = []
-                for candidate_id, phash, dhash, whash in fingerprint_rows:
-                    distances = [
-                        value
-                        for value in (
-                            hash_distance(perceptual_hash, phash),
-                            hash_distance(difference_hash, dhash),
-                            hash_distance(wavelet_hash, whash),
-                        )
-                        if value is not None
-                    ]
-                    if distances and min(distances) <= settings.perceptual_prefilter_distance:
-                        perceptual_ids.append(candidate_id)
-                    if len(perceptual_ids) >= settings.similarity_candidate_limit:
-                        break
-
-                missing_ids = [candidate_id for candidate_id in perceptual_ids if candidate_id not in candidate_map]
-                if missing_ids:
-                    for candidate in (
-                        await db.scalars(select(Image).where(Image.id.in_(missing_ids)))
-                    ).all():
-                        candidate_map[candidate.id] = (
-                            candidate,
-                            cosine_similarity(embedding, candidate.embedding),
-                        )
-
+            candidate_map: dict[UUID, tuple[Image, float]] = {
+                candidate.id: (candidate, max(-1.0, min(1.0, 1.0 - float(cosine_distance))))
+                for candidate, cosine_distance in nearest
+            }
+            fingerprint_rows = (
                 await db.execute(
-                    delete(DuplicateMatch).where(
-                        or_(
-                            DuplicateMatch.source_image_id == image.id,
-                            DuplicateMatch.target_image_id == image.id,
-                        )
+                    select(
+                        Image.id,
+                        Image.perceptual_hash,
+                        Image.difference_hash,
+                        Image.wavelet_hash,
+                    ).where(
+                        Image.user_id == image.user_id,
+                        Image.id != image.id,
+                        Image.status.in_(
+                            [ProcessingStatus.READY, ProcessingStatus.EXACT_DUPLICATE]
+                        ),
                     )
                 )
-                for candidate, clip_score in candidate_map.values():
-                    evidence = evaluate_similarity(
-                        first_hashes=(perceptual_hash, difference_hash, wavelet_hash),
-                        second_hashes=(
-                            candidate.perceptual_hash,
-                            candidate.difference_hash,
-                            candidate.wavelet_hash,
-                        ),
-                        first_color=color_signature,
-                        second_color=candidate.color_signature,
-                        first_size=(width, height),
-                        second_size=(candidate.width, candidate.height),
-                        clip_score=clip_score,
-                        perceptual_hash_threshold=settings.perceptual_hash_threshold,
-                        visual_similarity_threshold=settings.visual_similarity_threshold,
+            ).all()
+            ranked_fingerprints: list[tuple[int, str, UUID]] = []
+            for candidate_id, phash, dhash, whash in fingerprint_rows:
+                distances = [
+                    value
+                    for value in (
+                        hash_distance(perceptual_hash, phash),
+                        hash_distance(difference_hash, dhash),
+                        hash_distance(wavelet_hash, whash),
                     )
-                    if evidence is None:
-                        continue
-                    source_id, target_id = sorted((image.id, candidate.id), key=str)
-                    db.add(
-                        DuplicateMatch(
-                            user_id=image.user_id,
-                            source_image_id=source_id,
-                            target_image_id=target_id,
-                            match_type=DuplicateType(evidence.match_type),
-                            similarity_score=evidence.score,
-                            phash_distance=evidence.phash_distance,
-                            clip_score=evidence.clip_score,
-                            perceptual_score=evidence.perceptual_score,
-                            color_score=evidence.color_score,
-                            aspect_score=evidence.aspect_score,
-                            evidence=evidence.reasons,
-                        )
+                    if value is not None
+                ]
+                if distances and min(distances) <= settings.perceptual_prefilter_distance:
+                    ranked_fingerprints.append((sum(sorted(distances)[:2]), str(candidate_id), candidate_id))
+            # Rank all eligible fingerprints before limiting. Database row
+            # order must not hide the best duplicate in a larger library.
+            perceptual_ids = [row[2] for row in sorted(ranked_fingerprints)[:settings.similarity_candidate_limit]]
+
+            missing_ids = [candidate_id for candidate_id in perceptual_ids if candidate_id not in candidate_map]
+            if missing_ids:
+                for candidate in (
+                    await db.scalars(select(Image).where(Image.id.in_(missing_ids)))
+                ).all():
+                    candidate_map[candidate.id] = (
+                        candidate,
+                        cosine_similarity(embedding, candidate.embedding),
                     )
-                    matches_created += 1
+
+            await db.execute(
+                delete(DuplicateMatch).where(
+                    or_(
+                        DuplicateMatch.source_image_id == image.id,
+                        DuplicateMatch.target_image_id == image.id,
+                    )
+                )
+            )
+            for candidate, clip_score in candidate_map.values():
+                spatial_score = None
+                still_images = media_kind in (MediaKind.PHOTO, MediaKind.RAW) and candidate.media_kind in (MediaKind.PHOTO, MediaKind.RAW)
+                distances = [hash_distance(a, b) for a, b in zip(
+                    (perceptual_hash, difference_hash, wavelet_hash),
+                    (candidate.perceptual_hash, candidate.difference_hash, candidate.wavelet_hash),
+                    strict=True,
+                )]
+                if thumbnail and candidate.thumbnail_key and still_images and sum(
+                    d is not None and d <= settings.perceptual_hash_threshold for d in distances
+                ) >= 2:
+                    try:
+                        spatial_score = spatial_similarity(thumbnail, storage.get_bytes(candidate.thumbnail_key))
+                    except Exception:
+                        # An unavailable thumbnail cannot confirm a duplicate.
+                        logger.warning("duplicate_verification_unavailable", candidate_id=str(candidate.id))
+                evidence = evaluate_similarity(
+                    first_hashes=(perceptual_hash, difference_hash, wavelet_hash),
+                    second_hashes=(
+                        candidate.perceptual_hash,
+                        candidate.difference_hash,
+                        candidate.wavelet_hash,
+                    ),
+                    first_color=color_signature,
+                    second_color=candidate.color_signature,
+                    first_size=(width, height),
+                    second_size=(candidate.width, candidate.height),
+                    clip_score=clip_score,
+                    perceptual_hash_threshold=settings.perceptual_hash_threshold,
+                    visual_similarity_threshold=settings.visual_similarity_threshold,
+                    spatial_score=spatial_score,
+                    still_images=still_images,
+                )
+                if evidence is None:
+                    continue
+                source_id, target_id = sorted((image.id, candidate.id), key=str)
+                db.add(
+                    DuplicateMatch(
+                        user_id=image.user_id,
+                        source_image_id=source_id,
+                        target_image_id=target_id,
+                        match_type=DuplicateType(evidence.match_type),
+                        similarity_score=evidence.score,
+                        phash_distance=evidence.phash_distance,
+                        clip_score=evidence.clip_score,
+                        perceptual_score=evidence.perceptual_score,
+                        color_score=evidence.color_score,
+                        aspect_score=evidence.aspect_score,
+                        evidence=evidence.reasons,
+                    )
+                )
+                matches_created += 1
 
         job = await db.scalar(select(ProcessingJob).where(ProcessingJob.image_id == image_id))
         if job:
@@ -405,7 +428,7 @@ async def _mark_failed(image_id: UUID, message: str) -> None:
     async with SessionLocal() as db:
         image = await db.get(Image, image_id)
         if image:
-            image.status = ProcessingStatus.FAILED
+            image.status = ProcessingStatus.EXACT_DUPLICATE if image.exact_duplicate_of_id else ProcessingStatus.FAILED
             image.error_message = message[:1000]
         job = await db.scalar(select(ProcessingJob).where(ProcessingJob.image_id == image_id))
         if job:
@@ -415,12 +438,64 @@ async def _mark_failed(image_id: UUID, message: str) -> None:
         await db.commit()
 
 
+async def _reuse_exact_analysis(image_id: UUID, original_id: UUID) -> bool:
+    """Identical bytes can reuse successful analysis without another model run."""
+    async with SessionLocal() as db:
+        original = await db.get(Image, original_id)
+        image = await db.get(Image, image_id)
+        if not original or not image or not original.processed_at or original.error_message:
+            return False
+        if original.user_id != image.user_id or original.status not in (ProcessingStatus.READY, ProcessingStatus.EXACT_DUPLICATE):
+            return False
+        if original.analysis_version < settings.analysis_version or not original.thumbnail_key:
+            return False
+        if original.sha256 != image.sha256:
+            return False
+        try:
+            storage.put_bytes(image.thumbnail_key, storage.get_bytes(original.thumbnail_key), "image/webp")
+        except Exception:
+            logger.warning("exact_analysis_reuse_unavailable", image_id=str(image_id))
+            return False
+        for field in (
+            "width", "height", "perceptual_hash", "difference_hash", "wavelet_hash",
+            "color_signature", "exif_timestamp", "camera_model", "embedding", "blur_score",
+            "exposure_score", "resolution_score", "screenshot_quality_score", "quality_score",
+            "is_screenshot", "smart_labels", "ocr_text", "ocr_language", "ocr_layout",
+            "document_type", "media_kind", "frame_count", "duration_seconds",
+            "processing_device", "face_count", "analysis_version",
+        ):
+            setattr(image, field, getattr(original, field))
+        await db.execute(delete(DetectedFace).where(DetectedFace.image_id == image_id))
+        for face in (await db.scalars(select(DetectedFace).where(DetectedFace.image_id == original_id))).all():
+            db.add(DetectedFace(user_id=image.user_id, image_id=image_id, face_index=face.face_index,
+                                bounding_box=face.bounding_box, embedding=face.embedding,
+                                confidence=face.confidence, embedding_model=face.embedding_model))
+        image.status = ProcessingStatus.EXACT_DUPLICATE
+        image.processed_at = datetime.now(UTC)
+        image.error_message = None
+        job = await db.scalar(select(ProcessingJob).where(ProcessingJob.image_id == image_id))
+        if job:
+            job.status = JobStatus.COMPLETE
+            job.completed_at = datetime.now(UTC)
+            job.error_message = None
+        await db.commit()
+    return True
+
+
 async def _process(image_id: UUID) -> dict[str, object]:
     started = time.perf_counter()
     image = await _set_running(image_id)
     if image is None:
         return {"status": "missing", "image_id": str(image_id)}
     try:
+        if image.exact_duplicate_of_id and await _reuse_exact_analysis(image_id, image.exact_duplicate_of_id):
+            duration = time.perf_counter() - started
+            IMAGES_PROCESSED.inc()
+            PROCESSING_DURATION.observe(duration)
+            _heartbeat()
+            logger.info("exact_analysis_reused", image_id=str(image_id))
+            return {"status": "complete", "image_id": str(image_id), "duration_seconds": duration,
+                    "matches": 0, "device": "reused"}
         data = storage.get_bytes(image.object_key)
         media = decode_media(data, image.mime_type)
         (
@@ -435,9 +510,21 @@ async def _process(image_id: UUID) -> dict[str, object]:
             camera,
         ) = _metadata_for_media(media)
         storage.put_bytes(image.thumbnail_key, thumbnail, "image/webp")
-        embedding, inference_seconds, device = embedder.image_embedding_frames(media.frames)
+        warnings: list[str] = []
+        try:
+            embedding, inference_seconds, device = embedder.image_embedding_frames(media.frames)
+        except Exception:
+            logger.exception("semantic_analysis_unavailable", image_id=str(image_id))
+            embedding, inference_seconds, device = None, 0.0, "unavailable"
+            warnings.append("AI similarity unavailable; fingerprint matching still ran. Retry analysis later.")
         rgb = media.primary
-        ocr = extract_ocr_layout(rgb)
+        from app.services.intelligence import OcrResult
+        try:
+            ocr = extract_ocr_layout(rgb)
+        except Exception:
+            logger.exception("ocr_unavailable", image_id=str(image_id))
+            ocr = OcrResult(text="", language=None, layout=[], document_type=None)
+            warnings.append("OCR unavailable; retry analysis later.")
         screenshot = looks_like_screenshot(
             rgb,
             filename=image.original_filename,
@@ -445,13 +532,25 @@ async def _process(image_id: UUID) -> dict[str, object]:
             ocr_text=ocr.text,
         )
         quality = quality_metrics(rgb, is_screenshot=screenshot, ocr_text=ocr.text)
-        analyzed_faces = face_engine.analyze(rgb)
+        try:
+            analyzed_faces = face_engine.analyze(rgb)
+        except Exception:
+            logger.exception("face_analysis_unavailable", image_id=str(image_id))
+            analyzed_faces = []
+            warnings.append("Face analysis unavailable; retry analysis later.")
+        semantic_labels = {}
+        if embedding:
+            try:
+                semantic_labels = _semantic_labels(embedding)
+            except Exception:
+                logger.exception("smart_labels_unavailable", image_id=str(image_id))
+                warnings.append("Smart labels unavailable; retry analysis later.")
         faces = [
             (face.bounding_box, face.confidence, face.embedding)
             for face in analyzed_faces
         ]
         labels = merge_smart_labels(
-            _semantic_labels(embedding),
+            semantic_labels,
             is_screenshot=screenshot,
             ocr_text=ocr.text,
             face_boxes=[face.bounding_box for face in analyzed_faces],
@@ -493,6 +592,8 @@ async def _process(image_id: UUID) -> dict[str, object]:
             duration_seconds=media.duration_seconds,
             processing_device=device,
             faces=faces,
+            thumbnail=thumbnail,
+            warnings=warnings,
         )
         duration = time.perf_counter() - started
         IMAGES_PROCESSED.inc()

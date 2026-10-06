@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "imagevault-api"
-version = "1.1.0"
+version = "1.2.0"
 description = "Private image storage and visual intelligence for Azure and self-hosted deployments"
 requires-python = ">=3.11,<3.14"
 dependencies = [
@@ -44,6 +44,7 @@ worker = [
 ]
 dev = [
   "aiosqlite==0.21.0",
+  "fakeredis[lua]==2.28.1",
   "pytest==8.3.5",
   "pytest-asyncio==0.26.0",
   "ruff==0.11.8",

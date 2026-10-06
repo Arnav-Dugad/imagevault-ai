@@ -5,6 +5,7 @@ import { api } from "../lib/api";
 import { useAuth } from "../providers/AuthProvider";
 import { AuthPage } from "./AuthPage";
 import { SystemPage } from "./SystemPage";
+import { AppLayout } from "../components/AppLayout";
 
 vi.mock("../lib/api", () => ({ api: vi.fn(), ApiError: class extends Error {} }));
 vi.mock("../providers/AuthProvider", () => ({ useAuth: vi.fn() }));
@@ -53,5 +54,21 @@ describe("cloud service status", () => {
     expect(screen.queryByText("All services ready")).not.toBeInTheDocument();
     expect(screen.queryByText("Monitoring")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Download ImageVault/ })).toHaveAttribute("href", "https://github.com/Arnav-Dugad/imagevault-ai/releases/latest");
+  });
+});
+
+
+describe("simple classroom navigation", () => {
+  it("keeps four main links and expands advanced tools when visited", () => {
+    vi.mocked(useAuth).mockReturnValue({ user: { id: "user", email: "test@example.com", display_name: "Test User", created_at: "2026-01-01T00:00:00Z" }, loading: false, register: vi.fn(), login: vi.fn(), logout: vi.fn() });
+    const view = render(<MemoryRouter initialEntries={["/gallery"]}><AppLayout><p>Gallery content</p></AppLayout></MemoryRouter>);
+    const details = screen.getByText("Advanced").closest("details");
+    expect(details).not.toHaveAttribute("open");
+    expect(screen.getByRole("link", { name: "Upload" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Dashboard" })).toBeInTheDocument();
+    view.unmount();
+    render(<MemoryRouter initialEntries={["/system"]}><AppLayout><p>System content</p></AppLayout></MemoryRouter>);
+    expect(screen.getByText("Advanced").closest("details")).toHaveAttribute("open");
+    expect(screen.getByRole("link", { name: "System status" })).toBeInTheDocument();
   });
 });

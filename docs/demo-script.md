@@ -1,119 +1,45 @@
-# ImageVault AI live demonstration script
+# Five-minute classroom presentation
 
-## Before the room opens
+## Before class
 
-1. Run `docker compose up -d --build` early enough for the initial OpenCLIP download.
-2. Confirm `docker compose ps` shows healthy application services.
-3. Generate the synthetic set with `python scripts/generate_demo_images.py`.
-4. Open ImageVault, MinIO, Grafana, Prometheus, the GitHub Actions page, and the Terraform directory in separate tabs.
-5. Create or reset the demo account. Do not reset any other user.
-6. Upload one non-exact image once so the model is loaded; then clear the demo account if the presentation should start empty.
-7. Keep the actual account password and `.env` out of projected terminals.
+1. Deploy the Azure website using [azure-students.md](azure-students.md). Start the VM well before presenting; daily shutdown does not automatically start it again.
+2. Download the latest GitHub release. It includes six synthetic files under `demo-images/`. Source checkouts can generate them with `python scripts/generate_demo.py` after installing Pillow.
+3. Sign in with a demonstration account. Upload `01-original.png` beforehand to download/cache the model, then wait for processing to finish. In **Advanced → System status**, check API, storage, worker, and model. Model downloads require internet access on the VM.
+4. Rehearse the remaining five uploads. Check that the resized and JPEG copies show verified near-duplicate evidence, the exact copy shows SHA-256 evidence, and the document is unrelated. The mirrored image may appear as similar content, depending on the model; it must stay for manual review.
+5. Clear the rehearsal images, retaining the original, before class. Save screenshots of the successful run and GitHub checks as a fallback if the network fails. Do not claim screenshots are a live demo.
 
-## Part 1 — application story (4–5 minutes)
+## 0:00–0:40 — Problem and purpose
 
-1. Register or log in. State: “Authentication is self-hosted; passwords are Argon2 hashes in our PostgreSQL database.”
-2. Show the polished empty dashboard, upload call-to-action, and private processing indicator.
-3. Open Upload and select all six generated images.
-4. Explain the processing order displayed beside the drop zone:
-   - file validation;
-   - SHA-256 exact lookup;
-   - object storage and background job;
-   - thumbnail, pHash, OpenCLIP, and pgvector query.
-5. Point out the immediate exact match between `01-...original.jpg` and `02-...exact-copy.jpg`. Say: “This is byte equality, not an AI prediction.”
-6. Open Gallery and wait for `READY` states. Mention that the HTTP upload returned before AI processing completed.
-7. Open the original image detail and show dimensions, object key abstraction, hash, and visual match cards.
-8. Open Duplicate Review. Compare the exact copy with resized/compressed/edited candidates. State that thresholds are configurable and advisory.
-9. Select a duplicate, show the confirmation dialog and storage estimate, then cancel once to prove deletion is explicit. Optionally delete during the final rehearsal.
-10. Return to Dashboard and show updated counts, recoverable exact bytes, activity chart, and service confidence.
+“People collect repeated photos and waste space. ImageVault stores photos privately, detects identical files with hashes, and finds visually similar content with AI. It is a website, so classmates can use a browser.”
 
-## Part 2 — object storage (1 minute)
+## 0:40–1:40 — Upload
 
-1. Open the MinIO console at `http://localhost:9001` and sign in with local `.env` credentials.
-2. Navigate to the private `imagevault` bucket.
-3. Show `users/{uuid}/originals/` and `users/{uuid}/thumbnails/`.
-4. Explain that binaries are objects, PostgreSQL holds metadata, and the S3-compatible design could conceptually migrate without using AWS now.
+Open **Upload** and add files 02–06. Explain that the exact copy can be identified immediately from SHA-256, while a background worker handles the expensive image analysis. The browser stays responsive.
 
-## Part 3 — containers (1 minute)
+## 1:40–3:00 — Detection and evidence
 
-```powershell
-docker compose ps
-```
+Open **Duplicate review**. Show the exact-copy evidence and a resized/recompressed near duplicate. Explain the three levels:
 
-Point to frontend, Nginx, FastAPI, worker, PostgreSQL/pgvector, MinIO, Redis, Prometheus, and Grafana. Explain the private Compose network, volumes, health checks, and the intentionally single AI worker.
+| Result | Meaning | Action |
+|---|---|---|
+| Exact copy | Identical file bytes | Can select with “Select exact” |
+| Near duplicate | Multiple fingerprints and aligned pixels agree | Compare manually |
+| Similar content | AI recognizes related content | Keep for manual review |
 
-## Part 4 — Kubernetes and scaling (2 minutes)
+“An AI similarity score is resemblance, not a probability that deleting the photo is safe. We do not infer a match just because two photos each resemble a third.”
 
-If using the already-deployed Minikube environment:
+## 3:00–3:40 — Safe cleanup and dashboard
 
-```powershell
-kubectl get pods,svc,pvc -n imagevault
-kubectl get deployment imagevault-backend -n imagevault
-kubectl scale deployment imagevault-backend -n imagevault --replicas=3
-kubectl rollout status deployment/imagevault-backend -n imagevault
-kubectl get pods -n imagevault -l app=imagevault-backend
-```
+Use **Select exact**, then **Review delete**. Explain what will be removed and show the confirmation. Delete only the demonstration copy. Open **Dashboard** to show storage and upload totals.
 
-Explain ConfigMaps versus Secrets, readiness versus liveness, PVCs, requests/limits, Deployments versus StatefulSets, and why the stateless API can scale while the model worker remains one replica on a laptop.
+## 3:40–4:30 — Architecture
 
-After the demonstration, return to one replica:
+Show the compact diagram in [architecture.md](architecture.md). Five containers run on the VM: Caddy, API, worker, PostgreSQL, and Redis. Private originals are in Azure Blob Storage. Managed identity avoids storage account keys; signed preview links expire.
 
-```powershell
-kubectl scale deployment imagevault-backend -n imagevault --replicas=1
-```
+## 4:30–5:00 — Reproducibility and limits
 
-## Part 5 — monitoring (2 minutes)
+Show a passing GitHub Actions run and the downloadable release. Explain that Azure for Students credit funds the AI-capable VM; it is not unlimited free hosting. Crops, heavy edits, low-detail pictures, and video can require manual review. Face albums and OCR are advanced features with their own limits, rather than proof that duplicate detection is perfect.
 
-1. Open the System Status page and show API, PostgreSQL, MinIO, worker, model, pending jobs, and Redis queue.
-2. Run small traffic if graphs are quiet:
+## Optional rubric material
 
-```powershell
-python scripts/generate_load.py --password "YOUR_LOCAL_DEMO_PASSWORD" --iterations 30
-```
-
-3. Open the provisioned Grafana dashboard at `http://localhost:3001`.
-4. Show request rate, latency, upload/processing counts, exact/similar counts, inference time, and failures.
-5. Briefly show the Prometheus targets page. State that metrics contain no filenames, users, image bytes, or credentials.
-
-## Part 6 — CI/CD (1 minute)
-
-Open a successful GitHub Actions run. Explain:
-
-```text
-push / pull request
-  → backend lint and tests
-  → frontend audit, lint, tests and build
-  → Compose / Dockerfile checks
-  → Kubernetes render
-  → Terraform format and validation
-```
-
-Do not claim automatic public deployment; the release target is the reproducible local private cloud.
-
-## Part 7 — Infrastructure as Code (1 minute)
-
-```powershell
-cd infra/terraform
-terraform fmt -check -recursive
-terraform validate
-terraform plan
-```
-
-Show that only local Kubernetes/kubectl providers exist. Explain declarative desired state and why the plan is reviewed before apply/destroy.
-
-## Closing statement
-
-“ImageVault AI is the application workload. The core project contribution is the complete private-cloud and DevOps lifecycle: objects, database and vectors, asynchronous services, containers, orchestration, Infrastructure as Code, CI validation, health checks, logs, and monitoring—all locally controlled and with no additional cloud bill.”
-
-## Evidence checklist after the final rehearsal
-
-- `[ ] Dashboard screenshot`
-- `[ ] Exact duplicate evidence screenshot`
-- `[ ] Visual match evidence screenshot`
-- `[ ] MinIO object hierarchy screenshot`
-- `[ ] Docker Compose services screenshot`
-- `[ ] Kubernetes pods/PVCs screenshot`
-- `[ ] Grafana dashboard screenshot`
-- `[ ] Successful CI run screenshot`
-- `[ ] Terraform validate/plan screenshot`
-- `[ ] Actual benchmark and test output`
+Only if your lecturer requires them, show the existing local Kubernetes/Terraform examples and Prometheus/Grafana monitoring. They are separate extensions, not required to use the Azure website. Keep the main explanation focused on one deployed stack.

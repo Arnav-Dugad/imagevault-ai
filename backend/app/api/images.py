@@ -277,6 +277,7 @@ async def reindex_images(
             and image.wavelet_hash
             and image.color_signature
             and image.quality_score is not None
+            and not image.error_message
         )
         if missing_only and has_smart_index:
             continue

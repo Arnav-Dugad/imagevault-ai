@@ -57,6 +57,7 @@ def test_similarity_engine_explains_near_duplicate_match():
         first_size=(1600, 900),
         second_size=(1280, 720),
         clip_score=0.88,
+        spatial_score=0.98,
         perceptual_hash_threshold=8,
         visual_similarity_threshold=0.85,
     )

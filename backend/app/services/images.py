@@ -9,7 +9,7 @@ from PIL import Image as PillowImage
 from PIL import UnidentifiedImageError
 
 from app.core.config import get_settings
-from app.models import DuplicateType, Image, MediaKind
+from app.models import Image, MediaKind
 from app.schemas import ImageSummary
 from app.services.storage import storage
 
@@ -196,9 +196,3 @@ def image_summary(image: Image, best_similarity: float | None = None) -> ImageSu
 
 def page_count(total: int, page_size: int) -> int:
     return max(1, math.ceil(total / page_size))
-
-
-def candidate_type(score: float, phash_distance: int | None) -> DuplicateType:
-    if phash_distance is not None and phash_distance <= get_settings().perceptual_hash_threshold:
-        return DuplicateType.PERCEPTUAL
-    return DuplicateType.VISUAL
