@@ -17,8 +17,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(Boolean(getToken()));
 
   useEffect(() => {
-    if (!getToken()) return;
-    api<User>("/auth/me").then(setUser).catch(() => setToken(null)).finally(() => setLoading(false));
+    const token = getToken();
+    if (!token) return;
+    const controller = new AbortController();
+    api<User>("/auth/me", { signal: controller.signal })
+      .then((value) => { if (!controller.signal.aborted && getToken() === token) setUser(value); })
+      .catch(() => { /* API handles expired sessions; connection errors preserve login. */ })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
   }, []);
 
   useEffect(() => {

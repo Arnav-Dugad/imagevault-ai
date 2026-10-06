@@ -15,6 +15,7 @@ from app.models import (
     DuplicateMatch,
     DuplicateType,
     Image,
+    ObjectDeletion,
     JobStatus,
     ProcessingJob,
     ProcessingStatus,
@@ -32,6 +33,7 @@ from app.schemas import (
     UploadResponse,
 )
 from app.services.images import (
+    MIME_EXTENSIONS,
     image_summary,
     media_kind_for,
     object_keys,
@@ -40,6 +42,8 @@ from app.services.images import (
     sha256_bytes,
     similarity_classification,
 )
+from app.services.cleanup import purge_objects
+from app.services.matches import current_match_predicates
 from app.services.storage import storage
 from app.worker.tasks import embed_text, process_image
 
@@ -65,6 +69,7 @@ async def similarity_map(image_ids: list[UUID], db: Database) -> dict[UUID, floa
                 DuplicateMatch.target_image_id,
                 DuplicateMatch.similarity_score,
             ).where(
+                *current_match_predicates(),
                 or_(
                     DuplicateMatch.source_image_id.in_(image_ids),
                     DuplicateMatch.target_image_id.in_(image_ids),
@@ -79,6 +84,42 @@ async def similarity_map(image_ids: list[UUID], db: Database) -> dict[UUID, floa
         if target_id in image_ids:
             result[target_id] = max(result.get(target_id, 0), score)
     return result
+
+
+@router.get("/config")
+async def upload_config(user: CurrentUser) -> dict[str, Any]:
+    return {
+        "max_batch_files": settings.max_batch_files,
+        "max_upload_bytes": settings.max_upload_bytes,
+        "max_video_upload_bytes": settings.max_video_upload_bytes,
+        "allowed_extensions": [extension for mime, extension in MIME_EXTENSIONS.items()
+                               if mime in settings.allowed_mime_types] +
+                              ([".jpeg"] if "image/jpeg" in settings.allowed_mime_types else []),
+    }
+
+
+async def dispatch_images(image_ids: list[UUID], db: Database) -> set[UUID]:
+    """Publish off the event loop and make broker failures visible and retryable."""
+    failed: set[UUID] = set()
+    for image_id in image_ids:
+        try:
+            await asyncio.to_thread(cast(Any, process_image).delay, str(image_id))
+        except Exception:
+            logger.exception("Unable to enqueue image", extra={"image_id": str(image_id)})
+            failed.add(image_id)
+            image = await db.get(Image, image_id)
+            if image:
+                image.status = (ProcessingStatus.EXACT_DUPLICATE if image.exact_duplicate_of_id
+                                else ProcessingStatus.FAILED)
+                image.error_message = "File saved; worker queue unavailable. Retry using Rebuild smart index."
+            job = await db.scalar(select(ProcessingJob).where(ProcessingJob.image_id == image_id))
+            if job:
+                job.status = JobStatus.FAILED
+                job.error_message = "Worker queue unavailable; retry analysis."
+                job.completed_at = datetime.now(UTC)
+    if failed:
+        await db.commit()
+    return failed
 
 
 @router.post("/upload", response_model=UploadResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -100,10 +141,9 @@ async def upload_images(
     stored_keys: list[str] = []
     try:
         used_bytes = 0
+        # Serialize uploads and deletions per account for quota and exact-family consistency.
+        await db.execute(select(User.id).where(User.id == user.id).with_for_update())
         if settings.max_user_storage_bytes:
-            # Serialize concurrent uploads for this account on PostgreSQL, so
-            # two batches cannot both pass the same quota check.
-            await db.execute(select(User.id).where(User.id == user.id).with_for_update())
             used_bytes = int(await db.scalar(
                 select(func.coalesce(func.sum(Image.file_size), 0)).where(Image.user_id == user.id)
             ) or 0)
@@ -121,8 +161,8 @@ async def upload_images(
             )
             image_id = uuid4()
             original_key, thumbnail_key = object_keys(user.id, image_id, mime_type)
-            await asyncio.to_thread(storage.put_bytes, original_key, data, mime_type)
             stored_keys.append(original_key)
+            await asyncio.to_thread(storage.put_bytes, original_key, data, mime_type)
 
             exact = duplicate is not None
             image = Image(
@@ -156,10 +196,6 @@ async def upload_images(
             await db.flush()
             queued_ids.append(image_id)
 
-            IMAGE_UPLOADS.inc()
-            UPLOADED_BYTES.inc(len(data))
-            if exact:
-                EXACT_DUPLICATES.inc()
             response_items.append(
                 UploadItem(
                     image=image_summary(image),
@@ -175,18 +211,29 @@ async def upload_images(
         await db.commit()
     except Exception:
         await db.rollback()
-        for key in stored_keys:
+        if stored_keys:
             try:
-                await asyncio.to_thread(storage.delete, key)
+                for key in stored_keys:
+                    db.add(ObjectDeletion(object_key=key))
+                await db.commit()
+                await purge_objects(db, storage, keys=stored_keys)
             except Exception:
-                logger.exception("Failed to clean up object after upload rollback")
+                await db.rollback()
+                logger.exception("Failed to persist upload rollback cleanup")
         raise
 
-    for image_id in queued_ids:
-        try:
-            cast(Any, process_image).delay(str(image_id))
-        except Exception:
-            logger.exception("Unable to enqueue image", extra={"image_id": str(image_id)})
+    for item in response_items:
+        IMAGE_UPLOADS.inc()
+        UPLOADED_BYTES.inc(item.image.file_size)
+        if item.exact_duplicate:
+            EXACT_DUPLICATES.inc()
+
+    failed = await dispatch_images(queued_ids, db)
+    for item in response_items:
+        if item.image.id in failed:
+            image = await db.get(Image, item.image.id)
+            item.image = image_summary(image)
+            item.message = "File saved; queue unavailable. Retry using Rebuild smart index."
     return UploadResponse(batch_id=batch_id, items=response_items)
 
 
@@ -210,10 +257,12 @@ async def list_images(
     elif filter_by == "similar":
         match_ids = select(DuplicateMatch.source_image_id).where(
             DuplicateMatch.user_id == user.id,
+            *current_match_predicates(),
             DuplicateMatch.match_type.in_([DuplicateType.VISUAL, DuplicateType.PERCEPTUAL]),
         )
         target_ids = select(DuplicateMatch.target_image_id).where(
             DuplicateMatch.user_id == user.id,
+            *current_match_predicates(),
             DuplicateMatch.match_type.in_([DuplicateType.VISUAL, DuplicateType.PERCEPTUAL]),
         )
         predicates.append(or_(Image.id.in_(match_ids), Image.id.in_(target_ids)))
@@ -281,7 +330,10 @@ async def reindex_images(
         )
         if missing_only and has_smart_index:
             continue
-        if image.status in (ProcessingStatus.PENDING, ProcessingStatus.PROCESSING):
+        job = await db.scalar(select(ProcessingJob).where(ProcessingJob.image_id == image.id))
+        if image.status in (ProcessingStatus.PENDING, ProcessingStatus.PROCESSING) or (
+            job and job.status in (JobStatus.PENDING, JobStatus.RUNNING)
+        ):
             continue
         image.status = (
             ProcessingStatus.EXACT_DUPLICATE
@@ -289,6 +341,8 @@ async def reindex_images(
             else ProcessingStatus.PENDING
         )
         image.error_message = None
+        image.processed_at = None
+        image.analysis_version = 0
         job = await db.scalar(select(ProcessingJob).where(ProcessingJob.image_id == image.id))
         if job:
             job.status = JobStatus.PENDING
@@ -300,18 +354,14 @@ async def reindex_images(
         queued.append(image.id)
     await db.commit()
 
-    for image_id in queued:
-        try:
-            cast(Any, process_image).delay(str(image_id))
-        except Exception:
-            logger.exception("Unable to enqueue reindex", extra={"image_id": str(image_id)})
+    failed = await dispatch_images(queued, db)
+    accepted = len(queued) - len(failed)
     return ReindexResponse(
-        queued=len(queued),
-        message=(
-            f"Queued {len(queued)} image{'s' if len(queued) != 1 else ''} for smart re-analysis"
-            if queued
-            else "Every image already has the latest smart index"
-        ),
+        queued=accepted,
+        failed=len(failed),
+        message=(f"Queued {accepted} images; {len(failed)} could not be queued. Retry later."
+                 if failed else f"Queued {accepted} images for smart re-analysis"
+                 if queued else "No images need re-analysis or analysis is already in progress"),
     )
 
 
@@ -324,8 +374,11 @@ async def smart_search(
     page_size: Annotated[int, Query(ge=1, le=100)] = 24,
 ) -> ImageListResponse:
     cleaned = " ".join(query.split())
-    task = cast(Any, embed_text).delay(cleaned)
+    if len(cleaned) < 2:
+        raise HTTPException(status_code=422, detail="Enter at least two non-space characters")
+    task = None
     try:
+        task = await asyncio.to_thread(cast(Any, embed_text).delay, cleaned)
         vector = await asyncio.to_thread(
             task.get,
             timeout=settings.semantic_search_timeout_seconds,
@@ -339,7 +392,8 @@ async def smart_search(
         ) from exc
     finally:
         try:
-            task.forget()
+            if task is not None:
+                await asyncio.to_thread(task.forget)
         except Exception:
             pass
 
@@ -409,6 +463,40 @@ async def smart_search(
     )
 
 
+async def prepare_deletion(images: list[Image], user_id: UUID, db: Database) -> list[str]:
+    """Keep exact-copy families intact and commit cleanup with metadata deletion."""
+    deleting_ids = {image.id for image in images}
+    digests = {image.sha256 for image in images}
+    survivors = list((await db.scalars(select(Image).where(
+        Image.user_id == user_id, Image.sha256.in_(digests),
+        Image.id.not_in(deleting_ids),
+    ).order_by(Image.created_at, Image.id).with_for_update())).all())
+    for digest in digests:
+        family = [image for image in survivors if image.sha256 == digest]
+        if not family:
+            continue
+        keeper = next((image for image in family if image.exact_duplicate_of_id is None), family[0])
+        keeper.exact_duplicate_of_id = None
+        if keeper.status == ProcessingStatus.EXACT_DUPLICATE:
+            job = await db.scalar(select(ProcessingJob).where(ProcessingJob.image_id == keeper.id))
+            keeper.status = (ProcessingStatus.READY if keeper.processed_at else
+                             ProcessingStatus.FAILED if job and job.status == JobStatus.FAILED else
+                             ProcessingStatus.PROCESSING if job and job.status == JobStatus.RUNNING else
+                             ProcessingStatus.PENDING)
+        for copy in family:
+            if copy.id != keeper.id:
+                copy.exact_duplicate_of_id = keeper.id
+                copy.status = ProcessingStatus.EXACT_DUPLICATE
+    keys = list(dict.fromkeys(key for image in images
+                             for key in (image.thumbnail_key, image.object_key) if key))
+    for key in keys:
+        db.add(ObjectDeletion(object_key=key))
+    await db.flush()  # re-link survivors before the old keeper is removed
+    for image in images:
+        await db.delete(image)
+    return keys
+
+
 @router.post("/bulk-delete", response_model=BulkDeleteResponse)
 async def bulk_delete_images(
     request: BulkDeleteRequest,
@@ -417,11 +505,12 @@ async def bulk_delete_images(
 ) -> BulkDeleteResponse:
     if not request.confirm:
         raise HTTPException(status_code=400, detail="Explicit deletion confirmation is required")
+    await db.execute(select(User.id).where(User.id == user.id).with_for_update())
     image_ids = list(dict.fromkeys(request.image_ids))
     images = list(
         (
             await db.scalars(
-                select(Image).where(Image.user_id == user.id, Image.id.in_(image_ids))
+                select(Image).where(Image.user_id == user.id, Image.id.in_(image_ids)).with_for_update()
             )
         ).all()
     )
@@ -429,9 +518,7 @@ async def bulk_delete_images(
         raise HTTPException(status_code=404, detail="One or more images were not found")
 
     recovered_bytes = sum(image.file_size for image in images)
-    for image in images:
-        storage.delete(image.thumbnail_key)
-        storage.delete(image.object_key)
+    keys = await prepare_deletion(images, user.id, db)
     db.add(
         ActivityLog(
             user_id=user.id,
@@ -443,13 +530,14 @@ async def bulk_delete_images(
             },
         )
     )
-    for image in images:
-        await db.delete(image)
     await db.commit()
+    pending = await purge_objects(db, storage, keys=keys)
     return BulkDeleteResponse(
+        cleanup_pending=pending,
         deleted=len(images),
         recovered_bytes=recovered_bytes,
-        message=f"Deleted {len(images)} image{'s' if len(images) != 1 else ''}",
+        message=(f"Deleted {len(images)} image{'s' if len(images) != 1 else ''}"
+                 + ("; storage cleanup will retry automatically" if pending else "")),
     )
 
 
@@ -460,6 +548,7 @@ async def similar_for(image: Image, db: Database) -> list[SimilarImage]:
                 select(DuplicateMatch)
                 .where(
                     DuplicateMatch.user_id == image.user_id,
+                    *current_match_predicates(),
                     or_(
                         DuplicateMatch.source_image_id == image.id,
                         DuplicateMatch.target_image_id == image.id,
@@ -476,7 +565,7 @@ async def similar_for(image: Image, db: Database) -> list[SimilarImage]:
     candidates = {
         item.id: item
         for item in (
-            (await db.scalars(select(Image).where(Image.id.in_(candidate_ids)))).all()
+            (await db.scalars(select(Image).where(Image.id.in_(candidate_ids), Image.user_id == image.user_id))).all()
             if candidate_ids
             else []
         )
@@ -545,9 +634,9 @@ async def delete_image(
 ) -> MessageResponse:
     if not confirm:
         raise HTTPException(status_code=400, detail="Explicit deletion confirmation is required")
+    await db.execute(select(User.id).where(User.id == user.id).with_for_update())
     image = await owned_image(image_id, user.id, db)
-    storage.delete(image.thumbnail_key)
-    storage.delete(image.object_key)
+    keys = await prepare_deletion([image], user.id, db)
     db.add(
         ActivityLog(
             user_id=user.id,
@@ -555,6 +644,7 @@ async def delete_image(
             details={"filename": image.original_filename, "sha256": image.sha256},
         )
     )
-    await db.delete(image)
     await db.commit()
-    return MessageResponse(message=f"Deleted {image.original_filename}")
+    pending = await purge_objects(db, storage, keys=keys)
+    suffix = "; storage cleanup will retry automatically" if pending else ""
+    return MessageResponse(message=f"Deleted {image.original_filename}{suffix}")

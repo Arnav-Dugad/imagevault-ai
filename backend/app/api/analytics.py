@@ -9,7 +9,8 @@ from fastapi import APIRouter, Query
 from sqlalchemy import desc, select
 
 from app.api.dependencies import CurrentUser, Database
-from app.models import DuplicateMatch, DuplicateType, Image, ProcessingStatus
+from app.services.matches import current_match_predicates
+from app.models import DuplicateMatch, DuplicateType, Image
 from app.schemas import (
     DashboardResponse,
     DistributionPoint,
@@ -19,7 +20,7 @@ from app.schemas import (
     TimeSeriesPoint,
 )
 from app.core.config import get_settings
-from app.services.images import image_summary, similarity_classification
+from app.services.images import analysis_pending, image_summary, similarity_classification
 
 router = APIRouter(tags=["Analytics"])
 
@@ -89,7 +90,7 @@ async def _duplicate_groups(
         (
             await db.scalars(
                 select(DuplicateMatch)
-                .where(DuplicateMatch.user_id == user_id)
+                .where(DuplicateMatch.user_id == user_id, *current_match_predicates())
                 .order_by(desc(DuplicateMatch.similarity_score))
             )
         ).all()
@@ -189,6 +190,7 @@ async def dashboard(user: CurrentUser, db: Database) -> DashboardResponse:
             await db.scalars(
                 select(DuplicateMatch).where(
                     DuplicateMatch.user_id == user.id,
+                    *current_match_predicates(),
                     DuplicateMatch.match_type.in_([DuplicateType.VISUAL, DuplicateType.PERCEPTUAL]),
                 )
             )
@@ -211,7 +213,7 @@ async def dashboard(user: CurrentUser, db: Database) -> DashboardResponse:
         storage_used=sum(image.file_size for image in images),
         potential_savings=sum(image.file_size for image in exact),
         processing_images=sum(
-            image.status in (ProcessingStatus.PENDING, ProcessingStatus.PROCESSING) for image in images
+            analysis_pending(image) for image in images
         ),
         uploads_over_time=[
             TimeSeriesPoint(
@@ -252,7 +254,7 @@ async def duplicate_review(
         ),
         recoverable_bytes=sum(group.recoverable_bytes for group in groups),
         processing_images=sum(
-            image.status in (ProcessingStatus.PENDING, ProcessingStatus.PROCESSING)
+            analysis_pending(image)
             for image in scoped_images
         ),
         total_images_scanned=len(scoped_images),
