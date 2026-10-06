@@ -26,6 +26,7 @@ from app.models import (
     DuplicateMatch,
     DuplicateType,
     Image,
+    ObjectDeletion,
     JobStatus,
     MediaKind,
     ProcessingJob,
@@ -231,12 +232,12 @@ async def _save_result(
     faces: list[tuple[dict[str, int], float, list[float]]],
     thumbnail: bytes | None = None,
     warnings: list[str] | None = None,
-) -> int:
+) -> int | None:
     matches_created = 0
     async with SessionLocal() as db:
-        image = await db.get(Image, image_id)
+        image = await db.scalar(select(Image).where(Image.id == image_id).with_for_update())
         if image is None:
-            return 0
+            return None
         image.width = width
         image.height = height
         image.perceptual_hash = perceptual_hash
@@ -282,7 +283,7 @@ async def _save_result(
 
         if image.exact_duplicate_of_id:
             original = await db.get(Image, image.exact_duplicate_of_id)
-            if original:
+            if original and original.embedding is not None and original.analysis_version >= settings.analysis_version:
                 image.embedding = original.embedding
             image.status = ProcessingStatus.EXACT_DUPLICATE
         else:
@@ -442,7 +443,7 @@ async def _reuse_exact_analysis(image_id: UUID, original_id: UUID) -> bool:
     """Identical bytes can reuse successful analysis without another model run."""
     async with SessionLocal() as db:
         original = await db.get(Image, original_id)
-        image = await db.get(Image, image_id)
+        image = await db.scalar(select(Image).where(Image.id == image_id).with_for_update())
         if not original or not image or not original.processed_at or original.error_message:
             return False
         if original.user_id != image.user_id or original.status not in (ProcessingStatus.READY, ProcessingStatus.EXACT_DUPLICATE):
@@ -478,6 +479,17 @@ async def _reuse_exact_analysis(image_id: UUID, original_id: UUID) -> bool:
             job.status = JobStatus.COMPLETE
             job.completed_at = datetime.now(UTC)
             job.error_message = None
+        await db.commit()
+    return True
+
+
+async def _cleanup_if_deleted(image: Image) -> bool:
+    async with SessionLocal() as db:
+        if await db.scalar(select(Image.id).where(Image.id == image.id).with_for_update()):
+            return False
+        for key in (image.object_key, image.thumbnail_key):
+            if key and not await db.scalar(select(ObjectDeletion.id).where(ObjectDeletion.object_key == key).with_for_update()):
+                db.add(ObjectDeletion(object_key=key))
         await db.commit()
     return True
 
@@ -595,6 +607,9 @@ async def _process(image_id: UUID) -> dict[str, object]:
             thumbnail=thumbnail,
             warnings=warnings,
         )
+        if matches is None:
+            await _cleanup_if_deleted(image)
+            return {"status": "missing", "image_id": str(image_id)}
         duration = time.perf_counter() - started
         IMAGES_PROCESSED.inc()
         SIMILAR_IMAGES.inc(matches)
@@ -616,6 +631,8 @@ async def _process(image_id: UUID) -> dict[str, object]:
             "device": device,
         }
     except Exception as exc:
+        if await _cleanup_if_deleted(image):
+            return {"status": "missing", "image_id": str(image_id)}
         PROCESSING_FAILURES.inc()
         await _mark_failed(image_id, str(exc))
         logger.exception("image_processing_failed", image_id=str(image_id), error=str(exc))
@@ -624,6 +641,7 @@ async def _process(image_id: UUID) -> dict[str, object]:
 
 @celery_app.task(
     bind=True,
+    ignore_result=True,
     autoretry_for=(OSError, ConnectionError),
     retry_backoff=True,
     retry_jitter=True,

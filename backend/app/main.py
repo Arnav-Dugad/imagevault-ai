@@ -1,6 +1,6 @@
 import asyncio
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from uuid import uuid4
 
 import structlog
@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.core.rate_limit import rate_limiter
 from app.metrics import HTTP_LATENCY, HTTP_REQUESTS
+from app.services.cleanup import cleanup_loop
 from app.services.storage import storage
 
 settings = get_settings()
@@ -27,8 +28,14 @@ async def lifespan(_: FastAPI):
         logger.info("object_storage_ready", bucket=storage.bucket, provider=settings.storage_backend)
     except Exception as exc:
         logger.warning("object_storage_startup_failed", error=str(exc))
-    yield
-    await rate_limiter.redis.aclose()
+    cleanup = asyncio.create_task(cleanup_loop(storage))
+    try:
+        yield
+    finally:
+        cleanup.cancel()
+        with suppress(asyncio.CancelledError):
+            await cleanup
+        await rate_limiter.redis.aclose()
 
 
 app = FastAPI(

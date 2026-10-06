@@ -15,7 +15,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Button, EmptyState, PageHeading } from "../components/ui";
 import { api } from "../lib/api";
@@ -86,17 +86,26 @@ export function DuplicatesPage() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
 
+  const requestRef = useRef<AbortController | null>(null);
   const load = useCallback(() => {
+    requestRef.current?.abort();
+    const controller = new AbortController(); requestRef.current = controller;
     const query = batchId ? `?batch_id=${encodeURIComponent(batchId)}` : "";
-    return api<DuplicateReview>(`/duplicates/review${query}`).then(setReport).catch((reason: Error) => setError(reason.message));
+    return api<DuplicateReview>(`/duplicates/review${query}`, { signal: controller.signal })
+      .then((value) => {
+        if (controller.signal.aborted) return;
+        setReport(value); setError("");
+        const candidates = new Set(value.groups.flatMap((group) => group.candidates.map((item) => item.image.id)));
+        setSelected((current) => new Set([...current].filter((id) => candidates.has(id))));
+      }).catch((reason: Error) => { if (!controller.signal.aborted) setError(reason.message); });
   }, [batchId]);
 
-  useEffect(() => { setReport(null); setSelected(new Set()); setError(""); void load(); }, [load]);
+  useEffect(() => { setReport(null); setSelected(new Set()); setError(""); setConfirming(false); void load(); return () => requestRef.current?.abort(); }, [load]);
   useEffect(() => {
     if (!report?.processing_images) return;
     const timer = window.setTimeout(() => void load(), 2500);
     return () => window.clearTimeout(timer);
-  }, [load, report?.processing_images]);
+  }, [load, report]);
 
   const visibleGroups = useMemo(() => {
     if (!report) return [];
@@ -114,10 +123,11 @@ export function DuplicatesPage() {
 
 
   async function removeSelected() {
+    if (deleting || !selected.size) return;
     setDeleting(true); setError("");
     try {
-      await api("/images/bulk-delete", { method: "POST", body: JSON.stringify({ image_ids: [...selected], confirm: true }) });
-      setSelected(new Set()); setConfirming(false); setNotice("Selected images deleted."); await load();
+      const result = await api<{ message: string }>("/images/bulk-delete", { method: "POST", body: JSON.stringify({ image_ids: [...selected], confirm: true }) });
+      setSelected(new Set()); setConfirming(false); setNotice(result.message); await load();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not delete selected images"); }
     finally { setDeleting(false); }
   }
@@ -167,6 +177,6 @@ export function DuplicatesPage() {
 
     <AnimatePresence>{selected.size > 0 && !confirming && <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 30 }} className="fixed bottom-5 left-1/2 z-40 flex w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 items-center justify-between gap-4 rounded-2xl border border-line bg-[#15191f]/95 p-3 shadow-float backdrop-blur-xl"><div className="min-w-0 pl-2"><p className="text-sm font-semibold">{selected.size} selected</p><p className="truncate text-xs text-muted">Free {formatBytes(selectedBytes)} after confirmation</p></div><div className="flex gap-2"><Button variant="ghost" onClick={() => setSelected(new Set())}>Clear</Button><Button variant="danger" onClick={() => setConfirming(true)}><Trash2 className="h-4 w-4" />Review delete</Button></div></motion.div>}</AnimatePresence>
 
-    <AnimatePresence>{confirming && <div className="fixed inset-0 z-50 grid place-items-center p-4"><motion.button aria-label="Close confirmation" className="absolute inset-0 bg-black/75 backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setConfirming(false)} /><motion.div role="dialog" aria-modal="true" aria-labelledby="delete-title" initial={{ opacity: 0, scale: .96, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: .96 }} className="panel relative z-10 w-full max-w-md rounded-[28px] p-6 shadow-float"><button onClick={() => setConfirming(false)} aria-label="Close" className="focus-ring absolute right-4 top-4 rounded-lg p-2 text-muted"><X className="h-4 w-4" /></button><div className="grid h-12 w-12 place-items-center rounded-2xl bg-coral/10"><AlertTriangle className="h-5 w-5 text-coral" /></div><h2 id="delete-title" className="mt-5 text-xl font-semibold">Delete {selected.size} image{selected.size === 1 ? "" : "s"}?</h2><p className="mt-2 text-sm leading-6 text-muted">This permanently removes originals, thumbnails, metadata, and vectors. The recommended keeper in each family is protected from bulk selection.</p><div className="mt-4 rounded-xl border border-line bg-black/20 p-3"><p className="text-xs text-muted">Estimated space recovered</p><p className="mt-1 text-lg font-semibold text-coral">{formatBytes(selectedBytes)}</p></div><div className="mt-6 flex justify-end gap-2"><Button variant="secondary" onClick={() => setConfirming(false)}>Keep images</Button><Button variant="danger" loading={deleting} onClick={removeSelected}>Delete permanently</Button></div></motion.div></div>}</AnimatePresence>
+    <AnimatePresence>{confirming && <div className="fixed inset-0 z-50 grid place-items-center p-4"><motion.button aria-label="Close confirmation" className="absolute inset-0 bg-black/75 backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => { if (!deleting) setConfirming(false); }} /><motion.div role="dialog" aria-modal="true" aria-labelledby="delete-title" initial={{ opacity: 0, scale: .96, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: .96 }} className="panel relative z-10 w-full max-w-md rounded-[28px] p-6 shadow-float"><button onClick={() => { if (!deleting) setConfirming(false); }} aria-label="Close" className="focus-ring absolute right-4 top-4 rounded-lg p-2 text-muted"><X className="h-4 w-4" /></button><div className="grid h-12 w-12 place-items-center rounded-2xl bg-coral/10"><AlertTriangle className="h-5 w-5 text-coral" /></div><h2 id="delete-title" className="mt-5 text-xl font-semibold">Delete {selected.size} image{selected.size === 1 ? "" : "s"}?</h2><p className="mt-2 text-sm leading-6 text-muted">This permanently removes originals, thumbnails, metadata, and vectors. The recommended keeper in each family is protected from bulk selection.</p><div className="mt-4 rounded-xl border border-line bg-black/20 p-3"><p className="text-xs text-muted">Estimated space recovered</p><p className="mt-1 text-lg font-semibold text-coral">{formatBytes(selectedBytes)}</p></div><div className="mt-6 flex justify-end gap-2"><Button variant="secondary" onClick={() => { if (!deleting) setConfirming(false); }}>Keep images</Button><Button variant="danger" loading={deleting} onClick={removeSelected}>Delete permanently</Button></div></motion.div></div>}</AnimatePresence>
   </>;
 }

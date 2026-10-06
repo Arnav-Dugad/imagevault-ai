@@ -4,10 +4,11 @@ from uuid import UUID, uuid4
 
 import pytest
 from PIL import Image as PillowImage
+from sqlalchemy import select
 
 import app.api.images as image_routes
 import app.services.images as image_service
-from app.models import Image, ProcessingStatus
+from app.models import Image, JobStatus, ProcessingJob, ProcessingStatus
 from tests.conftest import create_user
 
 
@@ -159,6 +160,8 @@ async def test_reindex_route_queues_existing_ready_images(
         image = await session.get(Image, UUID(image_id))
         assert image is not None
         image.status = ProcessingStatus.READY
+        job = await session.scalar(select(ProcessingJob).where(ProcessingJob.image_id == image.id))
+        job.status = JobStatus.COMPLETE
         await session.commit()
 
     response = await client.post("/api/images/reindex", headers=headers)

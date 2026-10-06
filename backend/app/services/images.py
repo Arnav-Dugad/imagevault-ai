@@ -9,7 +9,7 @@ from PIL import Image as PillowImage
 from PIL import UnidentifiedImageError
 
 from app.core.config import get_settings
-from app.models import Image, MediaKind
+from app.models import Image, MediaKind, ProcessingStatus
 from app.schemas import ImageSummary
 from app.services.storage import storage
 
@@ -112,6 +112,13 @@ async def read_validated_image(upload: UploadFile) -> tuple[bytes, str, str]:
     detected_mime = _detected_mime(data, filename)
     if detected_mime is None or detected_mime not in settings.allowed_mime_types:
         raise HTTPException(status_code=400, detail="The file is not a supported image or video")
+    actual_limit = (
+        settings.max_video_upload_bytes
+        if detected_mime in VIDEO_MIME_TYPES or detected_mime in RAW_MIME_TYPES
+        else settings.max_upload_bytes
+    )
+    if len(data) > actual_limit:
+        raise HTTPException(status_code=413, detail=f"{filename} exceeds the upload limit")
     if declared_mime in settings.allowed_mime_types and declared_mime != detected_mime:
         compatible_heif = {declared_mime, detected_mime} <= {"image/heic", "image/heif"}
         compatible_raw = declared_mime in RAW_MIME_TYPES and detected_mime in RAW_MIME_TYPES
@@ -157,6 +164,13 @@ def similarity_classification(score: float) -> str:
     return "Low Similarity"
 
 
+def analysis_pending(image: Image) -> bool:
+    return image.status in (ProcessingStatus.PENDING, ProcessingStatus.PROCESSING) or (
+        image.status == ProcessingStatus.EXACT_DUPLICATE
+        and image.processed_at is None and not image.error_message
+    )
+
+
 def image_summary(image: Image, best_similarity: float | None = None) -> ImageSummary:
     return ImageSummary(
         id=image.id,
@@ -169,6 +183,7 @@ def image_summary(image: Image, best_similarity: float | None = None) -> ImageSu
         sha256=image.sha256,
         perceptual_hash=image.perceptual_hash,
         status=image.status,
+        analysis_pending=analysis_pending(image),
         exact_duplicate_of_id=image.exact_duplicate_of_id,
         created_at=image.created_at,
         processed_at=image.processed_at,

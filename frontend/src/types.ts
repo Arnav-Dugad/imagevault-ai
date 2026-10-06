@@ -27,6 +27,7 @@ export interface VaultImage {
   sha256: string;
   perceptual_hash: string | null;
   status: ProcessingStatus;
+  analysis_pending: boolean;
   exact_duplicate_of_id: string | null;
   created_at: string;
   processed_at: string | null;

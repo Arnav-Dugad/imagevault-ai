@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.models import DuplicateType, FaceFeedbackType, MediaKind, ProcessingStatus
 
@@ -12,10 +12,16 @@ class RegisterRequest(BaseModel):
     password: str = Field(min_length=8, max_length=128)
     registration_code: str = Field(default="", max_length=256)
 
+    @field_validator("display_name", mode="before")
+    @classmethod
+    def strip_display_name(cls, value: str) -> str:
+        return value.strip() if isinstance(value, str) else value
+
+
 
 class LoginRequest(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(min_length=1, max_length=128)
 
 
 class UserResponse(BaseModel):
@@ -45,6 +51,7 @@ class ImageSummary(BaseModel):
     sha256: str
     perceptual_hash: str | None
     status: ProcessingStatus
+    analysis_pending: bool = False
     exact_duplicate_of_id: UUID | None
     created_at: datetime
     processed_at: datetime | None
@@ -114,6 +121,7 @@ class UploadResponse(BaseModel):
 
 class ReindexResponse(BaseModel):
     queued: int
+    failed: int = 0
     message: str
 
 
@@ -124,6 +132,7 @@ class BulkDeleteRequest(BaseModel):
 
 class BulkDeleteResponse(BaseModel):
     deleted: int
+    cleanup_pending: int = 0
     recovered_bytes: int
     message: str
 

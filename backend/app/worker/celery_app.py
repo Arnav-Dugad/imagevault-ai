@@ -20,4 +20,10 @@ celery_app.conf.update(
     task_reject_on_worker_lost=True,
     broker_connection_retry_on_startup=True,
     result_expires=3600,
+    broker_connection_timeout=3,
+    redis_socket_connect_timeout=3,
+    redis_socket_timeout=3,
+    result_backend_transport_options={"retry_policy": {"timeout": 3}},
+    task_publish_retry=False,
+    broker_transport_options={"socket_connect_timeout": 3, "socket_timeout": 3},
 )

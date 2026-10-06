@@ -30,7 +30,8 @@ def create_access_token(user_id: UUID) -> tuple[str, int]:
 
 def decode_access_token(token: str) -> UUID:
     settings = get_settings()
-    payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+    payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm],
+                         options={"require": ["exp", "iat", "sub"]})
     if payload.get("type") != "access" or not payload.get("sub"):
         raise jwt.InvalidTokenError("Invalid token payload")
     return UUID(payload["sub"])

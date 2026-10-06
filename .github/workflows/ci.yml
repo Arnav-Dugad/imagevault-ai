@@ -73,6 +73,37 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+  browser:
+    name: Desktop and mobile browser flows
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install browser-test API dependencies
+        run: pip install -e 'backend[dev]'
+      - name: Install frontend and browser
+        working-directory: frontend
+        run: npm ci && npx playwright install --with-deps chromium
+      - name: Build and test website against disposable API
+        working-directory: frontend
+        env:
+          IMAGEVAULT_TEST_PYTHON: python
+        run: npm run build && npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-failure-evidence
+          path: frontend/test-results/
+          retention-days: 7
+
   infrastructure:
     name: Infrastructure validation
     runs-on: ubuntu-latest
@@ -116,7 +147,7 @@ jobs:
 
   release:
     name: Publish website/server downloads
-    needs: [backend, frontend, infrastructure]
+    needs: [backend, frontend, browser, infrastructure]
     if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/azure-student-website')
     runs-on: ubuntu-latest
     permissions:

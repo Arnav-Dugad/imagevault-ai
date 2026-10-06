@@ -62,3 +62,26 @@ async def test_postgres_worker_retrieves_and_verifies_resized_copy(monkeypatch):
         async with engine.begin() as connection:
             await connection.run_sync(Base.metadata.drop_all)
         await engine.dispose()
+
+
+def test_postgres_migrations_upgrade_and_rollback_cleanup_table():
+    import subprocess
+    import sys
+    from pathlib import Path
+    url = os.environ.get('TEST_POSTGRES_URL')
+    if not url:
+        pytest.skip('CI supplies a disposable pgvector database')
+    if not url.endswith('/imagevault_test'):
+        raise ValueError('Use only the disposable imagevault_test database')
+    env = {**os.environ, 'DATABASE_URL': url}
+    backend = Path(__file__).resolve().parents[1]
+    def migrate(*arguments):
+        result = subprocess.run([sys.executable, '-m', 'alembic', *arguments], cwd=backend,
+                                env=env, capture_output=True, text=True, timeout=90)
+        assert result.returncode == 0, result.stdout + result.stderr
+    try:
+        migrate('upgrade', 'head')
+        migrate('downgrade', '0005')
+        migrate('upgrade', 'head')
+    finally:
+        migrate('downgrade', 'base')
