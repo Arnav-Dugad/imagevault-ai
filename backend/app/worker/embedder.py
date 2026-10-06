@@ -13,8 +13,8 @@ from app.metrics import INFERENCE_DURATION, MODEL_LOADED
 
 def normalize_vector(values: list[float]) -> list[float]:
     magnitude = math.sqrt(sum(value * value for value in values))
-    if magnitude == 0:
-        raise ValueError("Cannot normalize a zero vector")
+    if not math.isfinite(magnitude) or magnitude == 0:
+        raise ValueError("Cannot normalize a zero or non-finite vector")
     return [value / magnitude for value in values]
 
 

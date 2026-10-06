@@ -24,6 +24,15 @@ def package(root: Path, output: Path) -> list[Path]:
             raise RuntimeError(f'Unsafe release entry: {name}')
         paths.append(path)
     paths.extend(path.relative_to(root) for path in dist.rglob('*') if path.is_file())
+    # Only these generated synthetic samples are added; never include uploads.
+    demo_names = ['01-original.png', '02-exact-copy.png', '03-resized.png', '04-compressed.jpg',
+                  '05-mirrored-review.png', '06-unrelated-document.png', 'manifest.json']
+    for name in demo_names:
+        path = Path('demo-images') / name
+        if (root / path).is_file():
+            if (root / path).is_symlink():
+                raise RuntimeError(f'Unsafe demo entry: {path}')
+            paths.append(path)
     paths = sorted(set(paths))
     output.mkdir(parents=True, exist_ok=True)
     tar_path, zip_path = output / 'imagevault-ai.tar.gz', output / 'imagevault-ai.zip'

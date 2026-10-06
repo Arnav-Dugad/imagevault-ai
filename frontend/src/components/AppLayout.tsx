@@ -7,11 +7,13 @@ import { useAuth } from "../providers/AuthProvider";
 import { Button } from "./ui";
 
 const nav = [
-  { to: "/", label: "Overview", icon: Gauge },
+  { to: "/", label: "Dashboard", icon: Gauge },
   { to: "/gallery", label: "Gallery", icon: Images },
-  { to: "/albums", label: "Smart albums", icon: FolderHeart },
   { to: "/upload", label: "Upload", icon: CloudUpload },
   { to: "/duplicates", label: "Duplicate review", icon: Copy },
+];
+const advancedNav = [
+  { to: "/albums", label: "Smart albums", icon: FolderHeart },
   { to: "/system", label: "System status", icon: Activity },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
@@ -20,7 +22,10 @@ function Brand() { return <div className="flex items-center gap-3"><div classNam
 
 function Navigation({ onNavigate }: { onNavigate?: () => void }) {
   const scope = onNavigate ? "mobile" : "desktop";
-  return <nav className="mt-9 space-y-1" aria-label="Primary navigation">{nav.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} end={to === "/"} onClick={onNavigate} className="focus-ring group relative flex items-center gap-3 overflow-hidden rounded-xl px-3 py-2.5 text-sm text-muted transition-colors hover:text-ink">{({ isActive }) => <><AnimatePresence>{isActive && <motion.span layoutId={`active-navigation-${scope}`} className="absolute inset-0 rounded-xl border border-white/[.045] bg-white/[.07]" transition={{ type: "spring", stiffness: 420, damping: 34 }} />}</AnimatePresence><Icon className={cn("relative h-4 w-4 transition", isActive ? "text-acid" : "group-hover:text-ink")} /><span className={cn("relative", isActive && "font-medium text-ink")}>{label}</span>{isActive && <motion.span layoutId={`active-navigation-dot-${scope}`} className="absolute right-3 h-1.5 w-1.5 rounded-full bg-acid shadow-[0_0_10px_#b9f36a]" />}</>}</NavLink>)}</nav>;
+  const location = useLocation();
+  const advancedActive = advancedNav.some((item) => item.to === location.pathname);
+  const links = (items: typeof nav) => items.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} end={to === "/"} onClick={onNavigate} className="focus-ring flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-muted hover:bg-white/5 hover:text-ink">{({ isActive }) => <><Icon className={cn("h-4 w-4", isActive && "text-acid")} /><span className={cn(isActive && "font-medium text-ink")}>{label}</span></>}</NavLink>);
+  return <nav className="mt-9 space-y-1" aria-label="Primary navigation">{nav.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} end={to === "/"} onClick={onNavigate} className="focus-ring group relative flex items-center gap-3 overflow-hidden rounded-xl px-3 py-2.5 text-sm text-muted transition-colors hover:text-ink">{({ isActive }) => <><AnimatePresence>{isActive && <motion.span layoutId={`active-navigation-${scope}`} className="absolute inset-0 rounded-xl border border-white/[.045] bg-white/[.07]" transition={{ type: "spring", stiffness: 420, damping: 34 }} />}</AnimatePresence><Icon className={cn("relative h-4 w-4 transition", isActive ? "text-acid" : "group-hover:text-ink")} /><span className={cn("relative", isActive && "font-medium text-ink")}>{label}</span>{isActive && <motion.span layoutId={`active-navigation-dot-${scope}`} className="absolute right-3 h-1.5 w-1.5 rounded-full bg-acid shadow-[0_0_10px_#b9f36a]" />}</>}</NavLink>)}<details key={advancedActive ? "active" : "inactive"} open={advancedActive || undefined} className="pt-4"><summary className="focus-ring cursor-pointer rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted">Advanced</summary><div className="mt-2 space-y-1">{links(advancedNav)}</div></details></nav>;
 }
 
 export function AppLayout({ children }: { children: ReactNode }) {
@@ -28,7 +33,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
   const reducedMotion = useReducedMotion();
-  const pageLabel = nav.find((item) => item.to === location.pathname)?.label ?? (location.pathname.startsWith("/images/") ? "Image details" : "ImageVault");
+  const pageLabel = [...nav, ...advancedNav].find((item) => item.to === location.pathname)?.label ?? (location.pathname.startsWith("/images/") ? "Image details" : "ImageVault");
   const initials = user?.display_name.split(" ").map((word) => word[0]).join("").slice(0, 2).toUpperCase();
   return <div className="app-backdrop grain min-h-screen">
     <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-line bg-[#0c0f13]/95 p-5 lg:flex lg:flex-col"><Brand /><Navigation /><div className="mt-auto rounded-2xl border border-line bg-white/[.025] p-4"><div className="mb-3 flex items-center gap-3"><div className="grid h-9 w-9 place-items-center rounded-full bg-lilac/15 text-xs font-bold text-lilac">{initials}</div><div className="min-w-0"><p className="truncate text-sm font-medium">{user?.display_name}</p><p className="truncate text-xs text-muted">{user?.email}</p></div></div><Button variant="ghost" className="w-full justify-start px-2" onClick={logout}><LogOut className="h-4 w-4" />Sign out</Button></div></aside>

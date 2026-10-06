@@ -2,7 +2,7 @@
 name: imagevault-azure
 
 x-app-environment: &app-environment
-  APP_VERSION: ${APP_VERSION:-1.1.0}
+  APP_VERSION: ${APP_VERSION:-1.2.0}
   ENVIRONMENT: azure
   DATABASE_URL: postgresql+asyncpg://imagevault:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/imagevault
   REDIS_URL: redis://redis:6379/0
@@ -17,6 +17,8 @@ x-app-environment: &app-environment
   MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-15728640}
   MAX_VIDEO_UPLOAD_BYTES: ${MAX_VIDEO_UPLOAD_BYTES:-104857600}
   MAX_BATCH_FILES: ${MAX_BATCH_FILES:-10}
+  RATE_LIMIT_ENABLED: "true"
+  TRUSTED_PROXY_CIDR: 172.30.42.0/24
   AI_DEVICE: cpu
   OMP_NUM_THREADS: "2"
   MKL_NUM_THREADS: "2"
@@ -88,24 +90,8 @@ services:
     restart: unless-stopped
     logging: *logging
 
-  frontend:
-    build: {context: ./frontend, dockerfile: Dockerfile}
-    mem_limit: 128m
-    restart: unless-stopped
-    logging: *logging
-
-  nginx:
-    image: nginx:1.27-alpine
-    volumes: ["./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro"]
-    depends_on:
-      backend: {condition: service_healthy}
-      frontend: {condition: service_healthy}
-    mem_limit: 64m
-    restart: unless-stopped
-    logging: *logging
-
   caddy:
-    image: caddy:2.10-alpine
+    build: {context: ./frontend, dockerfile: Dockerfile.azure}
     environment:
       APP_DOMAIN: ${APP_DOMAIN:?Set APP_DOMAIN}
     volumes:
@@ -113,7 +99,8 @@ services:
       - caddy-data:/data
       - caddy-config:/config
     ports: ["80:80", "443:443"]
-    depends_on: [nginx]
+    depends_on:
+      backend: {condition: service_healthy}
     mem_limit: 128m
     restart: unless-stopped
     logging: *logging

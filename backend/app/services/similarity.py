@@ -21,7 +21,7 @@ def hash_distance(first: str | None, second: str | None) -> int | None:
         return None
     try:
         return imagehash.hex_to_hash(first) - imagehash.hex_to_hash(second)
-    except ValueError:
+    except (ValueError, TypeError):
         return None
 
 
@@ -69,9 +69,14 @@ def aspect_similarity(
 
 
 def cosine_similarity(first: list[float] | None, second: list[float] | None) -> float:
-    if not first or not second or len(first) != len(second):
+    if first is None or second is None or not len(first) or len(first) != len(second):
         return 0.0
-    return max(-1.0, min(1.0, sum(a * b for a, b in zip(first, second))))
+    if not all(math.isfinite(value) for value in (*first, *second)):
+        return 0.0
+    magnitude = math.sqrt(sum(a * a for a in first) * sum(b * b for b in second))
+    if not magnitude:
+        return 0.0
+    return max(-1.0, min(1.0, sum(a * b for a, b in zip(first, second)) / magnitude))
 
 
 def evaluate_similarity(
@@ -85,42 +90,40 @@ def evaluate_similarity(
     clip_score: float,
     perceptual_hash_threshold: int,
     visual_similarity_threshold: float,
+    spatial_score: float | None = None,
+    still_images: bool = True,
 ) -> SimilarityEvidence | None:
     perceptual, phash_distance = perceptual_similarity(first_hashes, second_hashes)
     color = color_similarity(first_color, second_color)
     aspect = aspect_similarity(*first_size, *second_size)
-    clip = max(-1.0, min(1.0, clip_score))
+    clip = max(-1.0, min(1.0, clip_score)) if math.isfinite(clip_score) else 0.0
 
-    closest_hash_distance = min(
-        (
-            distance
-            for distance in (
-                hash_distance(first, second)
-                for first, second in zip(first_hashes, second_hashes, strict=True)
-            )
-            if distance is not None
-        ),
-        default=65,
+    agreeing_hashes = sum(
+        distance is not None and distance <= perceptual_hash_threshold
+        for distance in (hash_distance(a, b) for a, b in zip(first_hashes, second_hashes, strict=True))
     )
     is_perceptual = (
-        closest_hash_distance <= perceptual_hash_threshold
-        and color >= 0.58
-        and aspect >= 0.52
-    ) or (perceptual >= 0.82 and color >= 0.68 and aspect >= 0.62)
-    is_visual = clip >= visual_similarity_threshold
+        still_images and agreeing_hashes >= 2 and color >= 0.70 and aspect >= 0.94
+        and spatial_score is not None and spatial_score >= 0.92
+    )
+    # Semantic matches are useful for browsing, but always need human review.
+    # Corroboration reduces same-subject false positives at the lower cutoff.
+    is_visual = clip >= max(0.90, visual_similarity_threshold) and (
+        clip >= 0.96 or (color >= 0.72 and perceptual >= 0.40)
+    )
     if not is_perceptual and not is_visual:
         return None
 
     if is_perceptual:
-        score = 0.55 * perceptual + 0.20 * max(0.0, clip) + 0.15 * color + 0.10 * aspect
+        score = 0.70 * perceptual + 0.20 * spatial_score + 0.10 * color
         match_type = "PERCEPTUAL"
     else:
         score = 0.82 * max(0.0, clip) + 0.10 * color + 0.08 * aspect
         match_type = "VISUAL"
 
     reasons: list[str] = []
-    if closest_hash_distance <= perceptual_hash_threshold:
-        reasons.append("Near-identical visual fingerprint")
+    if is_perceptual:
+        reasons.extend(["Near-identical visual fingerprint", "Aligned pixels verified at two scales"])
     elif perceptual >= 0.72:
         reasons.append("Strong structural resemblance")
     if clip >= max(0.90, visual_similarity_threshold):
@@ -133,6 +136,8 @@ def evaluate_similarity(
         reasons.append("Matching frame geometry")
     if not reasons:
         reasons.append("Multiple visual signals agree")
+    if not is_perceptual:
+        reasons.append("Similar content only — review before deleting")
 
     return SimilarityEvidence(
         score=max(0.0, min(1.0, score)),
