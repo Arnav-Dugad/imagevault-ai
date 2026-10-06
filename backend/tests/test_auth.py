@@ -1,5 +1,7 @@
 import pytest
 
+import app.api.auth as auth_routes
+
 from tests.conftest import create_user
 
 
@@ -39,3 +41,27 @@ async def test_duplicate_email_and_bad_password_are_rejected(client):
 async def test_protected_route_requires_token(client):
     response = await client.get("/api/images")
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_cloud_invitation_is_required_and_not_disclosed(client, monkeypatch):
+    monkeypatch.setattr(auth_routes.settings, "registration_code", "private-invitation")
+    config = (await client.get("/api/auth/config")).json()
+    assert config == {"registration_enabled": True, "registration_requires_code": True}
+    payload = {"email": "invited@example.com", "display_name": "Invited User", "password": "strong-password"}
+    for code in ("", "wrong", "unicode-🔑"):
+        rejected = await client.post("/api/auth/register", json={**payload, "registration_code": code})
+        assert rejected.status_code == 403
+    accepted = await client.post("/api/auth/register", json={**payload, "registration_code": "private-invitation"})
+    assert accepted.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_closed_registration_preserves_existing_login(client, monkeypatch):
+    await create_user(client)
+    monkeypatch.setattr(auth_routes.settings, "registration_enabled", False)
+    assert (await client.get("/api/auth/config")).json()["registration_enabled"] is False
+    rejected = await client.post("/api/auth/register", json={"email": "new@example.com", "display_name": "New User", "password": "strong-password"})
+    assert rejected.status_code == 403
+    login = await client.post("/api/auth/login", json={"email": "student@example.com", "password": "strong-password"})
+    assert login.status_code == 200

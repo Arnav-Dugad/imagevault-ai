@@ -3,7 +3,7 @@ import { ArrowRight, Boxes, Eye, EyeOff } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "../components/ui";
-import { ApiError } from "../lib/api";
+import { api, ApiError } from "../lib/api";
 import { useAuth } from "../providers/AuthProvider";
 
 export function AuthPage() {
@@ -11,22 +11,31 @@ export function AuthPage() {
   const registerMode = pathname === "/register";
   const { user, login, register } = useAuth();
   const navigate = useNavigate();
-  const [form, setForm] = useState({ name: "", email: "", password: "" });
+  const [form, setForm] = useState({ name: "", email: "", password: "", invitation: "" });
+  const [config, setConfig] = useState<{ registration_enabled: boolean; registration_requires_code: boolean } | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    setForm({ name: "", email: "", password: "" });
+    setForm({ name: "", email: "", password: "", invitation: "" });
     setShowPassword(false);
     setBusy(false);
     setError("");
   }, [pathname]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    api<{ registration_enabled: boolean; registration_requires_code: boolean }>("/auth/config", { signal: controller.signal })
+      .then(setConfig)
+      .catch(() => { if (!controller.signal.aborted && registerMode) setError("Could not load signup settings. Please reload to try again."); });
+    return () => controller.abort();
+  }, [registerMode]);
+
   if (user) return <Navigate to="/" replace />;
   async function submit(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError("");
-    try { if (registerMode) await register(form.email, form.name, form.password); else await login(form.email, form.password); navigate("/"); }
+    try { if (registerMode) await register(form.email, form.name, form.password, form.invitation); else await login(form.email, form.password); navigate("/"); }
     catch (reason) { setError(reason instanceof ApiError ? reason.message : "Could not connect"); }
     finally { setBusy(false); }
   }
@@ -38,9 +47,11 @@ export function AuthPage() {
         {registerMode && <label className="block"><span className="mb-2 block text-xs font-medium text-muted">Display name</span><input required minLength={2} autoComplete="name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Your name" className="focus-ring h-12 w-full rounded-xl border border-line bg-panel px-4 text-sm placeholder:text-muted/50" /></label>}
         <label className="block"><span className="mb-2 block text-xs font-medium text-muted">Email address</span><input required type="email" autoComplete="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="you@example.com" className="focus-ring h-12 w-full rounded-xl border border-line bg-panel px-4 text-sm placeholder:text-muted/50" /></label>
         <label className="block"><span className="mb-2 block text-xs font-medium text-muted">Password</span><div className="relative"><input required minLength={8} type={showPassword ? "text" : "password"} autoComplete={registerMode ? "new-password" : "current-password"} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} placeholder="At least 8 characters" className="focus-ring h-12 w-full rounded-xl border border-line bg-panel px-4 pr-12 text-sm placeholder:text-muted/50" /><button type="button" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? "Hide password" : "Show password"} className="focus-ring absolute right-3 top-2.5 rounded-lg p-1.5 text-muted">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div></label>
+        {registerMode && config?.registration_requires_code && <label className="block"><span className="mb-2 block text-xs font-medium text-muted">Invitation code</span><input required type="password" maxLength={256} autoComplete="off" value={form.invitation} onChange={(event) => setForm({ ...form, invitation: event.target.value })} placeholder="Ask the vault owner for an invitation" className="focus-ring h-12 w-full rounded-xl border border-line bg-panel px-4 text-sm placeholder:text-muted/50" /></label>}
+        {registerMode && config?.registration_enabled === false && <p role="status" className="rounded-xl border border-line bg-panel p-4 text-sm text-muted">New accounts are closed. Existing members can still sign in.</p>}
         {error && <div role="alert" className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-200">{error}</div>}
-        <Button type="submit" loading={busy} className="mt-2 h-12 w-full">{registerMode ? "Create account" : "Sign in"}<ArrowRight className="h-4 w-4" /></Button>
-      </form><p className="mt-6 text-center text-sm text-muted">{registerMode ? "Already have an account?" : "New here?"} <Link className="focus-ring rounded text-ink underline decoration-line underline-offset-4 hover:decoration-acid" to={registerMode ? "/login" : "/register"}>{registerMode ? "Sign in" : "Create an account"}</Link></p>
+        <Button type="submit" loading={busy} disabled={registerMode && (!config || !config.registration_enabled)} className="mt-2 h-12 w-full">{registerMode ? "Create account" : "Sign in"}<ArrowRight className="h-4 w-4" /></Button>
+      </form>{(registerMode || config?.registration_enabled) && <p className="mt-6 text-center text-sm text-muted">{registerMode ? "Already have an account?" : "New here?"} <Link className="focus-ring rounded text-ink underline decoration-line underline-offset-4 hover:decoration-acid" to={registerMode ? "/login" : "/register"}>{registerMode ? "Sign in" : "Create an account"}</Link></p>}
     </motion.div></section>
   </div>;
 }

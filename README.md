@@ -1,8 +1,30 @@
 # ImageVault AI
 
-> Intelligent private-cloud image storage, exact duplicate detection, and local visual similarity—built as a Cloud Computing & DevOps mini-project with no additional software or cloud-service expenditure.
+> Private image and video storage, duplicate detection, people albums, OCR, and visual search — deploy on Azure for Students or run your own local copy.
 
-ImageVault AI stores original images in private S3-compatible MinIO object storage, keeps metadata and 512-dimensional vectors in PostgreSQL/pgvector, and processes new images asynchronously with a CPU-compatible OpenCLIP worker. Docker, Kubernetes, Terraform, GitHub Actions, Nginx, Prometheus, and Grafana make the cloud platform—not the model alone—the academic contribution.
+**[Download website/server bundle](https://github.com/Arnav-Dugad/imagevault-ai/releases/latest)** · **[Deployment guide](INSTALL.md)** · **[Azure for Students setup](docs/azure-students.md)**
+
+## Azure for Students
+
+The Azure deployment runs the entire app on an Ubuntu VM with private **Azure Blob Storage**.
+Your laptop can be turned off. It includes managed identity (no storage account keys),
+short-lived read-only signed previews, HTTPS, invitation-based signup, per-account
+upload quotas, and daily VM shutdown. PostgreSQL/pgvector, Redis, and one CPU AI
+worker stay on the VM to avoid extra managed-service costs. Cloud monitoring
+containers and MinIO are omitted from this deployment.
+
+Azure for Students offers $100 credit for 12 months and selected free allowances;
+the default 8 GiB VM **uses that credit**. It is not an unlimited free hosting plan.
+Keep your subscription spending limit enabled, check regional pricing/quota,
+and stop/deallocate the VM between demos. Follow the
+[step-by-step cloud guide](docs/azure-students.md) for deployment, migration, backups,
+and cost controls. No Azure account or live deployment is bundled with the source.
+
+Every passing main-branch CI run publishes ZIP and TAR.GZ application bundles with
+the compiled frontend, server code, Docker setup, Azure templates, and SHA-256
+checksums. Visitors use the deployed website in their browser.
+
+ImageVault AI stores original images in private Azure Blob Storage or S3-compatible MinIO, keeps metadata and 512-dimensional vectors in PostgreSQL/pgvector, and processes new images asynchronously with a CPU-compatible OpenCLIP worker. Docker, Azure Bicep, Kubernetes, Terraform, GitHub Actions, Nginx, Prometheus, and Grafana support cloud deployment and local academic demonstrations.
 
 ## What it demonstrates
 
@@ -49,12 +71,12 @@ See [architecture.md](docs/architecture.md) and [technical-design.md](docs/techn
 | API | FastAPI, Pydantic, SQLAlchemy, Alembic |
 | Authentication | Self-hosted PostgreSQL accounts, Argon2, expiring JWT |
 | Metadata / vector search | PostgreSQL 16 + pgvector |
-| Object storage | MinIO, using an S3-compatible object-key design |
+| Object storage | Azure Blob Storage with managed identity; MinIO for local deployments |
 | Async jobs | Redis + Celery |
 | Local AI/media | OpenCLIP ViT-B/32, OpenCV YuNet + SFace, multilingual Tesseract OCR, Pillow/pillow-heif, rawpy/LibRaw, FFmpeg, ImageHash |
 | Gateway | Nginx |
 | Containers / orchestration | Docker Compose, Kubernetes, Minikube |
-| Infrastructure as Code | Terraform |
+| Infrastructure as Code | Azure Bicep; Terraform for the local Kubernetes demonstration |
 | CI/CD | GitHub Actions |
 | Observability | Prometheus and Grafana OSS |
 
@@ -67,7 +89,8 @@ Recommended demonstration laptop: Windows 11, 16 GB RAM, at least 12 GB free dis
 3. For orchestration only: Minikube and `kubectl`.
 4. For IaC only: Terraform 1.6 or newer.
 
-No AWS, Azure, GCP, paid database, paid storage, card, API key, or commercial AI account is needed.
+The local setup needs no cloud account or commercial AI key. Azure hosting needs
+an Azure for Students subscription; use the separate cloud guide above.
 
 ## Quick start with Docker Compose
 

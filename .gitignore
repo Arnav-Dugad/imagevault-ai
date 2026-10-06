@@ -65,6 +65,7 @@ temp/
 # Generated demo and benchmark outputs
 demo-images/
 benchmark-results*.json
+release-dist/
 
 # Local certificates
 infra/nginx/certs/

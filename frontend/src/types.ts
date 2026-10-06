@@ -147,6 +147,11 @@ export interface SystemStatus {
   embedding_model: ComponentStatus;
   pending_jobs: number;
   queue_size: number | null;
+  environment: string;
+  storage_backend: "minio" | "azure";
+  max_user_storage_bytes: number;
+  grafana_url: string | null;
+  prometheus_url: string | null;
 }
 
 export interface ComponentStatus { status: string; detail: string | null }

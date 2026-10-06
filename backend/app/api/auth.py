@@ -1,16 +1,34 @@
+import secrets
+
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import func, select
 
 from app.api.dependencies import CurrentUser, Database
 from app.core.security import create_access_token, hash_password, verify_password
+from app.core.config import get_settings
 from app.models import ActivityLog, User
 from app.schemas import LoginRequest, RegisterRequest, TokenResponse, UserResponse
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+settings = get_settings()
+
+
+@router.get("/config")
+async def auth_config() -> dict[str, bool]:
+    return {
+        "registration_enabled": settings.registration_enabled,
+        "registration_requires_code": bool(settings.registration_code),
+    }
 
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 async def register(payload: RegisterRequest, db: Database) -> TokenResponse:
+    if not settings.registration_enabled:
+        raise HTTPException(status_code=403, detail="Account registration is closed")
+    if settings.registration_code and not secrets.compare_digest(
+        payload.registration_code.encode(), settings.registration_code.encode()
+    ):
+        raise HTTPException(status_code=403, detail="A valid invitation code is required")
     email = payload.email.lower().strip()
     existing = await db.scalar(select(User.id).where(func.lower(User.email) == email))
     if existing:

@@ -1,3 +1,4 @@
+import asyncio
 import time
 from contextlib import asynccontextmanager
 from uuid import uuid4
@@ -7,7 +8,6 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
-from app import __version__
 from app.api import albums, analytics, auth, health, images
 from app.core.config import get_settings
 from app.core.logging import configure_logging
@@ -22,8 +22,8 @@ logger = structlog.get_logger("imagevault.api")
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     try:
-        storage.ensure_bucket()
-        logger.info("object_storage_ready", bucket=settings.minio_bucket)
+        await asyncio.to_thread(storage.ensure_bucket)
+        logger.info("object_storage_ready", bucket=storage.bucket, provider=settings.storage_backend)
     except Exception as exc:
         logger.warning("object_storage_startup_failed", error=str(exc))
     yield
@@ -31,7 +31,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title=settings.app_name,
-    version=__version__,
+    version=settings.app_version,
     description=(
         "Self-hosted private-cloud image storage with SHA-256 duplicate detection, "
         "local OpenCLIP similarity, pgvector search, and observable asynchronous processing."
