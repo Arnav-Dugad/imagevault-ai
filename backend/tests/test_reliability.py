@@ -271,3 +271,18 @@ async def test_exact_equivalence_preserves_verified_near_copy_in_family(session_
         groups, _ = await _duplicate_groups(user.id, db)
         assert len(groups) == 1 and len(groups[0].candidates) == 2
         assert {candidate.match_type for candidate in groups[0].candidates} == {DuplicateType.EXACT, DuplicateType.PERCEPTUAL}
+
+
+def test_exif_orientation_dimensions_match_exported_copy():
+    from app.services.media import decode_media
+    first = scene()
+    exif = first.getexif()
+    exif[274] = 6
+    source = encoded(first, 'JPEG', exif=exif)
+    decoded = decode_media(source, 'image/jpeg')
+    assert (decoded.width, decoded.height) == (384, 512)
+    normalized = encoded(decoded.primary)
+    exported = decode_media(normalized, 'image/png')
+    assert (exported.width, exported.height) == (decoded.width, decoded.height)
+    result = evidence(decoded.primary, exported.primary)
+    assert result is not None and result.match_type == 'PERCEPTUAL'

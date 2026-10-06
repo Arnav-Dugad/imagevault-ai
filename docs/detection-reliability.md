@@ -12,7 +12,7 @@ ImageVault uses conservative rules to reduce false positives. No real-world accu
 - Video/animation thumbnails are not enough to establish that whole clips are duplicates; only byte-identical clips are exact copies.
 - Families require all pair relationships, rather than chaining unrelated endpoints.
 
-The regression suite includes real pixel transformations of generated scenes, blank-image collisions, rearranged scenes, single-hash disagreement, missing verification, invalid/unnormalized vectors, conservative family grouping and unavailable AI/OCR/face models. Cloud request-limit tests execute the atomic Lua bucket through an in-memory Redis emulator.
+The regression suite includes real pixel transformations of generated scenes, phone EXIF orientation, blank-image collisions, rearranged scenes, single-hash disagreement, missing verification, invalid/unnormalized vectors, conservative family grouping and unavailable AI/OCR/face models. Cloud request-limit tests execute the atomic Lua bucket through an in-memory Redis emulator. CI also checks candidate retrieval against a disposable PostgreSQL/pgvector database with deterministic model outputs.
 
 ## Honest limits
 
