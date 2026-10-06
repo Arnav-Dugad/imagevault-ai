@@ -10,6 +10,7 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     display_name: str = Field(min_length=2, max_length=100)
     password: str = Field(min_length=8, max_length=128)
+    registration_code: str = Field(default="", max_length=256)
 
 
 class LoginRequest(BaseModel):
@@ -249,6 +250,11 @@ class SystemStatusResponse(BaseModel):
     embedding_model: ComponentHealth
     pending_jobs: int
     queue_size: int | None = None
+    environment: str = "development"
+    storage_backend: str = "minio"
+    max_user_storage_bytes: int = 0
+    grafana_url: str | None = None
+    prometheus_url: str | None = None
 
 
 class MessageResponse(BaseModel):

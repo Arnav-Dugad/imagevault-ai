@@ -1,0 +1,30 @@
+#cloud-config
+package_update: true
+packages:
+  - docker.io
+  - docker-compose-v2
+  - ca-certificates
+  - curl
+  - python3
+write_files:
+  - path: /usr/local/sbin/imagevault-bootstrap
+    permissions: '0700'
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      umask 077
+      mkdir -p /opt/imagevault/app
+      cd /opt/imagevault
+      release_url='https://github.com/Arnav-Dugad/imagevault-ai/releases/download/__RELEASE_TAG__'
+      curl --fail --location --retry 5 "$release_url/imagevault-ai.tar.gz" -o imagevault-ai.tar.gz
+      curl --fail --location --retry 5 "$release_url/SHA256SUMS" -o SHA256SUMS
+      sha256sum --check --ignore-missing SHA256SUMS
+      tar --no-same-owner -xzf imagevault-ai.tar.gz -C app
+      cd app
+      if [ ! -f .env ]; then
+        python3 scripts/configure_azure.py --domain '__APP_DOMAIN__' --storage-url '__STORAGE_ACCOUNT_URL__'
+      fi
+      systemctl enable --now docker
+      docker compose -f docker-compose.azure.yml -f docker-compose.download.yml up -d --build
+runcmd:
+  - [bash, /usr/local/sbin/imagevault-bootstrap]

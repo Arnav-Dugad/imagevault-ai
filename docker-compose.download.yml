@@ -1,0 +1,5 @@
+# Apply after either local or Azure Compose when running a downloaded bundle.
+services:
+  frontend:
+    build:
+      dockerfile: Dockerfile.download

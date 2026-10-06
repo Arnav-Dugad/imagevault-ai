@@ -1,5 +1,7 @@
 from functools import lru_cache
+from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -9,13 +11,23 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "ImageVault AI"
-    app_version: str = "1.0.0"
+    app_version: str = "1.1.0"
     environment: str = "development"
     debug: bool = False
     api_prefix: str = "/api"
 
     database_url: str = "postgresql+asyncpg://imagevault:imagevault@postgres:5432/imagevault"
     redis_url: str = "redis://redis:6379/0"
+
+    storage_backend: Literal["minio", "azure"] = "minio"
+    azure_storage_account_url: str = ""
+    azure_storage_container: str = "imagevault"
+    registration_enabled: bool = True
+    registration_code: str = ""
+    # Original-file quota; thumbnails and Azure transactions are additional usage.
+    max_user_storage_bytes: int = Field(default=0, ge=0)
+    grafana_url: str = ""
+    prometheus_url: str = ""
 
     minio_endpoint: str = "minio:9000"
     minio_public_endpoint: str = "localhost:9000"
@@ -60,7 +72,7 @@ class Settings(BaseSettings):
     perceptual_hash_threshold: int = 8
     similarity_candidate_limit: int = 60
     perceptual_prefilter_distance: int = 18
-    presigned_url_expire_minutes: int = 30
+    presigned_url_expire_minutes: int = Field(default=30, ge=1, le=1440)
     metrics_port: int = 9101
     semantic_search_timeout_seconds: int = 30
     semantic_search_min_score: float = 0.16

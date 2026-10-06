@@ -18,6 +18,7 @@ from app.models import (
     JobStatus,
     ProcessingJob,
     ProcessingStatus,
+    User,
 )
 from app.schemas import (
     BulkDeleteRequest,
@@ -98,8 +99,19 @@ async def upload_images(
     queued_ids: list[UUID] = []
     stored_keys: list[str] = []
     try:
+        used_bytes = 0
+        if settings.max_user_storage_bytes:
+            # Serialize concurrent uploads for this account on PostgreSQL, so
+            # two batches cannot both pass the same quota check.
+            await db.execute(select(User.id).where(User.id == user.id).with_for_update())
+            used_bytes = int(await db.scalar(
+                select(func.coalesce(func.sum(Image.file_size), 0)).where(Image.user_id == user.id)
+            ) or 0)
         for upload in files:
             data, filename, mime_type = await read_validated_image(upload)
+            used_bytes += len(data)
+            if settings.max_user_storage_bytes and used_bytes > settings.max_user_storage_bytes:
+                raise HTTPException(status_code=413, detail="Your vault storage limit has been reached")
             digest = sha256_bytes(data)
             duplicate = await db.scalar(
                 select(Image)
@@ -109,7 +121,7 @@ async def upload_images(
             )
             image_id = uuid4()
             original_key, thumbnail_key = object_keys(user.id, image_id, mime_type)
-            storage.put_bytes(original_key, data, mime_type)
+            await asyncio.to_thread(storage.put_bytes, original_key, data, mime_type)
             stored_keys.append(original_key)
 
             exact = duplicate is not None
@@ -156,7 +168,7 @@ async def upload_images(
                     message=(
                         f"Exact duplicate detected: matches {duplicate.original_filename}"
                         if duplicate
-                        else "Upload accepted and queued for private local processing"
+                        else "Upload accepted and queued for private processing"
                     ),
                 )
             )
@@ -165,7 +177,7 @@ async def upload_images(
         await db.rollback()
         for key in stored_keys:
             try:
-                storage.delete(key)
+                await asyncio.to_thread(storage.delete, key)
             except Exception:
                 logger.exception("Failed to clean up object after upload rollback")
         raise

@@ -26,6 +26,30 @@ class FakeStorage:
         return f"http://objects.test/{key}" if key else None
 
 
+@pytest.mark.asyncio
+async def test_quota_rejects_entire_batch_and_cleans_uploaded_objects(client, monkeypatch):
+    auth = await create_user(client)
+    headers = {"Authorization": f"Bearer {auth['access_token']}"}
+    fake = FakeStorage()
+    monkeypatch.setattr(image_routes, "storage", fake)
+    monkeypatch.setattr(image_service, "storage", fake)
+    monkeypatch.setattr(image_routes, "process_image", SimpleNamespace(delay=lambda _: None))
+    data = png_bytes()
+    monkeypatch.setattr(image_routes.settings, "max_user_storage_bytes", len(data) + 1)
+    response = await client.post("/api/images/upload", headers=headers, files=[
+        ("files", ("first.png", data, "image/png")),
+        ("files", ("second.png", data, "image/png")),
+    ])
+    assert response.status_code == 413
+    assert fake.objects == {}
+    assert (await client.get("/api/images", headers=headers)).json()["total"] == 0
+    accepted = await client.post("/api/images/upload", headers=headers, files=[("files", ("first.png", data, "image/png"))])
+    assert accepted.status_code == 202
+    exceeded = await client.post("/api/images/upload", headers=headers, files=[("files", ("second.png", data, "image/png"))])
+    assert exceeded.status_code == 413
+    assert len(fake.objects) == 1
+
+
 def png_bytes(color: tuple[int, int, int] = (80, 180, 120)) -> bytes:
     output = BytesIO()
     PillowImage.new("RGB", (32, 24), color).save(output, format="PNG")
