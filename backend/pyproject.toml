@@ -4,12 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "imagevault-api"
-version = "1.0.0"
-description = "Private-cloud image storage and local visual similarity API"
+version = "1.1.0"
+description = "Private image storage and visual intelligence for Azure and self-hosted deployments"
 requires-python = ">=3.11,<3.14"
 dependencies = [
   "alembic==1.15.2",
   "asyncpg==0.30.0",
+  "azure-identity==1.26.0",
+  "azure-storage-blob==12.31.0",
   "celery[redis]==5.5.2",
   "email-validator==2.2.0",
   "fastapi==0.115.12",

@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, Response, status
 from redis.asyncio import Redis
 from sqlalchemy import func, select, text
@@ -22,10 +24,13 @@ async def component_status(db: Database) -> tuple[dict[str, ComponentHealth], in
         components["database"] = ComponentHealth(status="unhealthy", detail="Connection failed")
 
     try:
-        healthy = storage.healthy()
+        healthy = await asyncio.to_thread(storage.healthy)
         components["object_storage"] = ComponentHealth(
             status="healthy" if healthy else "unhealthy",
-            detail="MinIO bucket available" if healthy else "Bucket unavailable",
+            detail=(
+                f"{'Azure Blob' if settings.storage_backend == 'azure' else 'MinIO'} storage available"
+                if healthy else "Storage unavailable"
+            ),
         )
     except Exception:
         components["object_storage"] = ComponentHealth(status="unhealthy", detail="Connection failed")
@@ -94,7 +99,7 @@ async def ready(response: Response, db: Database) -> dict[str, object]:
 async def system_status(_: CurrentUser, db: Database) -> SystemStatusResponse:
     components, pending, queue_size = await component_status(db)
     overall = "healthy" if all(
-        components[key].status == "healthy" for key in ("database", "object_storage")
+        components[key].status == "healthy" for key in ("database", "object_storage", "worker")
     ) else "degraded"
     return SystemStatusResponse(
         status=overall,
@@ -106,4 +111,9 @@ async def system_status(_: CurrentUser, db: Database) -> SystemStatusResponse:
         embedding_model=components["embedding_model"],
         pending_jobs=pending,
         queue_size=queue_size,
+        environment=settings.environment,
+        storage_backend=settings.storage_backend,
+        max_user_storage_bytes=settings.max_user_storage_bytes,
+        grafana_url=settings.grafana_url or None,
+        prometheus_url=settings.prometheus_url or None,
     )

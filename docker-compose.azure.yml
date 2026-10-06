@@ -1,0 +1,132 @@
+# Standalone Azure deployment; do not merge this with the local Compose file.
+name: imagevault-azure
+
+x-app-environment: &app-environment
+  APP_VERSION: ${APP_VERSION:-1.1.0}
+  ENVIRONMENT: azure
+  DATABASE_URL: postgresql+asyncpg://imagevault:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/imagevault
+  REDIS_URL: redis://redis:6379/0
+  STORAGE_BACKEND: azure
+  AZURE_STORAGE_ACCOUNT_URL: ${AZURE_STORAGE_ACCOUNT_URL:?Set AZURE_STORAGE_ACCOUNT_URL}
+  AZURE_STORAGE_CONTAINER: ${AZURE_STORAGE_CONTAINER:-imagevault}
+  JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
+  REGISTRATION_CODE: ${REGISTRATION_CODE:?Set an invitation code for cloud signup}
+  REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-true}
+  CORS_ORIGINS: https://${APP_DOMAIN:?Set APP_DOMAIN}
+  MAX_USER_STORAGE_BYTES: ${MAX_USER_STORAGE_BYTES:-2147483648}
+  MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-15728640}
+  MAX_VIDEO_UPLOAD_BYTES: ${MAX_VIDEO_UPLOAD_BYTES:-104857600}
+  MAX_BATCH_FILES: ${MAX_BATCH_FILES:-10}
+  AI_DEVICE: cpu
+  OMP_NUM_THREADS: "2"
+  MKL_NUM_THREADS: "2"
+  NO_PROXY: 169.254.169.254,localhost,127.0.0.1
+  OCR_LANGUAGES: ${OCR_LANGUAGES:-eng+hin}
+  MEDIA_SAMPLE_FRAMES: ${MEDIA_SAMPLE_FRAMES:-3}
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: imagevault
+      POSTGRES_DB: imagevault
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes: ["postgres-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U imagevault -d imagevault"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 512m
+    restart: unless-stopped
+    logging: *logging
+
+  redis:
+    image: redis:7.4-alpine
+    # A task broker must never evict pending jobs to make room for new keys.
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "96mb", "--maxmemory-policy", "noeviction"]
+    volumes: ["redis-data:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 128m
+    restart: unless-stopped
+    logging: *logging
+
+  backend:
+    build: {context: ./backend, dockerfile: Dockerfile}
+    environment: *app-environment
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=15)"]
+      interval: 30s
+      timeout: 20s
+      start_period: 120s
+      retries: 10
+    mem_limit: 768m
+    restart: unless-stopped
+    logging: *logging
+
+  worker:
+    build: {context: ./backend, dockerfile: Dockerfile.worker}
+    environment: *app-environment
+    volumes: ["model-cache:/home/imagevault/.cache"]
+    depends_on:
+      backend: {condition: service_healthy}
+    mem_limit: 4g
+    cpus: 1.5
+    restart: unless-stopped
+    logging: *logging
+
+  frontend:
+    build: {context: ./frontend, dockerfile: Dockerfile}
+    mem_limit: 128m
+    restart: unless-stopped
+    logging: *logging
+
+  nginx:
+    image: nginx:1.27-alpine
+    volumes: ["./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro"]
+    depends_on:
+      backend: {condition: service_healthy}
+      frontend: {condition: service_healthy}
+    mem_limit: 64m
+    restart: unless-stopped
+    logging: *logging
+
+  caddy:
+    image: caddy:2.10-alpine
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?Set APP_DOMAIN}
+    volumes:
+      - ./infra/azure/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    ports: ["80:80", "443:443"]
+    depends_on: [nginx]
+    mem_limit: 128m
+    restart: unless-stopped
+    logging: *logging
+
+volumes:
+  postgres-data:
+  redis-data:
+  model-cache:
+  caddy-data:
+  caddy-config:
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.30.42.0/24

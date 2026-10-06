@@ -6,7 +6,7 @@ interface AuthValue {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, name: string, password: string) => Promise<void>;
+  register: (email: string, name: string, password: string, registrationCode?: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -37,7 +37,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user,
     loading,
     login: (email, password) => authenticate("/auth/login", { email, password }),
-    register: (email, display_name, password) => authenticate("/auth/register", { email, display_name, password }),
+    register: (email, display_name, password, registration_code = "") => authenticate("/auth/register", { email, display_name, password, registration_code }),
     logout: () => { setToken(null); setUser(null); },
   };
 

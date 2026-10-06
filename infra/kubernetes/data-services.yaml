@@ -178,7 +178,7 @@ spec:
       containers:
         - name: redis
           image: redis:7.4-alpine
-          args: [redis-server, --appendonly, "no", --maxmemory, 256mb, --maxmemory-policy, allkeys-lru]
+          args: [redis-server, --appendonly, "no", --maxmemory, 256mb, --maxmemory-policy, noeviction]
           ports:
             - {containerPort: 6379}
           readinessProbe:

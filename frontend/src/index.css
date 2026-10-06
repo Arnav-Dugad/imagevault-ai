@@ -1,8 +1,5 @@
-@import "@fontsource-variable/dm-sans";
-@import "@fontsource/ibm-plex-mono/500.css";
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@config "../tailwind.config.js";
 
 :root {
   color-scheme: dark;
