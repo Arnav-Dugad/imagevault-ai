@@ -1,7 +1,9 @@
+import asyncio
 import secrets
 
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 
 from app.api.dependencies import CurrentUser, Database
 from app.core.security import create_access_token, hash_password, verify_password
@@ -37,12 +39,16 @@ async def register(payload: RegisterRequest, db: Database) -> TokenResponse:
     user = User(
         email=email,
         display_name=payload.display_name.strip(),
-        password_hash=hash_password(payload.password),
+        password_hash=await asyncio.to_thread(hash_password, payload.password),
     )
     db.add(user)
-    await db.flush()
-    db.add(ActivityLog(user_id=user.id, action="account.registered"))
-    await db.commit()
+    try:
+        await db.flush()
+        db.add(ActivityLog(user_id=user.id, action="account.registered"))
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="An account with this email already exists") from exc
     await db.refresh(user)
     token, expires_in = create_access_token(user.id)
     return TokenResponse(access_token=token, expires_in=expires_in, user=UserResponse.model_validate(user))
@@ -51,7 +57,7 @@ async def register(payload: RegisterRequest, db: Database) -> TokenResponse:
 @router.post("/login", response_model=TokenResponse)
 async def login(payload: LoginRequest, db: Database) -> TokenResponse:
     user = await db.scalar(select(User).where(func.lower(User.email) == payload.email.lower().strip()))
-    if user is None or not verify_password(payload.password, user.password_hash):
+    if user is None or not await asyncio.to_thread(verify_password, payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Incorrect email or password")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="This account is disabled")

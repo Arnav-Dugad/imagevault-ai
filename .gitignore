@@ -72,3 +72,6 @@ infra/nginx/certs/
 
 # Generated synthetic classroom samples
 demo-images/
+
+frontend/test-results/
+frontend/playwright-report/

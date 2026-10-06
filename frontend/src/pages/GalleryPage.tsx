@@ -29,20 +29,26 @@ export function GalleryPage() {
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
+    const controller = new AbortController();
     setData(null); setError("");
     const params = new URLSearchParams({ page: String(page), page_size: "24" });
+    let path = "/images";
     if (searchMode === "smart" && smartQuery) {
-      params.set("query", smartQuery);
-      api<ImageList>(`/images/smart-search?${params}`).then(setData).catch((reason: Error) => setError(reason.message));
-      return;
+      params.set("query", smartQuery); path += "/smart-search";
+    } else {
+      params.set("filter_by", filter); params.set("sort_by", sort);
+      if (searchMode === "filename" && deferredSearch) params.set("search", deferredSearch);
     }
-    params.set("filter_by", filter); params.set("sort_by", sort);
-    if (searchMode === "filename" && deferredSearch) params.set("search", deferredSearch);
-    api<ImageList>(`/images?${params}`).then(setData).catch((reason: Error) => setError(reason.message));
+    api<ImageList>(`${path}?${params}`, { signal: controller.signal })
+      .then((value) => { if (!controller.signal.aborted) setData(value); })
+      .catch((reason: Error) => { if (!controller.signal.aborted) setError(reason.message); });
+    return () => controller.abort();
   }, [deferredSearch, filter, page, refreshKey, searchMode, smartQuery, sort]);
 
+  useEffect(() => { setSelected(new Set()); setConfirming(false); }, [deferredSearch, filter, page, searchMode, smartQuery, sort]);
+
   useEffect(() => {
-    if (!data?.items.some((image) => image.status === "PENDING" || image.status === "PROCESSING")) return;
+    if (!data?.items.some((image) => image.analysis_pending || image.status === "PENDING" || image.status === "PROCESSING")) return;
     const timer = window.setTimeout(() => setRefreshKey((value) => value + 1), 4000);
     return () => window.clearTimeout(timer);
   }, [data]);
@@ -56,10 +62,11 @@ export function GalleryPage() {
   function stopSelecting() { setSelecting(false); setSelected(new Set()); }
 
   async function removeSelected() {
+    if (deleting || !selected.size) return;
     setDeleting(true); setError("");
     try {
-      const result = await api<{ deleted: number; recovered_bytes: number; message: string }>("/images/bulk-delete", { method: "POST", body: JSON.stringify({ image_ids: [...selected], confirm: true }) });
-      setNotice(`${result.message} · ${formatBytes(result.recovered_bytes)} recovered`);
+      const result = await api<{ deleted: number; recovered_bytes: number; cleanup_pending: number; message: string }>("/images/bulk-delete", { method: "POST", body: JSON.stringify({ image_ids: [...selected], confirm: true }) });
+      setNotice(`${result.message} · ${formatBytes(result.recovered_bytes)} removed from vault`);
       setSelected(new Set()); setConfirming(false); setSelecting(false); setRefreshKey((value) => value + 1);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not delete selected images"); setConfirming(false); }
     finally { setDeleting(false); }
@@ -77,6 +84,6 @@ export function GalleryPage() {
     {error ? <EmptyState icon={Images} title="Gallery unavailable" description={error} /> : !data ? <LoadingGrid /> : data.items.length === 0 ? <EmptyState icon={Images} title={hasSearch || filter !== "all" ? "No matching images" : "No images yet"} description={hasSearch || filter !== "all" ? "Try a different search." : "Upload your first images."} action={!hasSearch && filter === "all" ? <Link to="/upload"><Button>Upload images</Button></Link> : undefined} /> : <><div className="mb-4 flex items-center justify-between"><p className="text-xs text-muted">{data.total.toLocaleString()} image{data.total === 1 ? "" : "s"}{smartQuery ? ` for “${smartQuery}”` : ""}</p><p className="font-mono text-[10px] uppercase tracking-wider text-muted">Page {data.page} of {data.pages}</p></div><div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">{data.items.map((image) => <ImageCard key={image.id} image={image} selectable={selecting} selected={selected.has(image.id)} onSelect={toggle} />)}</div>{data.pages > 1 && <div className="mt-7 flex justify-center gap-2"><Button variant="secondary" disabled={page === 1} onClick={() => { setPage((value) => value - 1); setSelected(new Set()); }}>Previous</Button><Button variant="secondary" disabled={page === data.pages} onClick={() => { setPage((value) => value + 1); setSelected(new Set()); }}>Next</Button></div>}</>}
 
     <AnimatePresence>{selected.size > 0 && !confirming && <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 30 }} className="fixed bottom-5 left-1/2 z-40 flex w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 items-center justify-between gap-4 rounded-2xl border border-line bg-[#15191f]/95 p-3 shadow-float backdrop-blur-xl"><div className="min-w-0 pl-2"><p className="text-sm font-semibold">{selected.size} selected</p><p className="truncate text-xs text-muted">{formatBytes(selectedBytes)}</p></div><div className="flex gap-2"><Button variant="ghost" onClick={() => setSelected(new Set())}>Clear</Button><Button variant="danger" onClick={() => setConfirming(true)}><Trash2 className="h-4 w-4" />Delete</Button></div></motion.div>}</AnimatePresence>
-    <AnimatePresence>{confirming && <div className="fixed inset-0 z-50 grid place-items-center p-4"><motion.button aria-label="Close confirmation" className="absolute inset-0 bg-black/75 backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setConfirming(false)} /><motion.div role="dialog" aria-modal="true" aria-labelledby="gallery-delete-title" initial={{ opacity: 0, scale: .96, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: .96 }} className="panel relative z-10 w-full max-w-md rounded-[28px] p-6"><div className="grid h-12 w-12 place-items-center rounded-2xl bg-coral/10"><AlertTriangle className="h-5 w-5 text-coral" /></div><h2 id="gallery-delete-title" className="mt-5 text-xl font-semibold">Delete {selected.size} image{selected.size === 1 ? "" : "s"}?</h2><p className="mt-2 text-sm text-muted">This cannot be undone.</p><div className="mt-6 flex justify-end gap-2"><Button variant="secondary" onClick={() => setConfirming(false)}>Cancel</Button><Button variant="danger" loading={deleting} onClick={removeSelected}>Delete permanently</Button></div></motion.div></div>}</AnimatePresence>
+    <AnimatePresence>{confirming && <div className="fixed inset-0 z-50 grid place-items-center p-4"><motion.button aria-label="Close confirmation" className="absolute inset-0 bg-black/75 backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => { if (!deleting) setConfirming(false); }} /><motion.div role="dialog" aria-modal="true" aria-labelledby="gallery-delete-title" initial={{ opacity: 0, scale: .96, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: .96 }} className="panel relative z-10 w-full max-w-md rounded-[28px] p-6"><div className="grid h-12 w-12 place-items-center rounded-2xl bg-coral/10"><AlertTriangle className="h-5 w-5 text-coral" /></div><h2 id="gallery-delete-title" className="mt-5 text-xl font-semibold">Delete {selected.size} image{selected.size === 1 ? "" : "s"}?</h2><p className="mt-2 text-sm text-muted">This cannot be undone.</p><div className="mt-6 flex justify-end gap-2"><Button variant="secondary" onClick={() => { if (!deleting) setConfirming(false); }}>Cancel</Button><Button variant="danger" loading={deleting} onClick={removeSelected}>Delete permanently</Button></div></motion.div></div>}</AnimatePresence>
   </>;
 }

@@ -21,15 +21,24 @@ export function ImageDetailPage() {
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  useEffect(() => { if (id) api<ImageDetail>(`/images/${id}`).then(setImage).catch((reason: Error) => setError(reason.message)); }, [id]);
   useEffect(() => {
-    if (!id || !image || !["PENDING", "PROCESSING"].includes(image.status)) return;
-    const timer = window.setTimeout(() => api<ImageDetail>(`/images/${id}`).then(setImage).catch(() => undefined), 4000);
-    return () => window.clearTimeout(timer);
+    const controller = new AbortController();
+    setImage(null); setError(""); setConfirming(false);
+    if (id) api<ImageDetail>(`/images/${id}`, { signal: controller.signal })
+      .then((value) => { if (!controller.signal.aborted) setImage(value); })
+      .catch((reason: Error) => { if (!controller.signal.aborted) setError(reason.message); });
+    return () => controller.abort();
+  }, [id]);
+  useEffect(() => {
+    if (!id || !image || !(image.analysis_pending || ["PENDING", "PROCESSING"].includes(image.status))) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => api<ImageDetail>(`/images/${id}`, { signal: controller.signal })
+      .then((value) => { if (!controller.signal.aborted) setImage(value); }).catch(() => undefined), 4000);
+    return () => { window.clearTimeout(timer); controller.abort(); };
   }, [id, image]);
 
   async function remove() {
-    if (!id) return;
+    if (!id || !image || image.id !== id || deleting) return;
     setDeleting(true);
     try { await api(`/images/${id}?confirm=true`, { method: "DELETE" }); navigate("/gallery"); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Deletion failed"); setConfirming(false); }
@@ -44,7 +53,7 @@ export function ImageDetailPage() {
   }
 
   if (error) return <div className="panel rounded-2xl p-8"><h1 className="text-xl font-semibold">Image unavailable</h1><p className="mt-2 text-sm text-muted">{error}</p><Link to="/gallery"><Button className="mt-5" variant="secondary">Back to gallery</Button></Link></div>;
-  if (!image) return <div className="grid gap-5 xl:grid-cols-[1.3fr_.7fr]"><div className="skeleton aspect-[4/3] rounded-[28px]" /><div className="skeleton h-[34rem] rounded-[28px]" /></div>;
+  if (!image || image.id !== id) return <div className="grid gap-5 xl:grid-cols-[1.3fr_.7fr]"><div className="skeleton aspect-[4/3] rounded-[28px]" /><div className="skeleton h-[34rem] rounded-[28px]" /></div>;
 
   const metadata = [
     [FileImage, "Format", image.mime_type.split("/")[1].toUpperCase()],
@@ -74,6 +83,6 @@ export function ImageDetailPage() {
 
     <section className="panel mt-5 rounded-[28px] p-5 sm:p-6"><div className="mb-5 flex items-center justify-between gap-3"><div><p className="eyebrow">Related images</p><h2 className="mt-2 text-xl font-semibold">Visual matches</h2></div>{image.batch_id && <Link to={`/duplicates?batch=${image.batch_id}`}><Button variant="secondary">View batch</Button></Link>}</div>{image.similar_images.length === 0 ? <div className="rounded-2xl border border-dashed border-line py-12 text-center text-sm text-muted">No strong matches.</div> : <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{image.similar_images.map((similar) => <article key={similar.image.id} className="overflow-hidden rounded-2xl border border-line bg-black/10"><Link to={`/images/${similar.image.id}`} className="focus-ring group block"><div className="relative aspect-[16/9] overflow-hidden bg-[#171b21]">{similar.image.thumbnail_url && <img src={similar.image.thumbnail_url} alt={similar.image.original_filename} className="h-full w-full object-cover transition group-hover:scale-[1.03]" />}<span className="absolute bottom-3 right-3 rounded-full bg-white px-2.5 py-1 font-mono text-[10px] font-semibold text-black">{percent(similar.similarity_score)}</span></div></Link><div className="p-4"><p className="truncate text-sm font-semibold">{similar.image.original_filename}</p><p className="mt-1 text-xs text-muted">{similar.classification}</p><div className="mt-4 grid grid-cols-2 gap-3"><ScoreBar label="AI" value={similar.clip_score} /><ScoreBar label="Structure" value={similar.perceptual_score} /><ScoreBar label="Color" value={similar.color_score} /><ScoreBar label="Frame" value={similar.aspect_score} /></div></div></article>)}</div>}</section>
 
-    <AnimatePresence>{confirming && <div className="fixed inset-0 z-50 grid place-items-center p-4"><motion.button aria-label="Close confirmation" className="absolute inset-0 bg-black/75" initial={{ opacity: 0 }} animate={{ opacity: 1 }} onClick={() => setConfirming(false)} /><motion.div role="dialog" aria-modal="true" className="panel relative z-10 w-full max-w-md rounded-[28px] p-6" initial={{ scale: .96, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}><button onClick={() => setConfirming(false)} aria-label="Close" className="absolute right-4 top-4 p-2 text-muted"><X className="h-4 w-4" /></button><h2 className="text-xl font-semibold">Delete this image?</h2><p className="mt-2 text-sm text-muted">This cannot be undone.</p><div className="mt-6 flex justify-end gap-2"><Button variant="secondary" onClick={() => setConfirming(false)}>Cancel</Button><Button variant="danger" loading={deleting} onClick={remove}>Delete permanently</Button></div></motion.div></div>}</AnimatePresence>
+    <AnimatePresence>{confirming && <div className="fixed inset-0 z-50 grid place-items-center p-4"><motion.button aria-label="Close confirmation" className="absolute inset-0 bg-black/75" initial={{ opacity: 0 }} animate={{ opacity: 1 }} onClick={() => { if (!deleting) setConfirming(false); }} /><motion.div role="dialog" aria-modal="true" className="panel relative z-10 w-full max-w-md rounded-[28px] p-6" initial={{ scale: .96, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}><button onClick={() => { if (!deleting) setConfirming(false); }} aria-label="Close" className="absolute right-4 top-4 p-2 text-muted"><X className="h-4 w-4" /></button><h2 className="text-xl font-semibold">Delete this image?</h2><p className="mt-2 text-sm text-muted">This cannot be undone.</p><div className="mt-6 flex justify-end gap-2"><Button variant="secondary" onClick={() => { if (!deleting) setConfirming(false); }}>Cancel</Button><Button variant="danger" loading={deleting} onClick={remove}>Delete permanently</Button></div></motion.div></div>}</AnimatePresence>
   </>;
 }

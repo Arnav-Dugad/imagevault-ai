@@ -83,3 +83,7 @@ do not establish a production accuracy benchmark.
 Original code is [MIT licensed](LICENSE). Dependencies and model weights retain
 their own licenses. This is a college teaching project with a single-VM deployment;
 maintain backups for important media.
+
+## Testing
+
+See [test coverage and reliability](docs/testing.md) for local checks, desktop/mobile browser tests, failure recovery, and the limits of the synthetic detection corpus. Every downloadable main-branch release now waits for these browser checks as well as backend, frontend, and infrastructure checks.

@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "ImageVault AI"
-    app_version: str = "1.2.0"
+    app_version: str = "1.2.1"
     environment: str = "development"
     debug: bool = False
     api_prefix: str = "/api"
