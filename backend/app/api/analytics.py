@@ -136,7 +136,14 @@ async def _duplicate_groups(
         if len(member_ids) < 2:
             continue
         members = [by_id[member_id] for member_id in member_ids]
-        keeper = min(members, key=_keeper_key)
+        # Timestamp precision can tie for a whole batch. Keep an exact-family
+        # representative in that case so exact-copy selection stays available;
+        # a UUID then makes the remaining tie independent of set iteration.
+        sha_counts = Counter(image.sha256 for image in members)
+        keeper = min(
+            members,
+            key=lambda image: (*_keeper_key(image), -sha_counts[image.sha256], str(image.id)),
+        )
         candidates: list[DuplicateCandidate] = []
         for candidate in sorted(
             (item for item in members if item.id != keeper.id),

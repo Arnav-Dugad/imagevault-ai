@@ -1,6 +1,6 @@
 from io import BytesIO
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import imagehash
 import numpy as np
@@ -253,14 +253,18 @@ async def test_exact_copy_reuses_analysis_and_does_not_run_models(session_factor
 
 
 @pytest.mark.asyncio
-async def test_exact_equivalence_preserves_verified_near_copy_in_family(session_factory, monkeypatch):
+@pytest.mark.parametrize('near_id_first', [True, False])
+async def test_exact_equivalence_preserves_verified_near_copy_in_family(session_factory, monkeypatch, near_id_first):
+    from datetime import UTC, datetime
     monkeypatch.setattr('app.services.images.storage', FakeStorage())
     async with session_factory() as db:
         user = User(email='equivalence@example.com', display_name='Test', password_hash='unused')
         db.add(user)
         await db.flush()
-        images = [Image(user_id=user.id, original_filename=f'{n}.png', object_key=f'{n}.png',
+        ids = [UUID(int=n) for n in ([2, 3, 1] if near_id_first else [1, 2, 3])]
+        images = [Image(id=ids[n], user_id=user.id, original_filename=f'{n}.png', object_key=f'{n}.png',
                         mime_type='image/png', file_size=100, sha256=('a' if n < 2 else 'b') * 64,
+                        created_at=datetime(2026, 1, 1, tzinfo=UTC),
                         analysis_version=6, status=ProcessingStatus.READY) for n in range(3)]
         db.add_all(images)
         await db.flush()
@@ -270,6 +274,7 @@ async def test_exact_equivalence_preserves_verified_near_copy_in_family(session_
         await db.commit()
         groups, _ = await _duplicate_groups(user.id, db)
         assert len(groups) == 1 and len(groups[0].candidates) == 2
+        assert groups[0].original.id in {images[0].id, images[1].id}
         assert {candidate.match_type for candidate in groups[0].candidates} == {DuplicateType.EXACT, DuplicateType.PERCEPTUAL}
 
 

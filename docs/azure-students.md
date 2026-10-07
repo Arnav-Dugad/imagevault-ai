@@ -1,5 +1,10 @@
 # Azure for Students deployment
 
+Updated 7 October 2026 for application 1.2.1. On Windows, use
+[the PowerShell walkthrough](setup-windows.md) to deploy from the existing folder.
+The Bash route below is an alternative. No Azure connection has been created by
+this source/documentation update; live verification remains pending.
+
 ImageVault can run entirely on Azure: **Ubuntu VM + private Azure Blob Storage**.
 The laptop can be switched off. Users open the deployed HTTPS address in a browser.
 FastAPI, PostgreSQL/pgvector, Redis, and the CPU AI worker run on the VM; originals

@@ -1,5 +1,9 @@
 # Five-minute classroom presentation
 
+Updated 7 October 2026 for application 1.2.1. Azure must first be connected and
+verified with [Windows setup](setup-windows.md). Until then, the cloud demonstration
+is planned; do not claim a live Azure result.
+
 ## Before class
 
 1. Deploy the Azure website using [azure-students.md](azure-students.md). Start the VM well before presenting; daily shutdown does not automatically start it again.

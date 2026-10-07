@@ -5,6 +5,10 @@ Use the deployed website in any modern browser.
 
 **[Download website/server bundle](https://github.com/Arnav-Dugad/imagevault-ai/releases/latest)** · **[Azure setup](docs/azure-students.md)** · **[Five-minute presentation](docs/demo-script.md)**
 
+**On Windows, start with [the step-by-step setup guide](docs/setup-windows.md).**
+It covers connecting your student subscription, deploying from this folder,
+opening the website, and the optional local Docker alternative.
+
 ## One primary deployment
 
 Azure for Students hosts an Ubuntu VM and private Azure Blob Storage. Five containers
@@ -87,3 +91,13 @@ maintain backups for important media.
 ## Testing
 
 See [test coverage and reliability](docs/testing.md) for local checks, desktop/mobile browser tests, failure recovery, and the limits of the synthetic detection corpus. Every downloadable main-branch release now waits for these browser checks as well as backend, frontend, and infrastructure checks.
+
+## Documentation
+
+The [synopsis](docs/synopsis-draft.md), [technical design](docs/technical-design.md),
+[implementation plan](docs/implementation-plan.md), [presentation outline](docs/presentation-outline.md),
+and [viva guide](docs/viva-guide.md) describe the Azure deployment and identify
+Kubernetes, Terraform and local monitoring as optional extensions.
+See [the validation report](docs/validation-report.md) for checks actually run
+in this folder and live Azure checks still outstanding.
+For suggested priorities, see [how to make the project simpler](docs/next-steps.md).

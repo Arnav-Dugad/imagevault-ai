@@ -1,5 +1,24 @@
 # Changelog
 
+## Azure setup and reliability update — 7 October 2026
+
+- Synchronize this folder with GitHub main `9ee8c0c` (application 1.2.1).
+- Add a Windows PowerShell Azure connection/deployment walkthrough and optional local startup.
+- Align synopsis, technical design, implementation plan, presentation, viva and contribution docs with Azure VM/Blob, Bicep/Compose, managed identity and student-credit limits.
+- Replace stale validation claims with evidence from this update and pending live Azure checks.
+- Align environment/Compose version labels with 1.2.1 while preserving local secrets.
+- Make keeper selection deterministic when quality and timestamps tie, preserving exact-copy selection in mixed review families.
+- Add desktop/mobile validation, upload interruption/retry, persistence and cross-account authorization checks.
+- Test cloud secret generation, environment preservation and secret-safe release packaging.
+- Document simple priorities for the next version: Trash, backups, clear retry controls and fewer optional features.
+
+## 1.2.1
+
+- Add transaction-backed deferred object cleanup, including storage outages and worker/deletion races.
+- Strengthen queue failure, account isolation and duplicate-evidence regression coverage.
+- Add frontend/API recovery checks and desktop/mobile Playwright workflows.
+- Gate release publication on browser checks alongside application and infrastructure checks.
+
 ## 1.2.0
 
 - Simplify Azure hosting to five containers with Caddy serving the website directly; preserve shared request limits.

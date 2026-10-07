@@ -1,224 +1,116 @@
-# ImageVault AI technical design document
+# ImageVault AI technical design
 
-## Document control
+Updated 7 October 2026 · application 1.2.1 · source baseline `9ee8c0c`.
+Authors/supervisor: `[To be supplied]`. Live Azure verification: pending.
 
-- Version: 1.0 draft
-- Project: ImageVault AI
-- Authors: `[Student name(s) to be added]`
-- Supervisor: `[Supervisor name to be added]`
-- Last verified deployment: `[Date and environment to be added after execution]`
+## Scope and deployment
 
-## 1. Purpose and scope
+The main deliverable is an HTTPS website on an Azure Ubuntu VM, backed by private Azure Blob Storage. Docker Compose runs Caddy/React, FastAPI, Celery, PostgreSQL/pgvector and Redis. Bicep defines the cloud resources; Terraform and Kubernetes examples target the optional local cluster.
 
-The system manages private image collections and highlights waste caused by exact and near-duplicate content. It is also a demonstrable local cloud platform: services are containerized, orchestrated, declared as code, continuously validated, health checked, and observed.
+In scope: invited accounts, private media upload/review, asynchronous analysis, exact/near/semantic evidence, analytics, advanced OCR/people/albums, failure recovery, CI releases and cost controls. High availability, public identity discovery, automatic deletion, MFA/email recovery and guaranteed accuracy are out of scope.
 
-In scope: self-hosted accounts, batch-aware photo/animation/RAW/video upload, MinIO objects, metadata, thumbnails, SHA-256, three perceptual hashes, color/frame evidence, multi-frame OpenCLIP embeddings, pgvector retrieval, multilingual OCR and document layout, private face clustering and feedback, quality scoring, smart albums, gallery, explainable duplicate review, storage analytics, explicit bulk deletion, service status, Compose, Minikube, Terraform, CI, metrics, logs, and documentation.
+## Components and configuration
 
-Out of scope for the current release: public internet hosting, high availability, cross-region replication, automatic deletion, identity lookup against public sources, email verification, password recovery, and mobile clients.
-
-## 2. Quality attributes
-
-| Attribute | Design response |
+| Component | Design |
 |---|---|
-| Privacy | No external image/AI API; private MinIO; signed previews; local model cache |
-| Security | Argon2, expiring JWT, ownership predicates, MIME/decoder limits, UUID keys, ignored/Kubernetes secrets |
-| Availability | Liveness/readiness probes, service health checks, restart policies, retrying jobs |
-| Scalability | Stateless API replicas, Redis decoupling, pgvector index, object storage abstraction |
-| Observability | Structured JSON logs, request IDs, API/worker Prometheus metrics, provisioned Grafana |
-| Portability | Environment configuration, Docker images, Compose, Kubernetes, local Terraform |
-| Demonstrability | Synthetic dataset, load generator, reset utility, status page, documented scaling command |
-| Cost | Only locally runnable free/open-source components; no paid provider |
+| Caddy | Serves compiled React, automatic HTTPS, API forwarding; public ports 80/443 |
+| FastAPI | Auth/ownership, quotas, Redis-backed limits, validation, metadata, signed previews, cleanup loop |
+| Celery | Single CPU worker for fingerprints, verification and optional model enrichment |
+| PostgreSQL 16/pgvector | Accounts, images, jobs, matches, albums/feedback, vectors and durable deletion records |
+| Redis | Task broker, heartbeat/model state and atomic shared request limits; Azure uses AOF/noeviction |
+| Azure Blob | Private originals/WebP thumbnails, Entra credentials and read-only user-delegation SAS |
+| Bicep/cloud-init | VM/network/storage/role/shutdown; release download, checksum verification and container bootstrap |
 
-## 3. Modules
+The VM generator writes a separate private cloud `.env` with independent PostgreSQL/JWT/invitation secrets. Cloud Compose supplies `STORAGE_BACKEND=azure`, the storage endpoint, HTTPS origin, CPU settings, proxy trust range and quotas. `DefaultAzureCredential` obtains VM managed-identity tokens through the metadata endpoint. Account-scoped Storage Blob Data Contributor covers both object operations and user-delegation keys. The local environment uses MinIO and separate secrets.
 
-### Authentication module
+Cloud defaults: Standard_B2ms x64, 8 GiB RAM, 64 GiB Standard SSD, one 4 GiB-limited worker, 2 GiB originals per user, 15 MiB photos, 100 MiB videos/RAW, 10 files per batch. These constrain application use; they do not cap Azure charges.
 
-Registration validates normalized email, display name, and password length. Argon2 stores a one-way password hash. Login issues an HS256 JWT with subject, issued-at, access type, and expiration claims. Every private route resolves the token to an active local user.
-
-### Image storage module
-
-The API reads each upload with a hard byte limit, checks the declared MIME type, decodes/verifies the content with Pillow, sanitizes the display filename, computes SHA-256, and uses server-generated UUID keys. PostgreSQL stores metadata; MinIO stores bytes.
-
-### Exact duplicate module
-
-Before queueing expensive inference, the API searches `(user_id, sha256)`. A hit sets `EXACT_DUPLICATE`, records `exact_duplicate_of_id`, reports the matched filename, and still preserves the explicitly uploaded object until the user chooses deletion.
-
-### AI processing module
-
-One Celery worker reads the original, extracts safe dimensions/optional EXIF fields, computes pHash, dHash, wHash, and a normalized color histogram, then writes a 640×640 maximum WebP thumbnail. It lazily loads OpenCLIP ViT-B/32 and averages embeddings from a normal crop, padded full-frame view, and mirrored view. The normalized 512-dimensional result is persisted with pgvector and used to retrieve up to 60 semantic candidates. A perceptual prefilter adds candidates that vector retrieval may miss. The final gate combines AI, hash consensus, color, and aspect evidence while keeping near-duplicate and semantic decisions distinct. CUDA is selected only when PyTorch reports it available.
-
-Pillow/pillow-heif decode standard and animated images, rawpy/LibRaw develops camera RAW files, and FFprobe/FFmpeg extract metadata and representative video frames. Tesseract selects an installed script-aware language group and stores searchable text plus bounded word coordinates, confidence, line, paragraph, and block structure. The worker samples frames for animated/video embeddings and records the active processing device. CUDA runtime failures are retried on CPU without losing the job.
-
-### Private people intelligence module
-
-OpenCV YuNet detects faces and SFace produces local face embeddings. Automatic clusters are reconciled with persistent user-owned person records. Rename, merge, split, and ignore actions persist across re-analysis. Same-person and different-person feedback is stored privately as normalized face pairs; its observed similarities adapt the account's automatic threshold while explicit different-person pairs remain blocked. No public identity service or external face API is used.
-
-### Duplicate review module
-
-Exact references and `duplicate_matches` rows become an undirected graph. Connected components produce complete, non-overlapping visual families instead of fragmented pairs. A batch-scoped report includes relationships inside one upload plus its direct library matches. Each candidate exposes the individual AI, perceptual, color, and frame signals with plain-language reasons. The UI recommends a high-resolution non-duplicate keeper, supports exact/high-confidence selection, and still requires an explicit confirmation dialog; the API additionally requires `confirm=true`.
-
-### Analytics and operations modules
-
-The dashboard calculates user-scoped counts, bytes, recoverable exact-duplicate bytes, seven-day activity, format distribution, and recent images. The status page checks API, PostgreSQL, MinIO, Redis/worker heartbeat, model state, and pending jobs.
-
-## 4. Data model
+## Upload and processing sequence
 
 ```mermaid
-erDiagram
-    USERS ||--o{ IMAGES : owns
-    USERS ||--o{ ACTIVITY_LOGS : creates
-    IMAGES ||--o| PROCESSING_JOBS : has
-    IMAGES ||--o{ DUPLICATE_MATCHES : source
-    IMAGES ||--o{ DUPLICATE_MATCHES : target
-    IMAGES o|--o{ IMAGES : exact_original
-
-    USERS {
-        uuid id PK
-        string email UK
-        string display_name
-        string password_hash
-        boolean is_active
-        timestamptz created_at
-    }
-    IMAGES {
-        uuid id PK
-        uuid user_id FK
-        uuid batch_id
-        string original_filename
-        string object_key UK
-        string thumbnail_key
-        string mime_type
-        bigint file_size
-        int width
-        int height
-        string sha256
-        string perceptual_hash
-        string difference_hash
-        string wavelet_hash
-        json color_signature
-        vector_512 embedding
-        string status
-        uuid exact_duplicate_of_id FK
-        timestamptz created_at
-        timestamptz processed_at
-    }
-    DUPLICATE_MATCHES {
-        uuid id PK
-        uuid user_id FK
-        uuid source_image_id FK
-        uuid target_image_id FK
-        string match_type
-        float similarity_score
-        int phash_distance
-        float clip_score
-        float perceptual_score
-        float color_score
-        float aspect_score
-        json evidence
-    }
-    PROCESSING_JOBS {
-        uuid id PK
-        uuid image_id FK
-        string status
-        int attempts
-        string error_message
-    }
-    ACTIVITY_LOGS {
-        uuid id PK
-        uuid user_id FK
-        string action
-        uuid image_id FK
-        json details
-    }
+sequenceDiagram
+    participant U as Browser
+    participant A as FastAPI
+    participant S as Private Blob
+    participant D as PostgreSQL
+    participant R as Redis
+    participant W as Celery
+    U->>A: Authenticated multipart batch
+    A->>A: Validate limits/content and SHA-256
+    A->>S: Store original
+    A->>D: Commit image and job
+    A->>R: Publish analysis task
+    A-->>U: Accepted records and processing state
+    R->>W: Dispatch task
+    W->>S: Read original and write thumbnail
+    W->>W: Fingerprints; optional CLIP/OCR/faces
+    W->>D: Persist analysis and verified pair evidence
+    U->>A: Gallery/review request
+    A->>S: Sign read-only expiring SAS
+    A-->>U: Owned records, evidence and previews
 ```
 
-Indexes support user/time gallery retrieval, user/SHA lookup, statuses, pHash, duplicate lookup, and HNSW vector cosine search. Duplicates are allowed to share the same hash because the product must represent and review each stored object.
+SHA-256 identifies byte equality within one account; each uploaded copy retains its own object until confirmed deletion. Successful analysis may be reused for exact copies, with a separately stored thumbnail.
 
-## 5. API contract summary
+Candidate retrieval combines normalized 512-dimensional OpenCLIP/pgvector cosine neighbors with perceptual hash candidates. Verified still-image near duplicates require multiple hash agreement, compatible color/frame evidence and aligned pixels at 32 and 96 scales. Low-detail inputs, missing verification, animations and video do not qualify from a single thumbnail. Strong semantic matches remain manual suggestions. Families require direct pair evidence between all members; transitive chains are insufficient.
 
-All private queries include the authenticated `user_id` predicate. IDs alone never authorize access.
+Pillow/pillow-heif, rawpy and FFmpeg support available image/RAW/video codecs. Optional Tesseract OCR, labels, quality and YuNet/SFace analysis run inside the deployment. Missing enrichment/model dependencies produce visible warnings while preserving successful fingerprints. Cloud inference uses CPU; optional local GPU configuration supports CPU fallback.
 
-- `/api/auth/*`: registration, login, current user.
-- `/api/images`: filter (`all`, `originals`, `exact`, `similar`, `recent`), search, sort, and pagination.
-- `/api/images/upload`: multipart batch, `202 Accepted`.
-- `/api/images/reindex`: enqueue older media for the current analysis version.
-- `/api/images/smart-search`: natural-language vector search across the private library.
-- `/api/images/bulk-delete`: confirmed deletion of multiple owned items.
-- `/api/images/{id}` and `/similar`: signed media, metadata, evidence.
-- `/api/images/{id}?confirm=true`: explicit deletion of MinIO original, thumbnail, database row, vector, matches, and job.
-- `/api/albums/events`, `/bursts`, `/people`: private smart albums.
-- `/api/albums/people/*`: rename, merge, split, ignore, and feedback controls.
-- `/api/duplicates`, `/dashboard`, `/system/status`: review, analytics, operations.
-- `/health/live`: process alive; `/health/ready`: required dependencies ready; `/metrics`: non-sensitive Prometheus data.
+## Data model
 
-The generated OpenAPI contract at `/docs` is the detailed source of truth.
-
-## 6. State transitions
-
-```mermaid
-stateDiagram-v2
-    [*] --> PENDING: New non-exact upload
-    [*] --> EXACT_DUPLICATE: SHA-256 match
-    PENDING --> PROCESSING: Worker starts
-    PROCESSING --> READY: Thumbnail + vector saved
-    PROCESSING --> FAILED: Processing exception
-    FAILED --> PROCESSING: Celery retry
-    EXACT_DUPLICATE --> EXACT_DUPLICATE: Thumbnail / vector reuse complete
-    READY --> [*]: Explicit deletion
-    EXACT_DUPLICATE --> [*]: Explicit deletion
-```
-
-## 7. Failure handling
-
-| Failure | Behavior |
+| Entity | Principal content |
 |---|---|
-| Invalid/oversized/corrupt upload | Request fails with a user-readable 4xx before object persistence |
-| Object write failure | Database transaction is rolled back; written objects are cleaned where possible |
-| Queue temporarily unavailable | Upload remains persisted and PENDING; operator sees queue status/log error |
-| Worker transient I/O failure | Celery retries with jittered exponential backoff, up to three times |
-| Model/inference failure | Image and job become FAILED with a bounded diagnostic; counter increments |
-| Database or MinIO unavailable | Readiness returns 503 so orchestration stops sending traffic |
-| Redis unavailable | Worker status becomes unhealthy; liveness remains independent |
-| Thumbnail unavailable while processing | The UI shows a stable media placeholder and retries after processing |
-| CUDA unavailable or inference fails | Worker selects CPU or retries the operation once on CPU |
-| Unsupported RAW/video codec | Job fails safely with a bounded diagnostic; original remains private |
-| Deletion without confirmation | API returns 400 and does not modify state |
+| users | UUID, normalized email, display name, Argon2 hash, active state |
+| images | Owner/batch IDs, object/thumbnail keys, size/type, SHA, hashes, embedding, metadata, state/version/warnings |
+| processing_jobs | Image association, pending/running/done/failed state, attempts and bounded diagnostic |
+| duplicate_matches | Owned pair, classification, similarity and perceptual/color/frame/pixel evidence |
+| people/faces/feedback | Owned persistent person decisions, face vectors and same/different constraints |
+| activity_logs | Account-scoped operations and dashboard evidence |
+| object_deletions | Object key, attempts/error and creation time; durable cleanup queue |
 
-An advanced production version would add a durable outbox/requeue mechanism for jobs accepted while Redis is unavailable.
+Alembic migrations `0001`–`0006` establish the schema. Migration `0006` adds deferred object deletion. Do not start old binaries against a newer schema without a reviewed rollback/backup plan. User/time, hash and vector indexes support queries. PostgreSQL stores metadata and vectors, not original image bytes.
 
-## 8. Security design and residual risk
+## API and authorization
 
-Controls: password hashing, token expiry, input decoding, size/type allowlists, path-independent UUID keys, CORS allowlist, Nginx limits, ownership checks, private buckets, signed URL expiry, environment secrets, non-root application containers, capability drops, health probes, and non-sensitive metrics.
+Auth exposes configuration, invitation registration, login and current-user endpoints. Image endpoints cover multipart upload, owned gallery/details, smart search, reindex and confirmed single/bulk deletion. Duplicate, album, dashboard and system endpoints remain owner-scoped. The running API's OpenAPI document is the contract.
 
-Residual risks: local `.env` disclosure, host compromise, unencrypted HTTP on the default laptop deployment, weak user-selected passwords, no token revocation list, no malware scanning, and no automated database/object backup. Therefore the project must not be exposed publicly or used as the only copy of irreplaceable media without additional controls.
+Every private query checks authenticated ownership; UUID knowledge alone grants no access. SAS tokens are read-only, HTTPS-only and short-lived (default 30 minutes). Invite codes are checked with constant-time comparison. Cloud rate limits use atomic Redis operations and a configured proxy trust range; Redis failure returns 503 on protected requests.
 
-## 9. Observability design
+## Failure handling
 
-API metrics include request count/latency/error status, uploads, bytes, and exact duplicates. Worker metrics include processed images, similar matches, inference/processing histograms, failures, queue gauge, and model-loaded state. JSON logs carry timestamp, level, service, request ID, image ID where appropriate, duration, and error context; they deliberately exclude secrets and image data.
+| Failure | Result and recovery |
+|---|---|
+| Invalid/oversized upload or quota | Readable rejection; no valid media record accepted |
+| Storage/database upload failure | Rollback/compensation; unresolved object cleanup is recorded where possible |
+| Queue publication failure | Original retained, analysis marked retryable; smart-index action after Redis recovery |
+| CLIP/OCR/face failure | Preserve fingerprint result and warn; retry enrichment with smart index |
+| Storage failure during confirmed deletion | Metadata removal and cleanup record commit together; API retries every 30 seconds and after restart |
+| Worker finishes after photo deletion | Any recreated thumbnail is scheduled for cleanup |
+| Unavailable database/storage | Readiness unhealthy; backend startup/gateway availability can be affected |
+| Missing worker heartbeat | System status degraded; readiness and liveness are separate checks |
+| Blob soft-delete retention | Visible vault space can fall before billed bytes disappear |
 
-Prometheus retains seven days locally. Compose provisions an eight-panel Grafana dashboard for API and worker health; Minikube provisions a compact equivalent. Docker resource usage remains available through Docker Desktop without adding an unreliable cAdvisor scrape target.
+Readiness requires database and object storage; the system page also reports worker/queue state. Liveness checks the process itself. Deletion cleanup uses row locking/skip-locked records and idempotent storage deletes. Queue publication still requires explicit smart-index retry after recovery; this is not a fully automatic durable task outbox.
 
-## 10. Deployment and capacity assumptions
+## Security and operations
 
-- One laptop, 4 CPU allocation, 10–12 GB Docker/Minikube memory, 12+ GB disk.
-- One worker to prevent multiple model copies from exhausting memory.
-- API memory limit 768 MiB; worker limit 4 GiB; PostgreSQL/MinIO 1 GiB each.
-- OpenCLIP weights are downloaded and cached at runtime. The worker image fetches checksum-verified OpenCV face models during its build; no weights enter Git or the Docker build context.
-- Prometheus retention is seven days to constrain disk use.
+Bicep disables public blobs/shared account keys, enables TLS-only storage, restricts SSH to the deployer's IPv4 CIDR and exposes only web ports publicly. Database/Redis ports are internal. Managed identity removes storage keys, not the need to protect PostgreSQL/JWT secrets. Logs are bounded in cloud Compose; SAS links and invitation codes must stay private.
 
-## 11. Testing strategy
+The deployment is single-VM, lacks MFA/email recovery and needs owner-managed backups. Seven-day Blob/container soft delete does not protect PostgreSQL. Persistent Docker volumes live on the managed OS disk; losing it loses database, Redis, model cache and certificates. Back up the database and media independently and rehearse restore.
 
-- Unit/API tests: auth, rejection, authorization isolation, upload/media signatures, exact duplicates, health, pHash, normalization, thumbnails, people controls, feedback constraints, and learned thresholds.
-- Frontend: utility tests, strict TypeScript build, ESLint, production bundling.
-- Static infrastructure: Compose resolution, Dockerfile build checks, Kubernetes render, Terraform format/validate.
-- Manual integration: generated GIF/HEIC/video decoding, multilingual OCR availability, first model download, CPU/GPU selection and fallback, signed MinIO links, full Compose/Minikube health, Grafana traffic, scale demonstration.
-- Evidence/results: `[Insert actual test output, screenshots, and benchmark measurements after execution.]`
+Cloud observability uses authenticated System status, health endpoints and container logs. Prometheus/Grafana remain local extensions and are not installed by cloud Compose. Metrics endpoints and Caddy routing are defined in code; do not assume public monitoring consoles exist.
 
-## 12. Decisions and alternatives
+## Delivery and validation
 
-- Redis/Celery was selected over Kafka because the workload needs a small local queue and retry mechanism.
-- MinIO was selected over filesystem mounts to demonstrate private object storage and S3 compatibility.
-- PostgreSQL/pgvector was selected over a separate vector database to reduce services and keep metadata/vector transactions together.
-- OpenCLIP ViT-B/32 balances recognizable similarity with CPU feasibility; the model is replaceable by environment variables.
-- Signed MinIO URLs avoid proxying every image through the API while retaining private bucket access.
-- Minikube plus Terraform demonstrates orchestration/IaC without pretending a public cloud account is free.
+GitHub Actions runs backend/frontend/browser/infrastructure checks before publishing releases. Bundles contain compiled web assets, server/deployment source, synthetic samples, checksum files and source metadata; they do not contain runtime secrets. Initial cloud-init installs a pinned release. Reapplying Bicep does not automatically upgrade application files.
+
+Browser fixtures use SQLite/in-memory objects/deterministic models. PostgreSQL tests need a disposable pgvector database. Azure SDK tests use fakes. Live identity, HTTPS, regional quota, original previews, persistence and restore require a real deployment. See [testing](testing.md), [validation](validation-report.md) and [Windows setup](setup-windows.md).
+
+## Design tradeoffs
+
+- Azure Blob replaces local MinIO in the main deployment; a storage protocol preserves the local option.
+- Caddy provides HTTPS and static serving with a small cloud footprint.
+- PostgreSQL/pgvector reduces service count compared with a separate vector database.
+- Redis/Celery fits a small background-processing workload.
+- Conservative pair verification favors fewer false cleanup suggestions over detecting every edit.
+- Bicep provisions Azure resources while local Terraform remains scoped to Kubernetes.

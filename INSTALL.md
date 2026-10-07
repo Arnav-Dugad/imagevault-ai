@@ -6,6 +6,10 @@ code to register, then upload and manage photos on the site.
 
 ## Host your own website on Azure for Students
 
+If you already have this repository folder on Windows, follow
+[Windows setup](docs/setup-windows.md). You do not need to clone it again or
+install Docker on your laptop to deploy to Azure.
+
 Download **imagevault-ai.zip** or **imagevault-ai.tar.gz** from
 [GitHub Releases](https://github.com/Arnav-Dugad/imagevault-ai/releases/latest).
 Each bundle includes the website source, compiled frontend, Python server and
@@ -20,7 +24,8 @@ deploy the full stack, rather than uploading only the HTML to static hosting.
 ## Local development or demonstration
 
 The original Docker Compose and PowerShell development scripts remain supported.
-See [README](README.md#quick-start-with-docker-compose). Downloaded bundles can
+See [local development](docs/local-development.md) and
+[Windows setup](docs/setup-windows.md#optional-run-on-this-windows-pc). Downloaded bundles can
 use `docker-compose.download.yml` after the local Compose file to serve the
 already-built frontend, avoiding a Node build:
 
@@ -28,7 +33,7 @@ already-built frontend, avoiding a Node build:
 docker compose -f docker-compose.yml -f docker-compose.download.yml up -d --build
 ```
 
-Configure a private `.env` first as described in the README. This starts a local
+Configure a private `.env` first as described in the local development guide. This starts a local
 website at <http://localhost>; it does not install a desktop application.
 
 ## Verify downloads

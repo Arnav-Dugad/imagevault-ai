@@ -1,5 +1,8 @@
 # ImageVault AI architecture
 
+Updated 7 October 2026 for application 1.2.1. Start with
+[Windows setup](setup-windows.md); live Azure deployment is still pending.
+
 The primary deployment is a website on an Azure VM, with private Azure Blob Storage. AI inference runs on the VM; images are not sent to a hosted AI API. The VM uses student credit. PostgreSQL, Redis and model caches persist in Docker volumes.
 
 ```mermaid
@@ -35,5 +38,14 @@ The VM's managed identity receives Blob Data Contributor access. The private con
 The original local Compose stack uses MinIO and Nginx and includes Prometheus/Grafana. Kubernetes examples are in `infra/kubernetes`, with Terraform in `infra/terraform`. These remain available when required by the course rubric, but the Azure website uses Compose and Bicep as its main deployment path.
 
 ## Updating older libraries
+
+Migration `0006` adds durable `object_deletions` records. Confirmed deletion commits
+metadata removal and object cleanup intent together; the API retries failed Blob
+cleanup every 30 seconds and after restart. A worker that recreates a thumbnail
+after deletion also schedules cleanup. Blob soft delete may retain billed bytes
+for seven days after the vault no longer lists the item.
+
+Queue publication failure retains the original and marks analysis retryable.
+After Redis recovers, use the smart-index action; it is not an automatic task outbox.
 
 Analysis version 6 hides older unverified visual matches from duplicate families. After upgrading, click **Duplicate review → Upgrade smart index**, let processing finish, and inspect any warning shown in image details. Warnings make those images eligible for a later retry. Originals are retained during re-analysis. Back up the database and Blob objects before upgrades.
