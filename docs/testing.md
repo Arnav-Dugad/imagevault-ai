@@ -1,5 +1,9 @@
 # Test coverage and reliability
 
+Updated 7 October 2026. This describes the available checks, not a claim that
+every check ran on this Windows PC. Actual results are in
+[validation-report.md](validation-report.md).
+
 ImageVault 1.2.1 adds regression tests for upload, queue, storage, authentication,
 page navigation, duplicate-family integrity, and desktop/mobile browser flows.
 Passing GitHub checks are required before the automatic download release job runs.
@@ -26,12 +30,47 @@ On Windows, use the equivalent virtual-environment Python paths. If Python is
 already on PATH, set `IMAGEVAULT_TEST_PYTHON=python` for the browser tests. This
 runs a website test server; it does not build a desktop application.
 
+For an explicit PowerShell setup from the repository root with Python 3.12 and
+Node installed:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e 'backend[dev]'
+Set-Location backend
+$env:DEBUG = 'false'
+..\.venv\Scripts\ruff.exe check app tests
+..\.venv\Scripts\python.exe -m pytest -q
+Set-Location ..\frontend
+npm.cmd ci
+npm.cmd run lint
+npm.cmd test
+npm.cmd run build
+npx.cmd playwright install chromium
+$env:IMAGEVAULT_TEST_PYTHON = '"' + (Resolve-Path ..\.venv\Scripts\python.exe).Path + '"'
+npm.cmd run test:e2e
+npm.cmd audit --audit-level=high
+```
+
+Do not use Azure CLI's private Python runtime for this environment. Backend
+dependencies support Python 3.11–3.13; CI uses 3.12. Node 22 is the CI baseline.
+The quoted Python path is required when the folder name contains spaces.
+The explicit `DEBUG=false` avoids inheriting a non-boolean host variable.
+
 The browser tests start and stop their own disposable API and production website
 preview. They cover signup with an invitation, uploading an original and an exact
 copy, reviewing the pair, cancelling and confirming deletion, preserving the
 keeper, signing out, and access protection. Desktop and mobile viewports both run
 this flow. Tests also check readable login errors, browser runtime errors and
 horizontal overflow. Failure screenshots and traces are retained in GitHub Actions.
+
+Additional desktop/mobile flows cover invalid invitation codes, unsupported and
+corrupt files, over-limit batches, an interrupted upload followed by retry,
+refresh persistence, and a second account denied access to another account's
+photo. There are ten browser scenarios in total across the two viewport projects.
+
+Deployment-script tests verify independent secrets, refusal to overwrite an
+existing environment, rejection of invalid endpoints, safe archive contents,
+release checksums and exclusion/refusal of private runtime files.
 
 The browser API uses SQLite, in-memory object storage, and deterministic model
 outputs. It exercises real HTTP, authentication, image validation, processing and

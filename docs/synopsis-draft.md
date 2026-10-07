@@ -1,132 +1,120 @@
 # ImageVault AI project synopsis
 
+Updated 7 October 2026 · application 1.2.1 · source baseline `9ee8c0c`.
+
 ## Project title
 
-**ImageVault AI — Intelligent Private-Cloud Media Storage, Duplicate Detection, Search, and Organization Platform**
+**ImageVault AI — Azure-Hosted Private Media Storage, Duplicate Detection, Search and Organization Platform**
 
-## Student details
+## Student and supervisor details
 
-- Student name(s): `[To be supplied]`
-- Registration number(s): `[To be supplied]`
-- Programme / batch / semester: `[To be supplied]`
-- Team number: `[To be supplied]`
+- Student name(s), registration number(s): `[To be supplied]`
+- Programme, batch, semester, team number: `[To be supplied]`
+- Supervisor and department: `[To be supplied]`
 
-## Supervisor details
+## Abstract
 
-- Supervisor name: `[To be supplied]`
-- Department: `[To be supplied]`
+ImageVault AI is a browser-based private media vault that stores original files and generated thumbnails in private Azure Blob Storage and keeps account-scoped metadata and vectors in PostgreSQL/pgvector. It addresses repeated backups, edited exports, visually similar photographs and media collections that are difficult to search manually. The user uploads media, compares explainable evidence and explicitly confirms cleanup; the system never deletes files automatically.
 
-## Synopsis / abstract
+SHA-256 identifies byte-identical files before expensive analysis. A Celery worker computes perceptual hashes, color and frame evidence, thumbnails and normalized OpenCLIP embeddings. Still-image near-duplicate decisions additionally require aligned-pixel verification at two scales. Semantic similarity remains a manual review suggestion. Displayed families require direct evidence between every pair, preventing unrelated endpoints from being joined through a chain. Optional OCR, face analysis and AI failures are recorded without discarding successful fingerprint analysis.
 
-ImageVault AI is a self-hosted private-cloud platform for securely storing, searching, analyzing, and organizing personal media. It accepts batches of standard photographs, animated images, HEIC/HEIF files, common camera RAW formats, and videos. Originals are stored privately in S3-compatible MinIO object storage, while PostgreSQL stores account-scoped metadata, processing state, cryptographic hashes, quality measurements, OCR results, face information, and pgvector embeddings. SHA-256 identifies byte-identical files before a background Celery worker performs more expensive local analysis.
+The primary deployment uses Azure for Students: an Ubuntu x64 VM runs five Docker containers for Caddy, FastAPI, Celery, PostgreSQL/pgvector and Redis. Caddy serves the React website over HTTPS. Bicep provisions the VM, networking, private Blob container, managed identity, role assignment and scheduled shutdown. The VM identity accesses storage without account keys, and browsers receive expiring read-only user-delegation SAS previews. Invitation-based registration, ownership checks, upload quotas and Redis-backed rate limits restrict access and usage.
 
-The intelligence pipeline combines pHash, dHash, wHash, color and geometry evidence, sampled-frame OpenCLIP embeddings, and pgvector cosine retrieval to identify exact copies, edited or recompressed near-duplicates, and semantically related media. Natural-language search allows queries such as “person wearing white near a car.” Local multilingual Tesseract OCR extracts searchable text and word-level layout from screenshots and documents. The system also calculates sharpness, exposure, resolution, screenshot readability, and overall quality scores; generates smart labels; selects the best photo from bursts; groups events; and builds private people albums using local YuNet face detection and SFace embeddings.
-
-People albums are persistent and user-controlled. Users can rename, merge, split, ignore, or restore people and provide private “same person” or “different person” feedback. This feedback remains in the local database, preserves explicit identity decisions across re-analysis, and adapts the account’s clustering threshold. The system does not contact a public face-recognition service and does not attempt to discover real-world identities.
-
-The project emphasizes Cloud Computing and DevOps as much as artificial intelligence. The React client, FastAPI API, Redis queue, Celery media worker, PostgreSQL/pgvector, MinIO, Nginx, Prometheus, and Grafana services are containerized with Docker. Docker Compose provides the primary laptop deployment, while Kubernetes on Minikube demonstrates orchestration, health probes, persistent volumes, configuration, secrets, resource controls, and horizontal API scaling. Terraform defines the local Kubernetes infrastructure, GitHub Actions validates changes, and Prometheus/Grafana provide metrics and operational dashboards. All required components use free/open-source software and no commercial AI API or paid public-cloud subscription is required.
+GitHub Actions validates application and infrastructure changes and publishes downloadable website/server releases after passing checks. Local Compose with MinIO/Nginx and optional Kubernetes, Terraform, Prometheus and Grafana examples remain available for development or course requirements. Azure resources consume student credit; the system is not unlimited free hosting. Azure connection, live deployment and operating measurements on the student's subscription remain pending.
 
 ## Problem statement
 
-Personal media collections grow through phone cameras, messaging applications, screenshots, downloads, burst photography, edited exports, and repeated backups. This creates byte-identical duplicates, resized or recompressed copies, visually similar shots, weak or blurry photographs, and large collections that are difficult to search manually. Filename comparison is unreliable because identical files can have different names, while visually equivalent files can have different bytes. Important text inside screenshots and documents is also invisible to ordinary filename search.
+Filename comparison cannot reliably find identical media with different names or resized/recompressed copies with different bytes. Semantic matches can also confuse distinct photographs of the same subject. Collections need a private store, understandable matching evidence, responsive background processing and user control over deletion.
 
-Existing organization methods often separate duplicate cleanup, visual search, OCR, face grouping, quality review, and infrastructure monitoring into unrelated tools or external services. This can increase privacy exposure, operating cost, and management complexity. ImageVault AI addresses these problems with local media intelligence inside a reproducible private-cloud architecture. AI results are advisory, user corrections are retained, and deletion always requires explicit confirmation.
+A student cloud project must also demonstrate reproducible infrastructure, identity and access management, secure web access, CI and operational cost control. ImageVault combines these concerns in a small deployment that can be shown through a browser without running the full platform on the presentation laptop.
 
 ## Objectives
 
-1. Build a secure, account-isolated private media vault using PostgreSQL and MinIO.
-2. Detect byte-identical, perceptual, and visually related media using explainable multi-signal evidence.
-3. Support natural-language search, multilingual OCR, document understanding, smart labels, and quality scoring without external AI APIs.
-4. Organize collections into events, burst best-shots, and private user-correctable people albums.
-5. Index photographs, animated images, HEIC/HEIF, camera RAW files, and representative video frames.
-6. Process uploads asynchronously with automatic GPU use when supported and safe CPU fallback.
-7. Demonstrate containerization, orchestration, infrastructure as code, CI/CD, monitoring, health checks, and structured logging.
-8. Preserve user control through explainable results, guarded bulk actions, and no automatic deletion.
+1. Store originals and thumbnails privately in Azure Blob Storage with account-isolated database records.
+2. Identify exact copies and conservatively verify near duplicates, keeping semantic suggestions separate.
+3. Process uploads asynchronously and expose progress, warnings and retry controls.
+4. Provide gallery search, duplicate review and storage analytics as four primary classroom pages.
+5. Retain advanced semantic search, OCR, quality scoring, events, bursts and user-correctable people albums.
+6. Provision cloud infrastructure with Bicep and run the app with Docker Compose.
+7. Apply HTTPS, managed identity, expiring previews, invitation signup, quotas and rate limits.
+8. Demonstrate CI, reproducible releases, failure recovery, backups and credit-conscious operations.
 
-## Proposed solution and modules
+## Modules
 
-1. **Authentication and isolation:** local registration/login, Argon2 password hashing, expiring JWT access, and ownership checks on every private query.
-2. **Media intake and object storage:** signature and size validation, batch upload, UUID object keys, private MinIO originals, generated WebP thumbnails, and separate limits for photos and large media.
-3. **Exact and visual duplicate intelligence:** SHA-256, three perceptual hashes, color histograms, frame geometry, multi-view/multi-frame OpenCLIP vectors, pgvector retrieval, connected duplicate families, and explainable confidence evidence.
-4. **Search and local understanding:** filename search, natural-language semantic search, multilingual OCR, positioned word layout, document-type inference, and smart labels.
-5. **Photo-quality intelligence:** sharpness, exposure, resolution, screenshot readability, overall quality, and burst best-photo selection.
-6. **Private people intelligence:** local face detection/embedding, persistent albums, rename, merge, split, ignore/restore, and private same/different-person feedback learning.
-7. **Smart albums:** automatic event albums using capture time and visual relationships, people albums, and burst groups with recommended keepers.
-8. **Gallery and review experience:** responsive gallery, media details, video playback, OCR details, similarity evidence, multi-selection, guarded bulk deletion, animated navigation, and accessible validation feedback.
-9. **Analytics and observability:** storage/savings/activity dashboards, health and readiness checks, queue/model state, structured logs, Prometheus metrics, and provisioned Grafana dashboards.
-10. **Cloud and DevOps platform:** Docker Compose, Nginx gateway, Kubernetes/Minikube manifests, Terraform, GitHub Actions, persistent volumes, secrets, probes, resource limits, and optional scaling.
+| Module | Responsibility |
+|---|---|
+| Authentication | Argon2 password hashes, expiring JWTs, invitation-based signup and ownership checks |
+| Upload/storage | Content/size validation, SHA-256, batch IDs, private UUID-keyed originals and thumbnails |
+| Duplicate intelligence | Exact references, multi-hash/color/frame evidence, two-scale pixel verification and pair-complete families |
+| Semantic retrieval | OpenCLIP vectors and pgvector cosine candidates; advisory content matches |
+| Advanced organization | OCR, document layout, quality, labels, events, burst selection, local-to-VM face inference and private feedback |
+| User interface | Upload, Gallery, Duplicate review, Dashboard; Advanced contains albums, status and settings |
+| Reliability | Retryable analysis, transactional deletion records, automatic deferred object cleanup and visible warnings |
+| Cloud/DevOps | Azure VM/Blob, managed identity, Caddy HTTPS, Bicep, Compose, GitHub Actions and release checksums |
+
+“Local inference” means inside the self-hosted VM or local deployment, not necessarily on the user's laptop. Azure hosts media and compute; the app does not use Azure OpenAI, Azure AI Vision or a public face-identification API.
 
 ## Tools and technologies
 
-| Classification | Technology |
+| Concern | Technology |
 |---|---|
-| Private cloud / orchestration | Kubernetes, Minikube |
-| Containerization | Docker, Docker Compose |
-| Object storage | MinIO |
-| Database / vector search | PostgreSQL 16, pgvector |
-| Backend / asynchronous jobs | FastAPI, SQLAlchemy, Alembic, Celery, Redis |
-| Frontend | React, TypeScript, Vite, Tailwind CSS, Framer Motion |
-| Visual AI | OpenCLIP, PyTorch, OpenCV YuNet and SFace |
-| OCR / image processing | Tesseract OCR, Pillow, pillow-heif, ImageHash, rawpy/LibRaw |
-| Video processing | FFmpeg, FFprobe |
-| Infrastructure as Code | Terraform |
-| CI/CD | GitHub Actions |
-| Monitoring / visualization | Prometheus, Grafana OSS |
-| Gateway | Nginx |
-| Version control | Git, GitHub |
+| Cloud infrastructure | Azure for Students, Ubuntu VM, Blob Storage, virtual network, NSG, managed identity |
+| Main IaC/deployment | Bicep, cloud-init, Docker Compose |
+| Web/gateway | React, TypeScript, Vite, Tailwind CSS, Caddy HTTPS |
+| API/auth | FastAPI, Pydantic, SQLAlchemy, Argon2, JWT |
+| Data/jobs | PostgreSQL 16, pgvector, Alembic, Redis, Celery |
+| Media/AI | OpenCLIP/PyTorch, Pillow, ImageHash, OpenCV YuNet/SFace, Tesseract, FFmpeg, rawpy |
+| Version control/delivery | Git, GitHub Actions, checksum-verified ZIP/TAR.GZ releases |
+| Optional local extensions | MinIO, Nginx, Minikube/Kubernetes, Terraform, Prometheus/Grafana |
 
-## System workflow
+## Workflow
 
-1. The authenticated user selects one or more supported media files.
-2. The API validates content signatures and limits, generates private object keys, calculates SHA-256, and stores metadata and the original.
-3. Exact byte matches are identified immediately; other media is queued through Redis.
-4. The Celery worker decodes photos or representative animation/video frames and creates a safe thumbnail.
-5. Local OCR, quality analysis, smart labeling, face analysis, hashes, and OpenCLIP embeddings are generated.
-6. PostgreSQL/pgvector retrieves candidates and stores explainable similarity relationships.
-7. The UI refreshes gallery, duplicate review, search, smart albums, and status information.
-8. User feedback updates persistent people decisions; deletion occurs only after explicit confirmation.
+1. An invited user registers or signs in over HTTPS.
+2. The API checks ownership, request limits, file signatures, batch and original-file quotas.
+3. It stores the original in Blob Storage, calculates SHA-256 and commits database/job state.
+4. Exact copies are recognized independently of AI; Redis dispatches remaining analysis.
+5. The worker creates thumbnails/fingerprints, attempts optional model enrichment and records warnings.
+6. pgvector/hash retrieval supplies candidates; pixel verification and conservative gates classify evidence.
+7. The browser shows private previews, review groups, analytics and advanced albums.
+8. Confirmed deletion commits metadata changes and durable cleanup records together; failed object cleanup retries.
 
-## Expected and achieved outcomes
+## Cloud design and cost
 
-- A working private media vault with local authentication and strict account isolation.
-- Batch-aware exact, near-duplicate, and semantic media matching with understandable evidence.
-- Natural-language retrieval plus local multilingual OCR and document-layout data.
-- More honest photo-quality scoring and automatic best-shot selection.
-- Persistent, private, user-correctable people albums.
-- Support for standard/animated images, HEIC/HEIF, common RAW formats, and videos.
-- Asynchronous processing with optional CUDA acceleration and automatic CPU fallback.
-- A reproducible multi-container platform with Kubernetes and Terraform alternatives.
-- CI validation, health checks, Prometheus metrics, Grafana dashboards, and structured logs.
-- A zero-additional-software-cost academic deployment based on free/open-source components.
-- Current verification: 32 backend tests, frontend unit tests, strict lint/type checks, production builds, Compose validation, migration validation, generated GIF/HEIC/video/OCR runtime smoke tests, and direct Playwright MCP desktop/mobile workflow QA covering authentication, navigation, search, upload validation, batch duplicates, albums, guarded deletion, status, and settings.
+The default VM is Standard_B2ms, 2 vCPU/8 GiB RAM, with a 64 GiB Standard SSD. PostgreSQL, Redis and model caches persist in VM Docker volumes; original media persists in Blob Storage. Database and queue ports are private. Seven-day Blob soft delete helps with accidental removal but does not back up the database.
 
-## Privacy, security, and limitations
+Microsoft's current student offer includes USD $100 credit for 12 months and selected allowances without a card at signup. This VM consumes credit, and availability depends on region/quota. Daily shutdown defaults to 20:00 UTC (01:30 IST the next day); the VM must be started for a demonstration. Deallocation stops compute billing, while disk, public IP and Blob usage can remain billable. Budgets notify rather than cap expenditure. See [cost analysis](cost-analysis.md) and Microsoft's linked offer terms.
 
-Images, OCR text, embeddings, and face feedback remain inside the self-hosted deployment. Passwords are stored as Argon2 hashes; objects use private UUID keys and time-limited signed links; all image, album, similarity, and deletion queries enforce ownership. Metrics and logs exclude image content, tokens, passwords, and embeddings.
+## Implementation and validation status
 
-AI similarity, OCR, quality scores, labels, and face clustering can still make mistakes and should be treated as decision support. RAW compatibility depends on LibRaw support for the camera format, and video indexing uses representative frames rather than complete scene-by-scene transcription. The default local deployment uses HTTP and single-instance data services, so TLS, automated backups, secret rotation, malware scanning, and high availability would be required before public or production use.
+Application and deployment definitions are present in GitHub main. This folder was updated from `bc7cea7` to `9ee8c0c`; academic docs were revised to match the Azure architecture. The user's Azure subscription has not yet been connected or provisioned through this update.
+
+Automated coverage includes authentication, upload isolation, exact copies, pixel evidence, conservative families, degraded models, deletion/queue failures, frontend behavior and desktop/mobile browser fixtures. Real PostgreSQL checks require a disposable database; storage/browser fakes do not establish live Azure behavior or real-world AI accuracy. Actual checks from this update are recorded in [validation-report.md](validation-report.md); no unmeasured accuracy, latency or savings is claimed.
+
+## Security and limitations
+
+Azure blobs remain private; storage-account shared keys are disabled in the template. User-delegation SAS URLs remain sensitive until expiry. Passwords, application secrets and invitation codes are kept outside version control. Images and embeddings reside in the self-hosted Azure deployment, rather than a hosted inference API.
+
+One VM and single data-service instances limit availability. Owners must arrange independent database/media backups. Accounts have no email recovery or MFA. OCR, face clustering and semantic/near-duplicate decisions can be wrong. Heavy crops/edits and changed document text require careful full-resolution review; sampled video frames cannot prove whole-video equivalence. Live managed identity, regional quota, HTTPS and persistence must be verified after deployment.
 
 ## Tentative 12-week timeline
 
-| Week | Work |
+| Weeks | Work |
 |---|---|
-| 1–2 | Requirements, problem study, scope, privacy, and cost constraints |
-| 3–4 | Architecture, repository, database/object model, and Compose foundation |
-| 4–5 | Authentication, APIs, PostgreSQL/pgvector, MinIO, and queue integration |
-| 5–7 | UI/UX, duplicate intelligence, natural-language search, OCR, labels, and quality scoring |
-| 7–8 | Face clustering, feedback controls, smart albums, rich media, and GPU fallback |
-| 8–9 | Security review, error handling, automated tests, and performance checks |
-| 9–10 | Minikube, Kubernetes, Terraform, CI/CD, Prometheus, and Grafana |
-| 10–11 | Release hardening, browser QA, measurements, screenshots, and demo rehearsal |
-| 11–12 | Final report, presentation, deployment evidence, and viva preparation |
-
-Activities overlap deliberately so infrastructure, security, documentation, and tests evolve alongside application functionality.
+| 1–2 | Requirements, media privacy, student eligibility and credit constraints |
+| 3–4 | API/data model, storage abstraction, containers and initial UI |
+| 4–6 | Authentication, uploads, exact/visual evidence, review and analytics |
+| 6–8 | Advanced intelligence, failure recovery, fixtures and browser checks |
+| 8–10 | Azure Bicep/identity/HTTPS, CI releases, cost controls and backup rehearsal |
+| 10–11 | Live deployment validation, screenshots and independent measurements |
+| 11–12 | Final report, presentation, contribution evidence and viva preparation |
 
 ## Future scope
 
-- Undoable encrypted trash and scheduled retention policies.
-- Video scene segmentation and local speech transcription.
-- Larger offline OCR language packs and handwriting recognition.
-- Private geospatial/map albums from optional GPS metadata.
-- Encrypted backup/export and disaster-recovery automation.
-- A mobile client, multi-node workers, and production-grade GPU scheduling.
+Automated encrypted backups and restore rehearsal, undoable trash, independent labeled evaluation, larger-library candidate indexing, multi-worker capacity planning, video scene/transcription analysis, mobile clients and improved account recovery.
+
+## References and next steps
+
+[Windows setup](setup-windows.md) · [Architecture](architecture.md) ·
+[Technical design](technical-design.md) · [Validation report](validation-report.md) ·
+[Presentation outline](presentation-outline.md). Complete student/supervisor fields
+and replace evidence placeholders only after an actual deployment.

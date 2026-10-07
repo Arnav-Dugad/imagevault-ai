@@ -1,33 +1,31 @@
 # Individual contribution template
 
-Do not add names or claim completed work until the team verifies it through commits, issues, reviews, and demonstration evidence.
+Updated 7 October 2026 for the Azure-based project. Fill names and completed work only from verified commits, reviews and deployment evidence.
 
 ## Three-member example
 
-| Member placeholder | Primary ownership | Shared responsibilities | Evidence to add |
+| Member | Primary ownership | Shared work | Evidence |
 |---|---|---|---|
-| Member A | React UI/UX, dashboard, gallery, upload and frontend integration | Testing, documentation review, full architecture understanding | `[Commit/PR/issue/demo links]` |
-| Member B | FastAPI, authentication, database, MinIO, REST APIs and migrations | Security review, tests, integration and full architecture understanding | `[Commit/PR/issue/demo links]` |
-| Member C | AI worker, Docker, Kubernetes, Terraform, CI/CD, Prometheus/Grafana | Performance evidence, demo operations and full architecture understanding | `[Commit/PR/issue/demo links]` |
+| Member A | React flows, upload/gallery/review/dashboard and frontend integration | Tests, documentation, full architecture | `[Commit/PR/demo links]` |
+| Member B | FastAPI/auth, PostgreSQL/Alembic, Azure Blob provider and user isolation | Security, recovery, integration | `[Commit/PR/test links]` |
+| Member C | Worker/detection, Azure Bicep/identity/Caddy, Compose and CI releases | Cost, backups, deployment and demo | `[Commit/PR/deployment links]` |
 
 ## Two-member alternative
 
-| Member placeholder | Primary ownership | Shared responsibilities | Evidence to add |
+| Member | Primary ownership | Shared work | Evidence |
 |---|---|---|---|
-| Member A | Frontend, product flows, authentication/API integration, dashboard and documentation | Core testing, deployment rehearsal, architecture/viva | `[Commit/PR/issue/demo links]` |
-| Member B | Backend/data/storage, AI pipeline, containers, Kubernetes, Terraform, CI and monitoring | Core testing, deployment rehearsal, architecture/viva | `[Commit/PR/issue/demo links]` |
+| Member A | Frontend, API/auth integration, product tests and academic docs | Azure rehearsal and architecture/viva | `[Links]` |
+| Member B | Backend/storage/AI, migrations/recovery, Azure infrastructure and CI | Azure rehearsal and architecture/viva | `[Links]` |
 
 ## Per-member record
 
-### `[Member name]`
-
-- Registration number: `[To be supplied]`
-- Planned modules: `[List]`
-- Implemented work: `[List only verified work]`
-- Design decisions/reviews: `[List]`
-- Tests written/executed: `[List and evidence]`
-- Documentation/demo work: `[List]`
-- Git evidence: `[Commit / pull request links]`
+- Name and registration number: `[To be supplied]`
+- Planned and verified implemented work: `[Separate lists]`
+- Design/review decisions: `[Evidence]`
+- Tests executed and results: `[Commands/output links]`
+- Azure deployment/identity/cost/backup work: `[Evidence or pending]`
+- Documentation and demonstration work: `[Links]`
+- Git evidence: `[Commit / pull request]`
 - Challenges and learning: `[Short reflection]`
 
-All members should be able to explain authentication, upload flow, MinIO, PostgreSQL/pgvector, Redis/worker, Docker, Kubernetes, Terraform, CI/CD, Prometheus/Grafana, security, cost, and limitations even when another member implemented the module.
+All members should explain the five-container Azure deployment, private Blob access, managed identity/SAS, PostgreSQL/pgvector, Celery/Redis, conservative detection, confirmed cleanup, Bicep/Compose, CI releases, student credit and backups. List Kubernetes/Terraform/Prometheus/Grafana as contributions only if the optional extension was actually implemented or demonstrated by that member.

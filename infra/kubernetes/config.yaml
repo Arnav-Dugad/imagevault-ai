@@ -4,7 +4,7 @@ metadata:
   name: imagevault-config
   namespace: imagevault
 data:
-  APP_VERSION: "1.1.0"
+  APP_VERSION: "1.2.1"
   ENVIRONMENT: kubernetes
   REDIS_URL: redis://redis:6379/0
   MINIO_ENDPOINT: minio:9000

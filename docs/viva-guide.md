@@ -1,158 +1,99 @@
 # ImageVault AI viva guide
 
-Use these as speaking notes, not a script to memorize word-for-word.
+Updated 7 October 2026 for the Azure-hosted 1.2.1 project.
 
-## What is cloud computing?
+## What is the project?
 
-Cloud computing is on-demand access to shared, configurable computing resources—such as compute, storage, databases, networking, and platforms—that can be provisioned and managed through software. A cloud does not have to be a paid public provider.
+A private browser-based media vault with upload, gallery, duplicate review and analytics. It demonstrates Azure object storage and identity, VM/container deployment, asynchronous processing, infrastructure as code and CI. Advanced OCR, albums and search remain available.
 
-## Why does ImageVault AI qualify as a Cloud Computing project?
+## Where does it run?
 
-It deploys an application workload on a private platform made of networked services, object storage, a database, an asynchronous worker, a gateway, orchestration, persistent volumes, configuration, health checks, scaling, automation, and monitoring. AI similarity is the workload; the way it is operated is the cloud/DevOps contribution.
+The primary website runs on an Azure Ubuntu VM. Five containers provide Caddy/React, FastAPI, Celery, PostgreSQL/pgvector and Redis. Originals/thumbnails are in Azure Blob Storage. Users need only a browser; the laptop can be off while the VM runs.
 
-## What is a private cloud?
+## What does Azure for Students provide?
 
-A private cloud provides cloud-style infrastructure for one organization or controlled environment. This project uses local Docker/Minikube resources controlled by the student instead of renting a public-cloud account.
+The current offer includes USD $100 credit for 12 months and selected free allowances, subject to eligibility and terms. The default 8 GiB Standard_B2ms VM consumes credit. Disks, IP, Blob operations/storage and traffic can cost credit too. Budgets notify; the spending limit controls the credit-funded subscription. It is not unlimited free hosting. See [cost analysis](cost-analysis.md).
 
-## What is containerization, and why Docker?
+## How is Azure connected without keys?
 
-Containerization packages an application with its runtime and dependencies while sharing the host kernel. Docker makes the FastAPI, React/Nginx, worker, PostgreSQL, Redis, MinIO, Prometheus, and Grafana environments repeatable. “Works on my machine” differences are reduced because the image definition travels with the code.
+Bicep enables a system-assigned VM identity and grants Storage Blob Data Contributor on the storage account. Azure SDK DefaultAzureCredential obtains identity tokens on the VM. Cloud Compose selects the Azure provider; a generated private VM environment supplies the endpoint/container. No storage connection string or Azure OpenAI key is required.
 
-## Docker image versus container?
+## Why Azure Blob instead of MinIO?
 
-An image is an immutable package/template built from a Dockerfile. A container is a running instance of that image with runtime configuration, networking, and volumes.
+Azure Blob is the primary managed object store and persists media separately from compute. MinIO implements the optional local S3-compatible development path. A shared storage interface supports both; Blob is not an S3 endpoint and provider/database migration must be explicit.
 
-## Why Docker Compose?
+## Why not put original media in PostgreSQL?
 
-Compose starts the complete multi-service development platform with one declarative file. It defines dependencies, networks, ports, health checks, environment values, and persistent volumes, making it the easiest live-demo mode.
+Blob stores binary objects; PostgreSQL provides transactions, ownership, metadata, processing state, hashes, relationships and vector queries. This separates large media from relational workloads.
 
-## What is Kubernetes?
+## How do previews stay private?
 
-Kubernetes is a container orchestrator. It schedules containers in Pods, maintains desired replica counts, exposes Services, mounts configuration/secrets/volumes, performs health checks, and supports rolling updates and scaling.
+The API checks ownership, then creates a short-lived read-only HTTPS user-delegation SAS URL. The container is never public. The URL itself permits access until expiry, so it must stay private.
 
-## What is Minikube?
+## What is the difference between exact, near and semantic matches?
 
-Minikube runs a small Kubernetes cluster on a local computer. It demonstrates Kubernetes concepts without EKS, AKS, GKE, a credit card, or a remote cluster.
+SHA-256 equality identifies identical file bytes. Verified near duplicates require multiple hashes, compatible frame/color evidence and aligned pixels at two scales. Semantic CLIP matches identify related content and can include different shots of the same subject. Similarity is not a deletion-safety probability.
 
-## What is orchestration?
+## Why must a family have direct evidence for every pair?
 
-Orchestration coordinates deployment, networking, recovery, scaling, configuration, and lifecycle of multiple services. Instead of starting each program manually, Kubernetes works toward the declared desired state.
+A-B and B-C do not prove A-C. Conservative complete-link grouping avoids joining unrelated endpoints through a chain, though it can split related media into smaller families.
 
-## Deployment, StatefulSet, Service, and Pod?
+## What are embeddings and pgvector?
 
-- A **Pod** is Kubernetes’ smallest deployable unit and contains one or more containers.
-- A **Deployment** manages replaceable/stateless Pods such as backend, frontend, worker, Redis, and Nginx.
-- A **StatefulSet** gives stable identity/order to stateful services such as PostgreSQL and MinIO.
-- A **Service** provides stable network discovery and load distribution in front of changing Pods.
+OpenCLIP encodes image content as normalized 512-number vectors. pgvector adds vector columns/distance operators and indexes to PostgreSQL. Cosine retrieval finds candidates; it is not sufficient proof of duplication.
 
-## ConfigMap versus Secret?
+## Is Azure AI/OpenAI used?
 
-A ConfigMap stores non-sensitive settings such as endpoints, thresholds, and Nginx configuration. A Secret stores credentials such as database passwords, MinIO keys, JWT secret, and Grafana password. A Kubernetes Secret improves separation and handling but is not automatically encrypted in every cluster configuration.
+No hosted inference API is required. OpenCLIP, OCR and face models run inside the self-hosted deployment. On Azure “local inference” refers to the VM, not the presentation laptop. Cloud defaults to CPU.
 
-## What is a PersistentVolumeClaim?
+## Why use Celery and Redis?
 
-A PVC requests durable storage from Kubernetes. PostgreSQL, MinIO, model cache, Prometheus, and Grafana use PVCs so their data survives Pod replacement.
+They move costly analysis off the upload request and provide tasks, retries and heartbeats. Redis also supports atomic cloud request limits. Kafka would add complexity beyond the small demo workload.
 
-## Liveness versus readiness?
+## What happens if models or the queue fail?
 
-Liveness answers “should Kubernetes restart this process?” Readiness answers “should Kubernetes send traffic to this instance?” ImageVault liveness checks that FastAPI is alive; readiness also checks required database and object-storage dependencies.
+Optional model/OCR/face failures preserve successful fingerprints and show warnings. Queue publication failure retains the original and reports retryable analysis. Restore the dependency and use the smart-index action. This is not a fully automatic task outbox.
 
-## What are requests and limits?
+## What happens if deletion meets a storage outage?
 
-Requests help Kubernetes schedule a Pod by reserving expected CPU/memory. Limits cap usage. ImageVault gives the AI worker the largest memory allowance and keeps it at one replica by default for a 16 GB laptop.
+Metadata removal and durable object-deletion records commit together. The API retries storage cleanup every 30 seconds and after restart. Blob deletion is idempotent. Soft-delete retention can keep billed bytes after vault removal.
 
-## What is horizontal scaling?
+## How are users isolated?
 
-Horizontal scaling adds more replicas instead of giving one instance more resources. The stateless FastAPI deployment can scale from one to three replicas. A HorizontalPodAutoscaler can automate this using CPU metrics, but it is optional for the base project.
+JWT identifies the active account, and private queries enforce its user ID. Invitation signup and quotas restrict use. Knowing another object's UUID does not authorize access. Different accounts receive separate original-file quotas.
 
-## What is Infrastructure as Code?
+## Why Caddy?
 
-IaC represents infrastructure in versioned declarative files. It improves repeatability, review, change history, and recovery compared with manual clicking or undocumented commands.
+It serves compiled React and obtains HTTPS certificates for the Azure DNS hostname while forwarding API requests. Local development instead uses Nginx; its configuration is a separate deployment path.
 
-## Why Terraform?
+## Bicep versus Terraform?
 
-Terraform creates a plan from desired configuration and manages resource state. Here it targets only local Kubernetes resources and secrets. No AWS/Azure/GCP provider is configured, so the required path cannot accidentally provision paid public-cloud resources.
+Bicep declares Azure VM, storage, networking, identity/RBAC and shutdown. Docker Compose runs the application. The existing Terraform directory manages the optional local Kubernetes cluster; it does not provision the primary Azure environment.
 
-## What is CI/CD, and why GitHub Actions?
+## Are Kubernetes and Grafana used by the Azure website?
 
-Continuous Integration automatically validates each change through dependency installation, security audit, lint, tests, build, and infrastructure checks. Continuous Delivery keeps deployable artifacts ready. GitHub Actions provides an understandable pipeline; this project validates local deployment rather than pretending to deploy to a paid production cloud.
+No. The main deployment uses Compose and Bicep with System status/container logs. Minikube/Kubernetes, local Terraform, Prometheus and Grafana are optional course extensions. Discuss Deployments, Services, Secrets, PVCs and HPA only when showing that extension.
 
-## What is object storage?
+## What do liveness and readiness mean?
 
-Object storage stores each binary as an object identified by a key, with metadata, inside a bucket. It differs from database rows and traditional hierarchical filesystems. It suits large immutable images and can scale independently.
+Liveness checks that the API process responds. Readiness checks required database/object-store access; status additionally reports worker heartbeat/queue/model state. Readiness is not a complete end-to-end application test.
 
-## Why MinIO and what is S3 compatibility?
+## What does CI/CD do?
 
-MinIO is free/open-source object storage exposing an API compatible with common Amazon S3 operations. ImageVault gets bucket/object semantics locally. S3 compatibility means the storage abstraction and concepts can map to other implementations; it does not mean AWS is used.
+GitHub Actions validates Python, frontend, browser fixtures and infrastructure. Passing main builds publish compiled website/server bundles and checksums. Cloud-init installs a selected release. CI does not automatically deploy updates to an already running VM.
 
-## Why not store images in PostgreSQL?
+## How do you save credit?
 
-Large binaries would grow backups, database I/O, and row storage unnecessarily. MinIO is optimized for objects, while PostgreSQL is used for transactions, ownership, queries, hashes, relationships, states, and embeddings.
+Start before demos, deallocate afterwards and check actual usage. Scheduled shutdown defaults to 20:00 UTC, 01:30 IST the next day; it does not start the VM. Disk/IP/Blob charges can continue while deallocated. Do not confuse an OS-level shutdown with Azure deallocation.
 
-## What are PostgreSQL and pgvector?
+## What persists and how is it backed up?
 
-PostgreSQL is a relational database with transactions, constraints, indexes, and SQL. pgvector is an extension that adds fixed-dimensional vectors and distance operators/indexes. It lets the same database store image metadata and query the closest embeddings.
+PostgreSQL, Redis, weights and Caddy data use VM disk volumes. Blob stores originals/thumbnails. Back up database and media independently. Blob soft delete is not a PostgreSQL backup; deleting the OS disk can lose the database.
 
-## What is a vector embedding?
+## What has been proven?
 
-An embedding is a list of numbers learned by a model to represent important content. Images that the model considers visually/semantically related tend to have vectors close to each other. ImageVault normalizes 512-number OpenCLIP embeddings.
+Separate code/regression evidence from live deployment and real-world accuracy. Browser fixtures and Azure SDK fakes do not prove managed identity, real models or HTTPS. See [validation-report.md](validation-report.md) for this folder. Report measured precision/recall only on an independent labeled corpus.
 
-## What is cosine similarity?
+## What are the main limitations?
 
-Cosine similarity measures the angle between vectors: for normalized vectors it is their dot product. A higher value indicates closer direction/content in the embedding space. It is evidence, not proof that two photos are duplicates.
-
-## What is CLIP / OpenCLIP?
-
-CLIP learns a shared representation from images and text. OpenCLIP is an open implementation/model ecosystem. ImageVault uses its image encoder locally to produce vectors. The model is downloaded and cached at runtime, runs on CPU, and optionally uses CUDA.
-
-## SHA-256 versus perceptual hashing?
-
-SHA-256 is cryptographic: any byte change produces a very different digest, so equal digests provide extremely strong evidence of identical bytes. A perceptual hash deliberately stays similar when appearance changes modestly and is compared by Hamming distance. It can make false matches and is not a cryptographic integrity check.
-
-## Why use both pHash and OpenCLIP?
-
-pHash is cheap and useful for resized/recompressed versions. OpenCLIP captures broader visual/semantic relationships and tolerates edits, but costs more CPU/memory. Keeping their results separate makes the evidence explainable.
-
-## Why process images asynchronously?
-
-Model inference can take seconds or longer on CPU. Upload should not keep an HTTP request open for all processing. The API stores the object and PENDING record, then Redis/Celery lets a worker process it independently with retries and visible states.
-
-## Why Redis/Celery instead of Kafka?
-
-The laptop workload needs a small queue, background tasks, and retry support. Redis/Celery is easier to explain and operate. Kafka would add resources and complexity without solving a requirement here.
-
-## Why Nginx?
-
-Nginx gives one browser entry point, routes SPA and API traffic, adds security headers, request-size/rate controls, request IDs, and load distribution across backend replicas.
-
-## Why Prometheus and Grafana?
-
-Prometheus periodically scrapes numeric time-series metrics. Grafana queries Prometheus and visualizes them. Together they show request rate, latency, errors, uploads, processing, duplicate outcomes, inference time, failures, and optional container resources.
-
-## Metrics versus logs?
-
-Metrics are aggregated numeric time series used for trends and alerts. Logs are discrete event records with context such as request ID, image ID, duration, and error. Neither should contain passwords, tokens, object keys with sensitive context, or raw image data.
-
-## How is user isolation enforced?
-
-The JWT identifies one active user. Every resource query includes `user_id`; knowing another image UUID is insufficient. Object keys also include the user UUID, and signed links are produced only after the ownership query.
-
-## Why are signed URLs used?
-
-The bucket remains private. After authorization, MinIO produces a time-limited URL allowing the browser to fetch that object without routing all image bytes through FastAPI. Expiration limits the value of a leaked link.
-
-## Is the system perfectly secure or perfectly accurate?
-
-No. The default local HTTP deployment lacks TLS, accounts lack email recovery/MFA, host compromise remains possible, and similarity can be wrong. The design states these limitations, keeps results advisory, and requires explicit deletion.
-
-## How could it migrate to AWS, Azure, or Google Cloud?
-
-MinIO maps conceptually to S3/Blob/Cloud Storage; PostgreSQL to RDS/Azure Database/Cloud SQL; Minikube to EKS/AKS/GKE; Nginx to a load balancer/API gateway; Prometheus/Grafana to managed monitoring. Migration would still require IAM, networking, TLS, backups, resilience, and cost design.
-
-## Why choose a local open-source private cloud?
-
-It satisfies the ₹0 additional software/cloud constraint, avoids card verification and usage surprises, keeps images local, works offline after dependencies/model are cached, and lets students demonstrate the same architectural concepts on controlled hardware.
-
-## How is the project “completely free”?
-
-The required software, AI inference, database, object storage, orchestration, IaC, CI setup, and monitoring require no additional paid license or cloud service. The statement does not treat the existing laptop, electricity, or internet as literally free.
+Single VM, finite student credit, regional quota, CPU throughput, model mistakes, sampled video analysis, owner-managed backups and no MFA/email recovery. Heavy edits and changed text need full-resolution manual comparison. No cleanup is automatic.

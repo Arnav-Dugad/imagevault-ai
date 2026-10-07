@@ -1,5 +1,10 @@
 # Detection reliability
 
+Updated 7 October 2026 for the Azure-based 1.2.1 deployment. Detection runs in the
+VM worker; managed Blob Storage changes hosting, not the evidence requirements.
+See [validation-report.md](validation-report.md) for executed checks and pending
+real-model/live-cloud verification.
+
 ImageVault uses conservative rules to reduce false positives. No real-world accuracy percentage has been established. Passing regression tests is evidence for the cases tested, not a claim of perfect detection.
 
 ## Why the layers matter
