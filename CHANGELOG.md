@@ -1,15 +1,25 @@
 # Changelog
 
+## 3.0.0 (2026-10-22)
+
+ImageVault is now a cloud website on Microsoft Azure, built to the CCD mini-project guidelines.
+
+- **Website on Azure App Service**, replacing the desktop app.
+- **Azure Database for PostgreSQL** stores photo data (SQLite is still used when running locally).
+- **Azure Blob Storage** holds photos and thumbnails, accessed with a managed identity, so no keys are needed.
+- **Application Insights** monitors requests, errors and logs.
+- **Terraform** (`infra/`) creates every Azure resource, including a **budget with email alerts**.
+- **GitHub Actions CI/CD:** tests run in local and cloud mode (PostgreSQL + Azure Storage emulator). Pushes to `main` deploy to Azure with passwordless OIDC sign-in, followed by a smoke test.
+- **New Cloud page** with live health and response time of each Azure service, an architecture diagram and the deployed commit.
+- **Real demo photos** (from Unsplash) with exact, resized, compressed and edited copies plus look-alikes, downloadable from the website.
+- Clearer duplicate review: the best copy is chosen by resolution and quality, and every other photo is labelled by how it relates to it.
+- New docs: Azure deployment guide, technical design document, demo guide.
+- Removed: the Windows desktop app, PyInstaller packaging and the in-app Azure connection form.
+
 ## 2.0.0 (2026-10-22)
 
-A complete rewrite that makes ImageVault much simpler to run and use.
+Simple Windows desktop app (FastAPI + SQLite + React) with optional Azure Blob Storage, replacing the multi-container 1.x stack.
 
-- **New desktop app for Windows:** download one `.exe` and double-click it. Nothing to install, no Docker, no database server.
-- **Azure Blob Storage in a few clicks:** paste your storage account's connection string in Settings. Photos already on your computer keep working.
-- **Optional website on Azure App Service** (free F1 plan) with password protection, using `packaging/deploy-azure.ps1`.
-- **Duplicate detection:** exact copies (SHA-256) and similar photos (perceptual hashes). Identical files are stored only once.
-- **Redesigned app:** Home, Photos, Upload, Duplicates and Settings pages, with a photo viewer, side-by-side duplicate review and one-click removal of exact copies.
-- **Simpler setup:** one Python process with SQLite replaces PostgreSQL, Redis, Celery, MinIO, Prometheus, Grafana, Kubernetes and Terraform. The AI models (CLIP, face recognition, OCR) were removed to keep the app small and fast.
-- New beginner-friendly docs: [Azure guide](docs/azure.md) and [how it works](docs/how-it-works.md).
+## 1.x
 
-Version 1.x (the multi-container Azure VM edition) is still available from the [older releases](https://github.com/Arnav-Dugad/imagevault-ai/releases) and the git history.
+Multi-container edition (PostgreSQL, Redis, Celery, MinIO, CLIP, Kubernetes, Terraform). Available in the git history and older releases.

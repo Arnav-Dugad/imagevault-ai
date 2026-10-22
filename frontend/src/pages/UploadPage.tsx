@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { CheckCircle2, Cloud, Copy, HardDrive, ImagePlus, LoaderCircle, Sparkles, XCircle } from "lucide-react";
 import { Button, PageHeading } from "../components/ui";
 import { uploadPhoto } from "../lib/api";
-import { useSettings } from "../lib/settings";
+import { useSystem } from "../lib/system";
 import { cn, formatBytes, percent } from "../lib/utils";
 import type { UploadResult } from "../types";
 
@@ -27,7 +27,7 @@ function ItemStatus({ item }: { item: Item }) {
 }
 
 export function UploadPage() {
-  const { settings } = useSettings();
+  const { system, onAzureStorage: azure } = useSystem();
   const [items, setItems] = useState<Item[]>([]);
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -60,7 +60,6 @@ export function UploadPage() {
 
   const done = items.filter((i) => i.state === "done");
   const duplicates = done.filter((i) => i.result?.match).length;
-  const azure = settings?.storage === "azure";
 
   return <>
     <PageHeading title="Upload photos" description="Add JPG, PNG, WEBP, GIF or BMP photos up to 25 MB each. Every photo is checked against your vault for duplicates." />
@@ -71,9 +70,9 @@ export function UploadPage() {
         dragging ? "border-acid bg-acid/[.07]" : "border-line bg-panel/60 hover:border-acid/40 hover:bg-panel", busy && "cursor-wait opacity-70")}>
       <div className="grid h-16 w-16 place-items-center rounded-2xl border border-acid/20 bg-acid/10"><ImagePlus className="h-7 w-7 text-acid" /></div>
       <p className="mt-5 text-lg font-semibold">{dragging ? "Drop to upload" : "Drag photos here, or click to choose"}</p>
-      {settings && <p className="mt-2 flex items-center gap-1.5 text-sm text-muted">
+      {system && <p className="mt-2 flex items-center gap-1.5 text-sm text-muted">
         {azure ? <Cloud className="h-4 w-4 text-lilac" /> : <HardDrive className="h-4 w-4 text-acid" />}
-        Saving to {azure ? `Azure (${settings.azure_account})` : "this computer"}
+        Saving to {azure ? "Azure Blob Storage" : "a local folder"}
       </p>}
     </button>
     <input ref={input} type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif,image/bmp" className="hidden"

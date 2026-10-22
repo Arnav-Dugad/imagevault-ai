@@ -3,12 +3,12 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { Spinner } from "./components/ui";
 import { api } from "./lib/api";
-import { SettingsProvider } from "./lib/settings";
+import { SystemProvider } from "./lib/system";
+import { CloudPage } from "./pages/CloudPage";
 import { DuplicatesPage } from "./pages/DuplicatesPage";
 import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
 import { PhotosPage } from "./pages/PhotosPage";
-import { SettingsPage } from "./pages/SettingsPage";
 import { UploadPage } from "./pages/UploadPage";
 
 interface Session { password_required: boolean; logged_in: boolean }
@@ -32,17 +32,17 @@ export default function App() {
   if (!session.logged_in) return <LoginPage onLoggedIn={check} />;
 
   return (
-    <SettingsProvider>
+    <SystemProvider>
       <Layout showLogout={session.password_required}>
         <Routes>
           <Route index element={<HomePage />} />
           <Route path="photos" element={<PhotosPage />} />
           <Route path="upload" element={<UploadPage />} />
           <Route path="duplicates" element={<DuplicatesPage />} />
-          <Route path="settings" element={<SettingsPage />} />
+          <Route path="cloud" element={<CloudPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Layout>
-    </SettingsProvider>
+    </SystemProvider>
   );
 }

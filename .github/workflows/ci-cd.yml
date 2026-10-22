@@ -1,0 +1,128 @@
+# CI: every push and pull request is tested.
+# CD: every push to main that passes the tests is deployed to Azure App Service.
+#
+# Deployment uses OpenID Connect: GitHub proves who it is to Azure, so no passwords are stored.
+# Set it up once with the commands printed by `terraform output github_setup_commands`.
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests (${{ matrix.mode }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        mode: [local, cloud]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: imagevault
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: imagevault
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # "cloud" mode runs the same tests against PostgreSQL and the Azure Storage emulator (Azurite).
+      TEST_DATABASE_URL: ${{ matrix.mode == 'cloud' && 'postgresql+psycopg://imagevault:ci-only-password@localhost:5432/imagevault' || '' }}
+      TEST_AZURE_STORAGE: ${{ matrix.mode == 'cloud' && 'DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;' || '' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Start Azure Storage emulator
+        if: matrix.mode == 'cloud'
+        run: |
+          npx -y azurite@3.35.0 --silent --location /tmp/azurite --skipApiVersionCheck &
+          for i in $(seq 1 30); do curl -s -o /dev/null http://127.0.0.1:10000 && break; sleep 1; done
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check app tests
+      - run: pytest -q
+
+  website:
+    name: Website lint and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+          npm run build
+
+  terraform:
+    name: Terraform check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v5
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check
+      - run: terraform init -backend=false
+      - run: terraform validate
+
+  deploy:
+    name: Deploy to Azure
+    needs: [test, website, terraform]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AZURE_WEBAPP_NAME != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # needed to sign in to Azure with OpenID Connect
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build the website
+        working-directory: frontend
+        run: npm ci && npm run build
+      - name: Prepare the package
+        run: |
+          cat > app/build.json <<EOF
+          {"commit": "${GITHUB_SHA}", "deployed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+           "run_url": "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}",
+           "repository": "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"}
+          EOF
+          mkdir deploy
+          cp -r app requirements.txt deploy/
+          find deploy -name __pycache__ -prune -exec rm -rf {} +
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.AZURE_WEBAPP_NAME }}
+          package: deploy
+      - name: Smoke test
+        run: |
+          url="https://${{ vars.AZURE_WEBAPP_NAME }}.azurewebsites.net/api/health"
+          for i in $(seq 1 30); do
+            if curl -sf "$url"; then echo; echo "Deployed: $url"; exit 0; fi
+            echo "Waiting for the site to start ($i/30)..."; sleep 10
+          done
+          echo "The site did not become healthy"; exit 1

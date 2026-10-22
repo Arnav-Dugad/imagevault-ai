@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Cloud, Download, HardDrive, LoaderCircle, Trash2, X } from "lucide-react";
 import { api } from "../lib/api";
+import { useSystem } from "../lib/system";
 import { formatBytes, formatDate } from "../lib/utils";
 import type { PhotoDetails } from "../types";
 import { PhotoThumb } from "./PhotoCard";
@@ -8,6 +9,7 @@ import { Button, ConfirmDialog, ErrorNote, MatchBadge, Modal } from "./ui";
 
 /** A pop-up showing one photo, its details and the photos it matches. */
 export function PhotoViewer({ id, onClose, onDeleted }: { id: string; onClose: () => void; onDeleted: () => void }) {
+  const { onAzureStorage } = useSystem();
   const [currentId, setCurrentId] = useState(id);
   const [photo, setPhoto] = useState<PhotoDetails | null>(null);
   const [error, setError] = useState("");
@@ -46,7 +48,7 @@ export function PhotoViewer({ id, onClose, onDeleted }: { id: string; onClose: (
       <div className="grid lg:grid-cols-[1fr_340px]">
         <div className="relative grid min-h-[40vh] place-items-center bg-black/40 p-3 lg:min-h-[75vh]">
           {photo && <img src={photo.file_url} alt={photo.filename} onLoad={() => setImageLoaded(true)} className="max-h-[75vh] w-auto rounded-lg object-contain"
-            onError={() => setError(photo.storage === "azure" ? "Couldn't load this photo from Azure. Check the Azure connection in Settings." : "Couldn't load this photo.")} />}
+            onError={() => setError("Couldn't load this photo from storage. The Cloud page shows whether storage is reachable.")} />}
           {(!photo || !imageLoaded) && !error && <LoaderCircle className="absolute h-6 w-6 animate-spin text-acid" />}
         </div>
         <aside className="flex flex-col border-t border-line p-5 lg:border-l lg:border-t-0">
@@ -57,8 +59,8 @@ export function PhotoViewer({ id, onClose, onDeleted }: { id: string; onClose: (
           {error && <div className="mt-4"><ErrorNote message={error} /></div>}
           {photo && <>
             <div className="mt-3 inline-flex w-fit items-center gap-1.5 rounded-full border border-line bg-raised px-2.5 py-1 text-xs text-muted">
-              {photo.storage === "azure" ? <Cloud className="h-3.5 w-3.5 text-lilac" /> : <HardDrive className="h-3.5 w-3.5 text-acid" />}
-              {photo.storage === "azure" ? "Stored in Azure" : "Stored on this computer"}
+              {onAzureStorage ? <Cloud className="h-3.5 w-3.5 text-lilac" /> : <HardDrive className="h-3.5 w-3.5 text-acid" />}
+              {onAzureStorage ? "Stored in Azure Blob Storage" : "Stored in a local folder"}
             </div>
             <dl className="mt-5 space-y-3 text-sm">
               {rows.map(([label, value]) => <div key={label} className="flex justify-between gap-4"><dt className="text-muted">{label}</dt><dd className="text-right">{value}</dd></div>)}
