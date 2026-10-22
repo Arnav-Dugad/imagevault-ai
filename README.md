@@ -1,103 +1,94 @@
-# ImageVault AI
+<p align="center"><img src="packaging/icon.png" width="96" alt="ImageVault icon"></p>
 
-Private photo storage and duplicate review, built for a simple classroom demonstration.
-Use the deployed website in any modern browser.
+<h1 align="center">ImageVault</h1>
 
-**[Download website/server bundle](https://github.com/Arnav-Dugad/imagevault-ai/releases/latest)** · **[Azure setup](docs/azure-students.md)** · **[Five-minute presentation](docs/demo-script.md)**
+<p align="center">A simple desktop app that keeps your photos in one place and finds duplicates,<br>with optional cloud storage on Microsoft Azure.</p>
 
-**On Windows, start with [the step-by-step setup guide](docs/setup-windows.md).**
-It covers connecting your student subscription, deploying from this folder,
-opening the website, and the optional local Docker alternative.
+<p align="center"><a href="https://github.com/Arnav-Dugad/imagevault-ai/releases/latest"><b>⬇ Download for Windows</b></a></p>
 
-## One primary deployment
+---
 
-Azure for Students hosts an Ubuntu VM and private Azure Blob Storage. Five containers
-run Caddy (HTTPS and the React website), FastAPI, a Celery worker, PostgreSQL/pgvector,
-and Redis. Managed identity avoids storage account keys. Signed previews expire;
-invitation-based signup and upload quotas control access and usage.
+## What it does
 
-The default 8 GiB CPU VM uses student credit. This is not unlimited free hosting.
-Keep your spending limit enabled, check regional pricing and quota, and deallocate
-compute between demos. Disks, public IP and stored data can still incur charges.
-See [cost controls](docs/cost-analysis.md). A live Azure account is not included.
+- **Upload photos** by dragging them into the app (JPG, PNG, WEBP, GIF, BMP).
+- **Finds exact copies:** the same file uploaded twice. Each copy is stored only once.
+- **Finds similar photos:** resized, compressed or slightly edited versions of the same picture.
+- **Review duplicates** side by side and delete the copies you don't need.
+- **Store in the cloud (optional):** connect an Azure Storage account and new photos are saved in Azure Blob Storage instead of on your computer.
 
-Start with [INSTALL.md](INSTALL.md) and the [Azure deployment guide](docs/azure-students.md).
-Bicep provisions the infrastructure; Docker Compose runs the application. No Windows
-application is built or needed.
+Everything runs on your own computer. Nothing is sent anywhere unless you connect Azure.
 
-## Four main pages
+## Download and run (Windows)
 
-- **Upload:** validate and upload photos to private storage.
-- **Gallery:** browse originals, search, and inspect image details.
-- **Duplicate review:** compare evidence and confirm cleanup.
-- **Dashboard:** view uploads, storage and potential exact-copy savings.
+1. Go to the [latest release](https://github.com/Arnav-Dugad/imagevault-ai/releases/latest) and download **`ImageVault-…-Windows.exe`**.
+2. Double-click it. There is nothing to install.
+3. Windows may say *"Windows protected your PC"* because the app isn't code-signed. Click **More info → Run anyway**.
 
-**Advanced** contains smart albums, system status and settings. People albums, OCR,
-quality scores, semantic search and supported video/RAW formats remain available.
-The [architecture guide](docs/architecture.md) explains the services and pipeline.
+To try duplicate detection straight away, download **`demo-photos.zip`** from the same page, unzip it and upload all the photos.
 
-## Reliable detection, with honest limits
+Your photos and database are kept in `%LOCALAPPDATA%\ImageVault` (the exact path is shown on the Settings page).
 
-| Result | Evidence | Cleanup behavior |
-|---|---|---|
-| Exact copy | SHA-256 of identical file bytes | Included in “Select exact”; confirmation required |
-| Near duplicate | Multiple hashes, compatible colors/frame, and aligned pixels at two scales | Manual comparison |
-| Similar content | Strong CLIP content match | Manual review; different shots may resemble one another |
+## Connect Azure (optional)
 
-Families require direct evidence between every pair; matching through a chain is
-insufficient. Fingerprint processing survives unavailable AI/OCR/face models;
-image details explain incomplete analysis and **Upgrade smart index** retries it.
-Scores indicate resemblance, not deletion-safety probabilities.
+Have an Azure account (for example **Azure for Students**)? Open **Settings** in the app and paste your storage account's connection string. The [Azure guide](docs/azure.md) walks you through it step by step, and also shows how to put ImageVault online as a website.
 
-After upgrading an existing library, click **Duplicate review → Upgrade smart index**
-and let version-6 processing finish. Older unverified visual families are hidden
-until rebuilt. Back up data before upgrading or deleting photos.
+## Run from source
 
-No real-world accuracy percentage is claimed. Crops, heavy edits, low-detail images,
-changed document text and videos need particular care. Read the
-[reliability and evaluation guide](docs/detection-reliability.md).
+Use this on Mac/Linux, or if you want to change the code. You need [Python 3.11+](https://www.python.org/downloads/) and [Node.js 20+](https://nodejs.org/).
 
-## Present it in class
+```bash
+git clone https://github.com/Arnav-Dugad/imagevault-ai.git
+cd imagevault-ai
 
-Each release includes six original synthetic demo images: an original, exact copy,
-resized copy, compressed copy, mirrored review case and unrelated document. Warm
-the model and rehearse before class. Follow the [five-minute demo](docs/demo-script.md).
-Source checkouts can generate the samples with `python scripts/generate_demo.py`
-after installing Pillow.
+# 1. Install the Python packages (in a virtual environment)
+python -m venv .venv
+.venv\Scripts\activate            # Windows
+# source .venv/bin/activate       # Mac / Linux
+pip install -r requirements-dev.txt
 
-Kubernetes, Terraform and Prometheus/Grafana remain optional academic extensions.
-Use them only when the course rubric requires them. The main Azure website uses
-Compose and Bicep; [local development](docs/local-development.md) uses MinIO.
+# 2. Build the website once
+cd frontend
+npm install
+npm run build
+cd ..
 
-## Tests and downloadable releases
+# 3. Start the app
+python -m app                     # opens the app window
+python -m app --browser           # or open it in your web browser
+```
 
-GitHub Actions checks Python lint/tests, frontend audit/lint/tests/build, Compose,
-Dockerfiles, Caddy, Bicep, Kubernetes and Terraform. Every passing `main` build
-publishes ZIP and TAR.GZ bundles with the compiled website, server source,
-deployment files, synthetic samples, SHA256SUMS and source metadata. Failed checks
-publish no release. Visitors only need the deployed website URL; the download is
-for someone deploying their own copy.
+**While changing the website**, run the API and the live-reloading website side by side:
 
-Live Azure quota, managed identity and HTTPS must be verified on a real student
-subscription. Regression tests use generated image cases and storage fakes; they
-do not establish a production accuracy benchmark.
+```bash
+python -m uvicorn app.server:app --reload --port 8000    # terminal 1
+cd frontend && npm run dev                               # terminal 2, then open http://localhost:5173
+```
+
+**Tests:** `pytest` (backend) and `npm run lint` in `frontend/`.
+
+**Build the Windows app yourself:** `python packaging/build.py` creates `dist/ImageVault.exe`.
+
+## How it works
+
+ImageVault is one Python program (a [FastAPI](https://fastapi.tiangolo.com/) web server with a SQLite database) that serves a React website. The desktop app shows that website in its own window.
+
+To compare photos it uses a SHA-256 fingerprint for exact copies and perceptual hashes for similar photos. [docs/how-it-works.md](docs/how-it-works.md) explains this with diagrams.
+
+```
+app/            Python server: API, duplicate detection, storage (local folder or Azure)
+frontend/       React website (Vite + Tailwind CSS)
+tests/          Automated tests
+packaging/      Builds the Windows app and deploys to Azure
+demo-photos/    Sample photos for trying duplicate detection
+docs/           Azure guide and how-it-works guide
+```
+
+## Releasing a new version
+
+1. Update the version in `app/__init__.py` and add a section to `CHANGELOG.md`.
+2. Push a tag: `git tag v2.1.0 && git push origin v2.1.0`.
+3. GitHub Actions builds the Windows app and publishes the release.
 
 ## License
 
-Original code is [MIT licensed](LICENSE). Dependencies and model weights retain
-their own licenses. This is a college teaching project with a single-VM deployment;
-maintain backups for important media.
-
-## Testing
-
-See [test coverage and reliability](docs/testing.md) for local checks, desktop/mobile browser tests, failure recovery, and the limits of the synthetic detection corpus. Every downloadable main-branch release now waits for these browser checks as well as backend, frontend, and infrastructure checks.
-
-## Documentation
-
-The [synopsis](docs/synopsis-draft.md), [technical design](docs/technical-design.md),
-[implementation plan](docs/implementation-plan.md), [presentation outline](docs/presentation-outline.md),
-and [viva guide](docs/viva-guide.md) describe the Azure deployment and identify
-Kubernetes, Terraform and local monitoring as optional extensions.
-See [the validation report](docs/validation-report.md) for checks actually run
-in this folder and live Azure checks still outstanding.
-For suggested priorities, see [how to make the project simpler](docs/next-steps.md).
+[MIT](LICENSE)

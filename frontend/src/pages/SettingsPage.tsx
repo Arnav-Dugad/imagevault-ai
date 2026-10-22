@@ -1,39 +1,110 @@
-import { BrainCircuit, KeyRound, LockKeyhole, RefreshCw, ScanFace, ScanText } from "lucide-react";
-import { useState } from "react";
-import { Button, PageHeading } from "../components/ui";
+import { useState, type FormEvent } from "react";
+import { Cloud, ExternalLink, FolderOpen, HardDrive, Info } from "lucide-react";
+import { Button, ConfirmDialog, ErrorNote, PageHeading } from "../components/ui";
 import { api } from "../lib/api";
-import { useAuth } from "../providers/AuthProvider";
+import { useSettings } from "../lib/settings";
+import type { Settings } from "../types";
 
-export function SettingsPage() {
-  const { user } = useAuth();
-  const [reindexing, setReindexing] = useState(false);
-  const [reindexMessage, setReindexMessage] = useState("");
-  const initials = user?.display_name.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase();
-  const features = [
-    [BrainCircuit, "Smart search", "Enabled"],
-    [ScanText, "Text recognition", "Enabled"],
-    [ScanFace, "Private face matching", "Enabled"],
-    [LockKeyhole, "Private storage", "Enabled"],
-    [KeyRound, "Signed previews", "Enabled"],
-  ] as const;
-  async function reindex() {
-    setReindexing(true);
-    setReindexMessage("");
+const GUIDE_URL = "https://github.com/Arnav-Dugad/imagevault-ai/blob/main/docs/azure.md";
+
+function AzureForm({ onConnected }: { onConnected: (s: Settings) => void }) {
+  const [connectionString, setConnectionString] = useState("");
+  const [container, setContainer] = useState("photos");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true); setError("");
     try {
-      const result = await api<{ queued: number; message: string }>("/images/reindex?missing_only=true", { method: "POST" });
-      setReindexMessage(result.message);
-    } catch (reason) {
-      setReindexMessage(reason instanceof Error ? reason.message : "Could not refresh the library");
+      onConnected(await api<Settings>("/settings/azure", { method: "PUT", body: JSON.stringify({ connection_string: connectionString, container }) }));
+    } catch (e) {
+      setError((e as Error).message);
     } finally {
-      setReindexing(false);
+      setBusy(false);
     }
   }
+
+  return (
+    <form onSubmit={submit} className="mt-6 space-y-4">
+      <ol className="space-y-1.5 rounded-xl border border-line bg-canvas/50 p-4 text-sm leading-6 text-muted">
+        <li><span className="text-ink">1.</span> Sign in to <a className="text-lilac hover:underline" href="https://portal.azure.com" target="_blank" rel="noreferrer">portal.azure.com</a> with your Azure for Students account.</li>
+        <li><span className="text-ink">2.</span> Create a <span className="text-ink">Storage account</span> (Standard performance, LRS redundancy).</li>
+        <li><span className="text-ink">3.</span> Open it, then go to <span className="text-ink">Security + networking → Access keys</span>.</li>
+        <li><span className="text-ink">4.</span> Click <span className="text-ink">Show</span> next to <span className="text-ink">Connection string</span>, copy it and paste it below.</li>
+      </ol>
+      <label className="block">
+        <span className="text-sm font-medium">Connection string</span>
+        <input type="password" required value={connectionString} onChange={(e) => setConnectionString(e.target.value)} autoComplete="off" spellCheck={false}
+          placeholder="DefaultEndpointsProtocol=https;AccountName=…;AccountKey=…"
+          className="focus-ring mt-1.5 h-11 w-full rounded-xl border border-line bg-canvas px-3 font-mono text-sm placeholder:font-sans placeholder:text-muted/60" />
+      </label>
+      <label className="block">
+        <span className="text-sm font-medium">Container name</span>
+        <input required value={container} onChange={(e) => setContainer(e.target.value)} spellCheck={false}
+          className="focus-ring mt-1.5 block h-11 w-full rounded-xl border border-line bg-canvas px-3 text-sm sm:w-72" />
+        <span className="mt-1.5 block text-xs text-muted">A folder inside your storage account. It is created for you if it doesn't exist.</span>
+      </label>
+      {error && <ErrorNote message={error} />}
+      <div className="flex flex-wrap items-center gap-4">
+        <Button type="submit" loading={busy}><Cloud className="h-4 w-4" />{busy ? "Testing connection…" : "Connect to Azure"}</Button>
+        <a href={GUIDE_URL} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-ink">Full step-by-step guide <ExternalLink className="h-3.5 w-3.5" /></a>
+      </div>
+    </form>
+  );
+}
+
+export function SettingsPage() {
+  const { settings, update } = useSettings();
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  if (!settings) return null;
+
+  async function disconnect() {
+    setBusy(true);
+    try { update(await api<Settings>("/settings/azure", { method: "DELETE" })); }
+    catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); setConfirm(false); }
+  }
+
+  const azure = settings.storage === "azure";
   return <>
-    <PageHeading eyebrow="Settings" title="Account and privacy" />
-    <div className="grid min-w-0 gap-5 lg:grid-cols-[.8fr_1.2fr]">
-      <section className="panel min-w-0 rounded-[28px] p-6"><p className="eyebrow">Account</p><div className="mt-6 flex min-w-0 items-center gap-4"><div className="grid h-14 w-14 shrink-0 place-items-center rounded-full bg-lilac/15 font-semibold text-lilac">{initials}</div><div className="min-w-0"><p className="truncate font-semibold">{user?.display_name}</p><p className="truncate text-sm text-muted">{user?.email}</p></div></div></section>
-      <section className="panel min-w-0 rounded-[28px] p-6"><p className="eyebrow">Features</p><div className="mt-6 grid min-w-0 gap-3 sm:grid-cols-2">{features.map(([Icon, label, value]) => <div key={label} className="group flex min-w-0 items-center justify-between gap-3 rounded-xl border border-line bg-white/[.02] p-4 transition hover:-translate-y-0.5 hover:border-white/15"><span className="flex min-w-0 items-center gap-3 text-sm"><Icon className="h-4 w-4 shrink-0 text-acid transition group-hover:scale-110" /><span className="truncate">{label}</span></span><span className="shrink-0 font-mono text-[9px] uppercase text-acid">{value}</span></div>)}</div></section>
-      <section className="panel min-w-0 rounded-[28px] p-6 lg:col-span-2"><div className="flex min-w-0 flex-col justify-between gap-4 sm:flex-row sm:items-center"><div className="min-w-0"><p className="eyebrow">AI accuracy</p><h2 className="mt-3 font-semibold">Refresh smart analysis</h2><p className="mt-1 text-sm text-muted">Applies the newest face, quality, and tagging engine to older photos.</p></div><Button variant="secondary" loading={reindexing} onClick={reindex}><RefreshCw className="h-4 w-4" />Re-analyze library</Button></div>{reindexMessage && <p role="status" className="mt-4 rounded-xl border border-acid/20 bg-acid/[.055] p-3 text-sm text-acid">{reindexMessage}</p>}</section>
-    </div>
+    <PageHeading title="Settings" description="Choose where ImageVault stores your photos." />
+
+    <section className="panel p-6">
+      <div className="flex items-start gap-4">
+        <div className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl border ${azure ? "border-lilac/30 bg-lilac/10" : "border-acid/25 bg-acid/10"}`}>
+          {azure ? <Cloud className="h-5 w-5 text-lilac" /> : <HardDrive className="h-5 w-5 text-acid" />}
+        </div>
+        <div className="min-w-0">
+          <h2 className="font-semibold">{azure ? "Connected to Azure Blob Storage" : "Photos are stored on this computer"}</h2>
+          <p className="mt-1 text-sm leading-6 text-muted">
+            {azure
+              ? <>New photos are uploaded to the <span className="text-ink">{settings.azure_container}</span> container in the <span className="text-ink">{settings.azure_account}</span> storage account.</>
+              : "Connect your Azure for Students account to keep new photos in Microsoft's cloud. Photos you already added stay where they are."}
+          </p>
+        </div>
+      </div>
+      {error && <div className="mt-4"><ErrorNote message={error} /></div>}
+      {!azure && <AzureForm onConnected={update} />}
+      {azure && !settings.azure_set_by_environment && (
+        <div className="mt-6"><Button variant="secondary" onClick={() => setConfirm(true)}>Disconnect Azure</Button></div>
+      )}
+      {settings.azure_set_by_environment && (
+        <p className="mt-6 flex items-center gap-2 text-sm text-muted"><Info className="h-4 w-4" />Azure is configured by the server, so it can't be changed here.</p>
+      )}
+    </section>
+
+    <section className="panel mt-4 p-6">
+      <h2 className="flex items-center gap-2 font-semibold"><FolderOpen className="h-4 w-4 text-acid" />Data folder</h2>
+      <p className="mt-1 text-sm text-muted">The database, previews and locally stored photos are kept here:</p>
+      <code className="mt-3 block break-all rounded-lg border border-line bg-canvas px-3 py-2 text-sm">{settings.data_folder}</code>
+    </section>
+
+    <p className="mt-8 text-center text-xs text-muted">ImageVault {settings.version} · <a className="hover:text-ink" href="https://github.com/Arnav-Dugad/imagevault-ai" target="_blank" rel="noreferrer">GitHub</a></p>
+
+    {confirm && <ConfirmDialog title="Disconnect Azure?" confirmLabel="Disconnect" busy={busy} onCancel={() => setConfirm(false)} onConfirm={disconnect}
+      message="New photos will be saved on this computer again. Photos already in Azure stay there, but you won't be able to open them until you reconnect." />}
   </>;
 }

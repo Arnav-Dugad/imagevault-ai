@@ -1,52 +1,18 @@
-# Secrets and local configuration
-.env
-.env.*
-!.env.example
-*.pem
-*.key
-secrets/
-infra/kubernetes/secret.yaml
-
 # Python
 __pycache__/
 *.py[cod]
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.coverage
-htmlcov/
 .venv/
-venv/
-build/
-*.egg-info/
+.pytest_cache/
+.ruff_cache/
 
-# JavaScript
-node_modules
-dist/
-coverage/
+# Website build output (created by `npm run build`)
+app/static/
+node_modules/
 *.tsbuildinfo
-frontend/vite.config.js
-frontend/vite.config.d.ts
 
-# Runtime data and uploaded content
-data/
-uploads/
-postgres-data/
-minio-data/
-redis-data/
-grafana-data/
-prometheus-data/
-model-cache/
-.cache/
-
-# Terraform
-.terraform/
-*.tfstate
-*.tfstate.*
-*.tfplan
-*.tfvars
-!*.tfvars.example
-crash.log
+# Desktop app build output (created by packaging/build.py)
+build/
+dist/
 
 # Editors and operating systems
 .idea/
@@ -54,24 +20,4 @@ crash.log
 .DS_Store
 Thumbs.db
 desktop.ini
-*.swp
-
-# Logs and temporary files
-*.log
-tmp/
-temp/
-*.tmp
-
-# Generated demo and benchmark outputs
-demo-images/
-benchmark-results*.json
-release-dist/
-
-# Local certificates
-infra/nginx/certs/
-
-# Generated synthetic classroom samples
-demo-images/
-
-frontend/test-results/
-frontend/playwright-report/
+.playwright-mcp/

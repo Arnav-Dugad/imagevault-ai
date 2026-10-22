@@ -1,0 +1,53 @@
+# Builds the Windows app and publishes a GitHub release when a version tag is pushed:
+#   git tag v2.0.0 && git push origin v2.0.0
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Build and publish
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pip install -r requirements-dev.txt
+      - run: pytest -q
+      - run: python packaging/build.py
+      - name: Package files
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          Move-Item dist/ImageVault.exe "dist/ImageVault-$version-Windows.exe"
+          Compress-Archive -Path demo-photos/* -DestinationPath dist/demo-photos.zip
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          $notes = @"
+          ## Download
+
+          **Windows:** download ``ImageVault-$version-Windows.exe`` below and double-click it. No installation needed.
+
+          > Windows may show *"Windows protected your PC"* because the app is not code-signed. Click **More info → Run anyway**.
+
+          Want to try duplicate detection? Download ``demo-photos.zip``, unzip it and upload the photos.
+
+          **Mac / Linux:** run from source, see the [README](https://github.com/${{ github.repository }}#run-from-source).
+
+          See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for what's new.
+          "@
+          gh release create "${{ github.ref_name }}" "dist/ImageVault-$version-Windows.exe" dist/demo-photos.zip `
+            --title "ImageVault $version" --notes $notes --latest
