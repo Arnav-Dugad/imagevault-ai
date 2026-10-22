@@ -1,4 +1,5 @@
-export type MatchKind = "exact" | "similar";
+export type CopyKind = "exact" | "similar";
+export type MatchKind = CopyKind | "subject";
 export type StorageKind = "local" | "azure";
 
 export interface Photo {
@@ -10,20 +11,43 @@ export interface Photo {
   height: number;
   sha256: string;
   uploaded_at: string;
+  ai_status: "processing" | "done" | "failed" | null;
   thumb_url: string;
   file_url: string;
-  match?: MatchKind | null;
+  match?: CopyKind | null;
+}
+
+export interface FaceInPhoto {
+  id: string;
+  person_id: string | null;
+  name: string | null;
+  photos: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  image_url: string;
 }
 
 export interface PhotoDetails extends Photo {
   matches: { kind: MatchKind; similarity: number; photo: Photo }[];
+  people: FaceInPhoto[];
 }
 
 export interface PhotoList { total: number; items: Photo[] }
 
 export interface UploadResult {
   photo: Photo;
-  match: { id: string; filename: string; kind: MatchKind; similarity: number } | null;
+  match: { id: string; filename: string; kind: CopyKind; similarity: number } | null;
+}
+
+export interface AiStatus {
+  enabled: boolean;
+  ready: boolean;
+  message: string;
+  analysed: number;
+  waiting: number;
+  failed: number;
 }
 
 export interface Stats {
@@ -33,7 +57,9 @@ export interface Stats {
   saved_bytes: number;
   exact_copies: number;
   similar_pairs: number;
+  people: number;
   storage: StorageKind;
+  ai: AiStatus;
   recent: Photo[];
 }
 
@@ -43,8 +69,22 @@ export interface DuplicateGroup {
   items: { kind: "keep" | MatchKind; similarity: number; photo: Photo }[];
 }
 
+export interface Person {
+  id: string;
+  name: string | null;
+  photos: number;
+  image_url: string | null;
+}
+
+export interface PersonDetails {
+  id: string;
+  name: string | null;
+  image_url: string | null;
+  photos: Photo[];
+}
+
 export interface CloudService {
-  id: "app-service" | "database" | "storage" | "monitoring";
+  id: "app-service" | "database" | "storage" | "monitoring" | "ai";
   name: string;
   role: string;
   active: boolean;

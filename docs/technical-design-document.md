@@ -12,6 +12,8 @@
 
 ImageVault is a web application for storing photos in the cloud. It automatically finds **exact duplicates** (the same file uploaded more than once) and **similar photos** (resized, compressed or edited copies). Users upload photos in the browser, review matching photos side by side, and delete the copies they don't need.
 
+It also includes **free AI recognition** that runs inside the application, with no paid AI service: it recognises the **same person** across photos (People), finds photos by **description** (smart search), and suggests photos of the **same subject taken differently**.
+
 The project's main focus is **cloud architecture and DevOps**, as the guidelines require:
 
 - the application runs on **Azure App Service** and uses three managed services: **Azure Database for PostgreSQL**, **Azure Blob Storage** and **Application Insights**;
@@ -42,9 +44,10 @@ People keep thousands of photos across phones, laptops and messaging apps. The s
 2. detects exact copies reliably, and stores identical files only once;
 3. detects visually similar copies (resized, compressed, edited) without flagging different photos of a similar subject;
 4. lets the user review and remove duplicates safely;
-5. is deployed, monitored and updated automatically using cloud-native DevOps practices, within a student budget.
+5. is deployed, monitored and updated automatically using cloud-native DevOps practices, within a student budget;
+6. helps organise photos by **people** and **content** using AI, at no extra cost and without sending photos to third parties.
 
-**Out of scope:** multiple user accounts, mobile apps, and AI recognition of photo content. Possible extensions are listed in Section 6.
+**Out of scope:** multiple user accounts and mobile apps. Possible extensions are listed in Section 6.
 
 ## 3. Solution Architecture
 
@@ -61,7 +64,7 @@ flowchart TB
     end
     subgraph Azure["Microsoft Azure · resource group imagevault-rg"]
       ASP["App Service plan (Linux, F1)"]
-      WEB["Linux Web App<br/>Python FastAPI + React<br/>system-assigned managed identity"]
+      WEB["Linux Web App<br/>Python FastAPI + React<br/>free AI models (CLIP, YuNet, SFace)<br/>system-assigned managed identity"]
       PG[("Azure Database for PostgreSQL<br/>Flexible Server B1ms")]
       ST["Storage account (Standard LRS)<br/>container: photos"]
       AI["Application Insights"]
@@ -101,6 +104,7 @@ All resources are defined in `infra/main.tf` and created in a single resource gr
 | PostgreSQL B1ms + 32 GB | US$0 under the 12-month free services allowance, otherwise about US$13–15 |
 | Blob Storage (5 GB, LRS, hot) | about US$0.10 |
 | Application Insights / Log Analytics (< 5 GB) | US$0 |
+| AI recognition (open-source models running on the App Service) | US$0: no API calls, no per-photo charges |
 | **Total** | **about US$0–15/month**, well within the US$100 student credit |
 
 ### 3.4 Deployment flow
@@ -116,17 +120,20 @@ All resources are defined in `infra/main.tf` and created in a single resource gr
 ```mermaid
 flowchart LR
     subgraph Frontend["Frontend (React 18 + TypeScript + Vite + Tailwind CSS)"]
-      P1["Home"] --- P2["Photos"] --- P3["Upload"] --- P4["Duplicates"] --- P5["Cloud"]
+      P1["Home"] --- P2["Photos"] --- P3["Upload"] --- P4["Duplicates"] --- P6["People"] --- P5["Cloud"]
     end
     subgraph Backend["Backend (Python 3.12, FastAPI)"]
       API["server.py<br/>REST API + static website"]
       PH["photos.py<br/>hashing + comparison"]
+      INT["intelligence.py<br/>background AI worker"]
+      AIM["ai.py<br/>CLIP · YuNet · SFace<br/>(ONNX Runtime, OpenCV)"]
       STO["storage.py<br/>Blob / local"]
       DBM["database.py<br/>SQLAlchemy"]
       CFG["config.py<br/>environment settings"]
     end
     Frontend -- "fetch / XHR (JSON, multipart)" --> API
-    API --> PH & STO & DBM
+    API --> PH & STO & DBM & INT
+    INT --> AIM
     STO --> BLOB[("Blob Storage")]
     DBM --> PG[("PostgreSQL")]
 ```
@@ -138,12 +145,16 @@ The frontend is a single-page app that the backend serves as static files, so on
 | Method & path | Purpose |
 |---|---|
 | `POST /api/photos` | Upload one photo (multipart). Returns the photo and its best match |
-| `GET /api/photos?search=&duplicates_only=&offset=&limit=` | Paginated, searchable photo list |
-| `GET /api/photos/{id}` | Photo details and all of its matches |
+| `GET /api/photos?search=&smart=&duplicates_only=&offset=&limit=` | Paginated photo list; search by file name, or by description when `smart=true` |
+| `GET /api/photos/{id}` | Photo details, all of its matches, and the faces/people in it |
 | `GET /api/photos/{id}/thumb`, `/file` | Thumbnail / original (streamed from Blob Storage, cached by the browser) |
 | `DELETE /api/photos/{id}` | Delete a photo; the stored file is removed when its last copy is deleted |
 | `GET /api/duplicates` | Duplicate groups with the suggested best copy |
 | `POST /api/duplicates/remove-exact` | Remove all exact copies, keeping the first upload of each |
+| `GET /api/related` | AI "same subject, different shot" groups (never deleted automatically) |
+| `GET /api/people`, `GET /api/people/{id}`, `PUT /api/people/{id}` | Recognised people, their photos, renaming |
+| `GET /api/faces/{id}/image` | Face crop used as a person's picture |
+| `GET /api/ai` | AI progress: analysed, waiting and failed photos |
 | `GET /api/stats` | Dashboard numbers |
 | `GET /api/system` | Live health and response time of each cloud service, plus deployment information |
 | `GET /api/health` | Health check used by the pipeline's smoke test |
@@ -154,6 +165,8 @@ The frontend is a single-page app that the backend serves as static files, so on
 ```mermaid
 erDiagram
     photos ||--o{ matches : "photo_a / photo_b"
+    photos ||--o{ faces : "contains"
+    people ||--o{ faces : "groups"
     photos {
         varchar id PK
         varchar filename
@@ -165,16 +178,33 @@ erDiagram
         varchar phash "64-bit perceptual hash (hex)"
         varchar dhash "64-bit difference hash (hex)"
         varchar uploaded_at "ISO 8601"
+        bytea clip "512 float32 CLIP numbers"
+        varchar ai_status "NULL | processing | done | failed"
     }
     matches {
         varchar photo_a PK, FK
         varchar photo_b PK, FK
-        varchar kind "exact | similar"
+        varchar kind "exact | similar | subject"
         float similarity "0..1"
+    }
+    faces {
+        varchar id PK
+        varchar photo_id FK
+        varchar person_id FK
+        float x "box, as fractions of the photo"
+        float y
+        float w
+        float h
+        bytea embedding "128 float32 SFace numbers"
+    }
+    people {
+        varchar id PK
+        varchar name "set by the user"
+        varchar created_at
     }
 ```
 
-**Blob layout:** `originals/<sha256>` and `thumbnails/<sha256>.jpg` (content-addressed).
+**Blob layout:** `originals/<sha256>`, `thumbnails/<sha256>.jpg` (content-addressed) and `faces/<face-id>.jpg` (face crops).
 
 ## 5. Technical Designs
 
@@ -236,7 +266,7 @@ The deploy job writes `app/build.json` (commit, time, run link), which the Cloud
 ### 5.6 Monitoring and operations
 
 - The **Azure Monitor OpenTelemetry distro** is enabled when `APPLICATIONINSIGHTS_CONNECTION_STRING` is set. It automatically records every HTTP request (duration, status), dependency calls and exceptions.
-- Custom log events: `Photo uploaded` (size, match type, processing time), `Photo deleted`, `Exact copies removed`, failed logins and storage errors.
+- Custom log events: `Photo uploaded` (size, match type, processing time), `Photo analysed` (faces found), `Photo deleted`, `Exact copies removed`, AI model downloads and failures, failed logins and storage errors.
 - The **Cloud** page runs live checks: a `SELECT 1` against PostgreSQL and a container existence check against Blob Storage, each with its response time.
 - The **budget alerts** email the team at 50%, at 80%, and when spending is forecast to reach 100%.
 
@@ -246,10 +276,45 @@ The app is stateless: all data lives in PostgreSQL and Blob Storage. So moving f
 
 ### 5.8 Testing
 
-- **11 automated backend tests** (`tests/test_app.py`): upload/download, exact copies and storage deduplication including file deletion, resized/compressed/brightened copies, non-matches, grouping and best copy, bulk removal, invalid files, search/filter, health/cloud status, and password protection.
-- The same tests run in two modes in CI: SQLite + local folder, and PostgreSQL 16 + Azurite, so the cloud code paths are exercised on every push.
+- **14 automated backend tests:**
+  - `tests/test_app.py` (11 tests): upload/download, exact copies and storage deduplication including file deletion, resized/compressed/brightened copies, non-matches, grouping and best copy, bulk removal, invalid files, search/filter, health/cloud status, and password protection.
+  - `tests/test_ai.py` (3 tests, real public-domain photos): the same person recognised across photos but not confused with another person; a mirrored, cropped, recoloured shot grouped as "same subject" rather than as a copy; smart search finding the right photos, and nothing for an absent subject.
+- The same tests run in two modes in CI: SQLite + local folder, and PostgreSQL 16 + Azurite, so the cloud code paths are exercised on every push. The AI models are cached between runs.
 - Website: TypeScript type-checking, ESLint, production build.
-- Manual end-to-end check with the 17 demo photos (Section 5.1).
+- Manual end-to-end check with the 32 demo photos (Sections 5.1 and 5.9).
+
+### 5.9 Free AI recognition
+
+**Requirement:** recognise people and photo content at no cost, on a student subscription, without sending photos to third parties.
+
+**Options considered:**
+
+| Option | Result |
+|---|---|
+| Azure AI Face (verify/identify same person) | ❌ Limited Access: only for customers managed by Microsoft; not available to students |
+| Azure AI Vision multimodal embeddings | ⚠️ Free tier exists but is region-limited and capped per month; adds an external dependency |
+| PyTorch CLIP + face libraries (as in v1) | ❌ About 2 GB of libraries; too heavy for the free App Service plan |
+| **Quantised ONNX models in the app** (chosen) | ✅ 190 MB of models, about 320 MB of memory, CPU only, free, works offline and locally |
+
+**Design** (`app/ai.py`, `app/intelligence.py`):
+
+- **Models:** CLIP ViT-B/32 (8-bit quantised, via ONNX Runtime) for images and text; YuNet (face detection) and SFace (face embeddings) via OpenCV. They're downloaded once from pinned versions, verified by SHA-256 and stored in `/home/models` on App Service.
+- **Asynchronous processing:** uploads mark photos as waiting, and a background worker claims them one at a time with an atomic `UPDATE … WHERE ai_status IS NULL`. Photos interrupted by a restart are retried. Uploads therefore stay fast, and the Home page shows progress.
+- **People:** a face joins a person when its SFace cosine similarity with any known face is ≥ 0.363 (OpenCV's recommended threshold); faces that connect two people merge them. Faces under 32 px are ignored.
+- **Same subject:** CLIP image cosine ≥ 0.82, excluding pairs that are already copies and pairs where both photos contain faces.
+- **Smart search:** the score is the CLIP text-to-image similarity of "a photo of {query}" *minus* the best similarity of generic captions ("a photo.", "a picture."). Results need a margin ≥ 0.015 and must be within 0.045 of the best result.
+
+**Evaluation:**
+
+| Test | Result |
+|---|---|
+| Face matching, 22 public-domain portraits | Same person 0.60–0.83, different people ≤ 0.28: **100% correctly grouped** at 0.363 |
+| Group photo (23 people, 1800 px) | **23/23 faces** detected; Obama (0.81) and Biden recognised; best wrong match 0.29 |
+| Same subject (4 Taj Mahal photos, different angles/light) | **All 4 grouped**; portraits of different people correctly *not* grouped |
+| Smart search, 15 queries on 32 photos | Correct results for objects, scenes and people; **no results** for absent subjects ("a car", "a bridge") |
+| Speed (laptop CPU) | about 25 ms per photo (CLIP) + 50 ms (faces); 32 photos analysed in about 3 s |
+
+**Limitation found:** CLIP judges "the same *kind* of thing", for example two different cats. A geometric check (SIFT keypoints + RANSAC) intended to confirm the *exact same object* was tested and rejected, because it was unreliable on real photos.
 
 ## 6. Lessons Learned
 
@@ -260,6 +325,8 @@ The app is stateless: all data lives in PostgreSQL and Blob Storage. So moving f
 5. **Infrastructure as Code makes the environment reproducible.** One `terraform apply` rebuilds everything, and `terraform destroy` stops all costs. The student subscription's region and quota limits are easier to work around by changing one variable than by clicking through the portal again.
 6. **Measure accuracy with realistic data.** Real photos, including look-alike "traps", showed that requiring two perceptual hashes to agree avoids false matches. They also exposed a UX issue in choosing the "best copy", which we fixed.
 7. **Cost awareness is part of design.** Choosing F1/B1ms tiers, LRS storage, thumbnails and a budget alert from day one kept the project inside the free allowances.
+8. **"Managed" isn't always available, so check access early.** Azure's face identification is restricted (Limited Access). Small open-source models, quantised to 8-bit and run with ONNX Runtime, gave the same capability at no cost and within the free plan's memory.
+9. **Measure AI before trusting it, and keep what fails out.** Testing on real photos showed CLIP's raw scores can't tell "same object" from "same kind of object". Two things came from that: a face rule for portraits, and comparing searches against generic captions so absent subjects return nothing. A plausible-sounding technique (SIFT + RANSAC verification) was dropped because the measurements showed it was unreliable.
 
 ## 7. Individual Contributions
 

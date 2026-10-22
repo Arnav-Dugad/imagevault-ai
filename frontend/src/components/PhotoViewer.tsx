@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { Cloud, Download, HardDrive, LoaderCircle, Trash2, X } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Cloud, Download, HardDrive, LoaderCircle, Sparkles, Trash2, X } from "lucide-react";
+import { FaceAvatar, personName } from "../pages/PeoplePage";
 import { api } from "../lib/api";
 import { useSystem } from "../lib/system";
 import { formatBytes, formatDate } from "../lib/utils";
@@ -36,6 +38,10 @@ export function PhotoViewer({ id, onClose, onDeleted }: { id: string; onClose: (
     }
   }
 
+  // Neighbouring name labels alternate above and below the face so they don't overlap.
+  const named = photo?.people.filter((face) => face.name).map((face) => face.id) ?? [];
+  const namedIndex = (faceId: string) => named.indexOf(faceId);
+
   const rows = photo ? [
     ["Size", `${photo.width} × ${photo.height} px · ${formatBytes(photo.size)}`],
     ["Type", photo.content_type.replace("image/", "").toUpperCase()],
@@ -45,13 +51,22 @@ export function PhotoViewer({ id, onClose, onDeleted }: { id: string; onClose: (
 
   return (
     <Modal onClose={onClose} className="max-w-6xl">
-      <div className="grid lg:grid-cols-[1fr_340px]">
-        <div className="relative grid min-h-[40vh] place-items-center bg-black/40 p-3 lg:min-h-[75vh]">
-          {photo && <img src={photo.file_url} alt={photo.filename} onLoad={() => setImageLoaded(true)} className="max-h-[75vh] w-auto rounded-lg object-contain"
-            onError={() => setError("Couldn't load this photo from storage. The Cloud page shows whether storage is reachable.")} />}
+      <div className="grid lg:h-[86vh] lg:grid-cols-[1fr_340px]">
+        <div className="relative grid min-h-[40vh] place-items-center bg-black/40 p-3 lg:min-h-0">
+          {photo && <div className="relative">
+            <img src={photo.file_url} alt={photo.filename} onLoad={() => setImageLoaded(true)} className="block max-h-[80vh] w-auto rounded-lg object-contain"
+              onError={() => setError("Couldn't load this photo from storage. The Cloud page shows whether storage is reachable.")} />
+            {imageLoaded && photo.people.map((face, i) => (
+              <span key={face.id} title={face.name ?? "Recognised face"}
+                className="face-box pointer-events-none absolute rounded-lg border-2 border-sky-300/80 shadow-[0_0_0_1px_rgba(0,0,0,.4)]"
+                style={{ left: `${face.x * 100}%`, top: `${face.y * 100}%`, width: `${face.w * 100}%`, height: `${face.h * 100}%`, animationDelay: `${300 + i * 80}ms` }}>
+                {face.name && <span className={`absolute left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-canvas/90 px-1.5 py-0.5 text-[11px] font-medium text-sky-200 ${namedIndex(face.id) % 2 ? "-top-6" : "-bottom-6"}`}>{face.name}</span>}
+              </span>
+            ))}
+          </div>}
           {(!photo || !imageLoaded) && !error && <LoaderCircle className="absolute h-6 w-6 animate-spin text-acid" />}
         </div>
-        <aside className="flex flex-col border-t border-line p-5 lg:border-l lg:border-t-0">
+        <aside className="flex flex-col border-t border-line p-5 lg:min-h-0 lg:overflow-y-auto lg:border-l lg:border-t-0">
           <div className="flex items-start justify-between gap-3">
             <h2 className="break-all text-lg font-semibold leading-snug">{photo?.filename ?? "Loading…"}</h2>
             <button onClick={onClose} aria-label="Close" className="focus-ring -mr-1 -mt-1 rounded-lg p-1.5 text-muted hover:bg-white/5 hover:text-ink"><X className="h-5 w-5" /></button>
@@ -65,6 +80,26 @@ export function PhotoViewer({ id, onClose, onDeleted }: { id: string; onClose: (
             <dl className="mt-5 space-y-3 text-sm">
               {rows.map(([label, value]) => <div key={label} className="flex justify-between gap-4"><dt className="text-muted">{label}</dt><dd className="text-right">{value}</dd></div>)}
             </dl>
+            {(photo.ai_status === null || photo.ai_status === "processing") && (
+              <p className="mt-4 flex items-center gap-2 rounded-xl border border-sky-300/20 bg-sky-300/[.06] px-3 py-2 text-xs text-sky-200">
+                <Sparkles className="h-3.5 w-3.5 animate-pulse" />The free AI is still looking at this photo…
+              </p>
+            )}
+            {photo.people.length > 0 && (() => {
+              const known = photo.people.filter((face) => face.person_id && face.photos > 1);
+              const others = photo.people.length - known.length;
+              return <div className="mt-6">
+                <h3 className="text-sm font-semibold">{photo.people.length} {photo.people.length === 1 ? "face" : "faces"} found</h3>
+                {known.length > 0 && <ul className="mt-3 flex flex-wrap gap-2">
+                  {known.map((face) => <li key={face.id}>
+                    <Link to={`/people/${face.person_id}`} className="focus-ring flex items-center gap-2 rounded-full border border-sky-300/30 py-1 pl-1 pr-3 text-xs hover:border-sky-300/60 hover:bg-white/5">
+                      <FaceAvatar src={face.image_url} className="h-7 w-7" />{personName(face)}<span className="text-muted">· {face.photos} photos</span>
+                    </Link>
+                  </li>)}
+                </ul>}
+                {others > 0 && <p className="mt-2 text-xs text-muted">{known.length ? `+ ${others} other` : `${others}`} {others === 1 ? "face" : "faces"} not seen in any other photo yet</p>}
+              </div>;
+            })()}
             {photo.matches.length > 0 && <div className="mt-6">
               <h3 className="text-sm font-semibold">Matches ({photo.matches.length})</h3>
               <ul className="mt-3 space-y-2">

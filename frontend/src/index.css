@@ -45,6 +45,9 @@ body {
 @keyframes shine { to { background-position-x: -200%; } }
 @keyframes pop-in { from { opacity: 0; transform: translateY(6px) scale(.98); } }
 .pop-in { animation: pop-in .18s ease-out; }
+/* Face outlines "lock on" after the photo appears */
+@keyframes face-lock { from { opacity: 0; transform: scale(1.35); } }
+.face-box { animation: face-lock .45s cubic-bezier(.22, 1, .36, 1) backwards; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }

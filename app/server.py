@@ -7,6 +7,7 @@ import logging
 import re
 import time
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -22,9 +23,9 @@ from fastapi import FastAPI, File, HTTPException, Request, UploadFile  # noqa: E
 from fastapi.responses import FileResponse, JSONResponse, Response  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
-from sqlalchemy import make_url, text  # noqa: E402
+from sqlalchemy import bindparam, make_url, text  # noqa: E402
 
-from app import __version__  # noqa: E402
+from app import __version__, intelligence  # noqa: E402
 from app.database import connect, init_db  # noqa: E402
 from app.photos import NotAPhoto, analyze, compare  # noqa: E402
 from app.storage import get_storage, original_key, thumbnail_key  # noqa: E402
@@ -36,7 +37,14 @@ SESSION_COOKIE = "imagevault_session"
 log = logging.getLogger("imagevault")
 log.setLevel(logging.INFO)
 
-app = FastAPI(title="ImageVault", version=__version__)
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    intelligence.start_worker()  # analyses photos with AI in the background
+    yield
+
+
+app = FastAPI(title="ImageVault", version=__version__, lifespan=lifespan)
 init_db()
 
 
@@ -97,7 +105,7 @@ def logout():
 
 def _photo_json(row) -> dict:
     photo = dict(row)
-    for hidden in ("phash", "dhash"):
+    for hidden in ("phash", "dhash", "clip"):
         photo.pop(hidden, None)
     photo["thumb_url"] = f"/api/photos/{photo['id']}/thumb"
     photo["file_url"] = f"/api/photos/{photo['id']}/file"
@@ -111,13 +119,15 @@ def _get_photo(conn, photo_id: str):
     return row
 
 
+COPIES = "kind IN ('exact', 'similar')"  # matches that are copies (not just the same subject)
+
 # Adds a "match" column ('exact', 'similar' or NULL) so the gallery can show a badge.
-PHOTO_COLUMNS = """
+PHOTO_COLUMNS = f"""
     photos.*,
     (SELECT CASE WHEN COUNT(*) = 0 THEN NULL
                  WHEN SUM(CASE WHEN kind = 'exact' THEN 1 ELSE 0 END) > 0 THEN 'exact'
                  ELSE 'similar' END
-       FROM matches WHERE photo_a = photos.id OR photo_b = photos.id) AS match_kind
+       FROM matches WHERE (photo_a = photos.id OR photo_b = photos.id) AND {COPIES}) AS match_kind
 """
 
 
@@ -127,12 +137,34 @@ def _with_match(row) -> dict:
     return photo
 
 
+def _photos_by_id(conn, ids: list[str]) -> list[dict]:
+    """Photos with the given IDs, in the same order."""
+    if not ids:
+        return []
+    rows = conn.execute(
+        text(f"SELECT {PHOTO_COLUMNS} FROM photos WHERE id IN :ids").bindparams(bindparam("ids", expanding=True)),
+        {"ids": ids},
+    ).mappings().all()
+    by_id = {row["id"]: _with_match(row) for row in rows}
+    return [by_id[i] for i in ids if i in by_id]
+
+
 @app.get("/api/photos")
-def list_photos(search: str = "", duplicates_only: bool = False, offset: int = 0, limit: int = 60):
+def list_photos(search: str = "", smart: bool = False, duplicates_only: bool = False,
+                offset: int = 0, limit: int = 60):
+    limit, offset = max(1, min(limit, 200)), max(0, offset)
+    if smart and search.strip():  # AI search: "dog on a beach"
+        if not intelligence.status()["ready"]:
+            raise HTTPException(503, "Smart search is still getting ready. Try again in a minute.")
+        ranked = intelligence.search(search.strip())
+        with connect() as conn:
+            return {"total": len(ranked), "items": _photos_by_id(conn, ranked[offset:offset + limit])}
+
     where = "WHERE LOWER(filename) LIKE :search"
     if duplicates_only:
-        where += " AND id IN (SELECT photo_a FROM matches UNION SELECT photo_b FROM matches)"
-    params = {"search": f"%{search.lower()}%", "limit": max(1, min(limit, 200)), "offset": max(0, offset)}
+        where += (f" AND id IN (SELECT photo_a FROM matches WHERE {COPIES}"
+                  f" UNION SELECT photo_b FROM matches WHERE {COPIES})")
+    params = {"search": f"%{search.lower()}%", "limit": limit, "offset": offset}
     with connect() as conn:
         total = conn.execute(text(f"SELECT COUNT(*) FROM photos {where}"), params).scalar_one()
         rows = conn.execute(
@@ -202,6 +234,7 @@ def upload_photo(file: UploadFile = File(...)):
 
     log.info("Photo uploaded", extra={"size": len(data), "match": best["kind"] if best else "none",
                                       "seconds": round(time.perf_counter() - started, 3)})
+    intelligence.wake()  # start AI analysis in the background
     return {"photo": _photo_json(photo), "match": best}
 
 
@@ -217,8 +250,17 @@ def photo_details(photo_id: str):
                     ORDER BY matches.similarity DESC"""),
             {"id": photo_id},
         ).mappings().all()
+        in_photo = conn.execute(
+            text("""SELECT faces.id, faces.person_id, people.name, faces.x, faces.y, faces.w, faces.h,
+                           (SELECT COUNT(DISTINCT f.photo_id) FROM faces f
+                             WHERE f.person_id = faces.person_id) AS photos
+                    FROM faces LEFT JOIN people ON people.id = faces.person_id
+                    WHERE faces.photo_id = :id ORDER BY faces.x"""),
+            {"id": photo_id},
+        ).mappings().all()
     result = _photo_json(photo)
     result["matches"] = [{"kind": m["kind"], "similarity": m["similarity"], "photo": _photo_json(m)} for m in found]
+    result["people"] = [{**dict(face), "image_url": f"/api/faces/{face['id']}/image"} for face in in_photo]
     return result
 
 
@@ -251,12 +293,17 @@ def photo_file(photo_id: str, download: bool = False):
 
 
 def _delete(conn, photo) -> None:
+    storage = get_storage()
+    face_ids = conn.execute(text("SELECT id FROM faces WHERE photo_id = :id"), {"id": photo["id"]}).scalars().all()
+    for face_id in face_ids:
+        storage.delete(intelligence.face_key(face_id))
+    conn.execute(text("DELETE FROM faces WHERE photo_id = :id"), {"id": photo["id"]})
+    conn.execute(text("DELETE FROM people WHERE id NOT IN (SELECT person_id FROM faces WHERE person_id IS NOT NULL)"))
     conn.execute(text("DELETE FROM matches WHERE photo_a = :id OR photo_b = :id"), {"id": photo["id"]})
     conn.execute(text("DELETE FROM photos WHERE id = :id"), {"id": photo["id"]})
     sha = {"sha": photo["sha256"]}
     still_used = conn.execute(text("SELECT 1 FROM photos WHERE sha256 = :sha LIMIT 1"), sha).first()
     if not still_used:  # the last copy is gone, so remove the stored files too
-        storage = get_storage()
         storage.delete(original_key(photo["sha256"]))
         storage.delete(thumbnail_key(photo["sha256"]))
 
@@ -280,6 +327,7 @@ def stats():
         )).scalar_one()
         unique = conn.execute(text("SELECT COUNT(DISTINCT sha256) FROM photos")).scalar_one()
         similar = conn.execute(text("SELECT COUNT(*) FROM matches WHERE kind = 'similar'")).scalar_one()
+        people_count = conn.execute(text(f"SELECT COUNT(*) FROM ({PEOPLE_QUERY}) AS p")).scalar_one()
         recent = conn.execute(
             text(f"SELECT {PHOTO_COLUMNS} FROM photos ORDER BY uploaded_at DESC LIMIT 8")
         ).mappings().all()
@@ -290,22 +338,22 @@ def stats():
         "saved_bytes": int(total_bytes - stored_bytes),
         "exact_copies": total - unique,
         "similar_pairs": similar,
+        "people": people_count,
         "storage": get_storage().kind,
+        "ai": intelligence.status(),
         "recent": [_with_match(row) for row in recent],
     }
 
 
-@app.get("/api/duplicates")
-def duplicate_groups():
-    """Group photos that are linked by matches. The best copy of each group is listed first."""
+def _matched_groups(kinds: str) -> tuple[list, list[list]]:
+    """Photos linked by matches of the given kinds, joined into groups (union-find)."""
     with connect() as conn:
-        found = conn.execute(text("SELECT * FROM matches")).mappings().all()
-        rows = conn.execute(
-            text("SELECT * FROM photos WHERE id IN (SELECT photo_a FROM matches UNION SELECT photo_b FROM matches)")
-        ).mappings().all()
+        found = conn.execute(text(f"SELECT * FROM matches WHERE {kinds}")).mappings().all()
+        rows = conn.execute(text(
+            f"SELECT * FROM photos WHERE id IN (SELECT photo_a FROM matches WHERE {kinds} "
+            f"UNION SELECT photo_b FROM matches WHERE {kinds})"
+        )).mappings().all()
     photos = {row["id"]: row for row in rows}
-
-    # Union-find: put photos that match each other into the same group.
     parent = {photo_id: photo_id for photo_id in photos}
 
     def root(x):
@@ -319,7 +367,13 @@ def duplicate_groups():
     groups: dict[str, list] = {}
     for photo_id, photo in photos.items():
         groups.setdefault(root(photo_id), []).append(photo)
+    return found, list(groups.values())
 
+
+@app.get("/api/duplicates")
+def duplicate_groups():
+    """Group photos that are copies of each other. The best copy of each group is listed first."""
+    found, groups = _matched_groups(COPIES)
     pair = {frozenset((m["photo_a"], m["photo_b"])): m for m in found}
     best_similarity = {}
     for m in found:
@@ -327,7 +381,7 @@ def duplicate_groups():
             best_similarity[photo_id] = max(best_similarity.get(photo_id, 0), m["similarity"])
 
     result = []
-    for members in groups.values():
+    for members in groups:
         # Keep the photo with the most pixels, then the largest file (least compressed), then the oldest.
         members.sort(key=lambda p: (-(p["width"] * p["height"]), -p["size"], p["uploaded_at"]))
         keeper = members[0]
@@ -365,6 +419,94 @@ def remove_exact_copies():
             seen.add(photo["sha256"])
     log.info("Exact copies removed", extra={"removed": removed})
     return {"removed": removed}
+
+
+@app.get("/api/related")
+def related_groups():
+    """Different photos of the same subject or scene, found by AI. These are never deleted automatically."""
+    found, groups = _matched_groups("kind = 'subject'")
+    best = {}
+    for m in found:
+        for photo_id in (m["photo_a"], m["photo_b"]):
+            best[photo_id] = max(best.get(photo_id, 0), m["similarity"])
+    result = []
+    for members in groups:
+        members.sort(key=lambda p: p["uploaded_at"])
+        items = [{"kind": "subject", "similarity": best[p["id"]], "photo": _photo_json(p)} for p in members]
+        result.append({"id": members[0]["id"], "items": items, "extra_bytes": 0})
+    result.sort(key=lambda g: len(g["items"]), reverse=True)
+    return result
+
+
+# --- People (face recognition) -------------------------------------------------------
+
+# People who appear in at least two different photos; one-off faces are not worth showing.
+PEOPLE_QUERY = """
+    SELECT people.id, people.name, COUNT(DISTINCT faces.photo_id) AS photos
+    FROM people JOIN faces ON faces.person_id = people.id
+    GROUP BY people.id, people.name
+    HAVING COUNT(DISTINCT faces.photo_id) >= 2
+"""
+
+
+def _cover_faces(conn) -> dict:
+    """The largest face of each person, used as their picture."""
+    rows = conn.execute(text("SELECT id, person_id, w * h AS area FROM faces WHERE person_id IS NOT NULL")).all()
+    cover = {}
+    for row in rows:
+        if row.person_id not in cover or row.area > cover[row.person_id][1]:
+            cover[row.person_id] = (row.id, row.area)
+    return {person: f"/api/faces/{face_id}/image" for person, (face_id, _) in cover.items()}
+
+
+@app.get("/api/people")
+def list_people():
+    with connect() as conn:
+        rows = conn.execute(text(f"{PEOPLE_QUERY} ORDER BY photos DESC, people.name")).mappings().all()
+        covers = _cover_faces(conn)
+    return [{**dict(row), "image_url": covers.get(row["id"])} for row in rows]
+
+
+@app.get("/api/people/{person_id}")
+def person_details(person_id: str):
+    with connect() as conn:
+        person = conn.execute(text("SELECT id, name FROM people WHERE id = :id"), {"id": person_id}).mappings().first()
+        if person is None:
+            raise HTTPException(404, "Person not found.")
+        ids = conn.execute(text(
+            "SELECT photos.id FROM photos WHERE id IN (SELECT photo_id FROM faces WHERE person_id = :id) "
+            "ORDER BY uploaded_at DESC"), {"id": person_id}).scalars().all()
+        photos = _photos_by_id(conn, list(ids))
+        cover = _cover_faces(conn).get(person_id)
+    return {**dict(person), "image_url": cover, "photos": photos}
+
+
+class PersonName(BaseModel):
+    name: str
+
+
+@app.put("/api/people/{person_id}")
+def rename_person(person_id: str, body: PersonName):
+    name = body.name.strip()[:100] or None
+    with connect() as conn:
+        updated = conn.execute(text("UPDATE people SET name = :name WHERE id = :id"),
+                               {"name": name, "id": person_id}).rowcount
+    if not updated:
+        raise HTTPException(404, "Person not found.")
+    return {"id": person_id, "name": name}
+
+
+@app.get("/api/faces/{face_id}/image")
+def face_image(face_id: str):
+    with connect() as conn:
+        if conn.execute(text("SELECT 1 FROM faces WHERE id = :id"), {"id": face_id}).first() is None:
+            raise HTTPException(404, "Face not found.")
+    return _file_response(intelligence.face_key(face_id), "image/jpeg")
+
+
+@app.get("/api/ai")
+def ai_status():
+    return intelligence.status()
 
 
 # --- Health and cloud status -------------------------------------------------------
@@ -409,6 +551,9 @@ def system_status():
     storage = get_storage()
     st_ok, st_ms, st_error = _timed(storage.check)
     insights = bool(env("APPLICATIONINSIGHTS_CONNECTION_STRING"))
+    ai = intelligence.status()
+    ai_detail = (f"{ai['analysed']} photos analysed" + (f", {ai['waiting']} waiting" if ai["waiting"] else "")
+                 if ai["ready"] else ai["message"])
     return {
         "version": __version__,
         "environment": "Azure" if site else "Local",
@@ -426,6 +571,9 @@ def system_status():
             {"id": "monitoring", "name": "Application Insights", "role": "Tracks requests, errors and logs",
              "active": insights, "healthy": insights, "latency_ms": None,
              "detail": "Sending telemetry" if insights else "Not configured", "error": None},
+            {"id": "ai", "name": "Free AI recognition", "role": "CLIP + face recognition, running inside the app",
+             "active": ai["enabled"], "healthy": ai["ready"] and not ai["failed"], "latency_ms": None,
+             "detail": ai_detail, "error": f"{ai['failed']} photos could not be analysed" if ai["failed"] else None},
         ],
     }
 

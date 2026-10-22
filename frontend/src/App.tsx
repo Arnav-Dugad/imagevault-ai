@@ -8,6 +8,7 @@ import { CloudPage } from "./pages/CloudPage";
 import { DuplicatesPage } from "./pages/DuplicatesPage";
 import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
+import { PeoplePage, PersonPage } from "./pages/PeoplePage";
 import { PhotosPage } from "./pages/PhotosPage";
 import { UploadPage } from "./pages/UploadPage";
 
@@ -39,6 +40,8 @@ export default function App() {
           <Route path="photos" element={<PhotosPage />} />
           <Route path="upload" element={<UploadPage />} />
           <Route path="duplicates" element={<DuplicatesPage />} />
+          <Route path="people" element={<PeoplePage />} />
+          <Route path="people/:id" element={<PersonPage />} />
           <Route path="cloud" element={<CloudPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

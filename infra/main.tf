@@ -148,6 +148,7 @@ resource "azurerm_linux_web_app" "main" {
     AZURE_STORAGE_CONTAINER               = azurerm_storage_container.photos.name
     APPLICATIONINSIGHTS_CONNECTION_STRING = azurerm_application_insights.main.connection_string
     APP_PASSWORD                          = var.app_password
+    IMAGEVAULT_MODEL_DIR                  = "/home/models" # free AI models, downloaded once and kept across restarts
   }
 }
 
