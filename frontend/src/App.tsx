@@ -1,44 +1,48 @@
-import { LoaderCircle } from "lucide-react";
-import { lazy, Suspense } from "react";
-import { Navigate, Outlet, Route, Routes } from "react-router-dom";
-import { AppLayout } from "./components/AppLayout";
-import { useAuth } from "./providers/AuthProvider";
+import { useCallback, useEffect, useState } from "react";
+import { Navigate, Route, Routes } from "react-router-dom";
+import { Layout } from "./components/Layout";
+import { Spinner } from "./components/ui";
+import { api } from "./lib/api";
+import { SettingsProvider } from "./lib/settings";
+import { DuplicatesPage } from "./pages/DuplicatesPage";
+import { HomePage } from "./pages/HomePage";
+import { LoginPage } from "./pages/LoginPage";
+import { PhotosPage } from "./pages/PhotosPage";
+import { SettingsPage } from "./pages/SettingsPage";
+import { UploadPage } from "./pages/UploadPage";
 
-const AuthPage = lazy(() => import("./pages/AuthPage").then((module) => ({ default: module.AuthPage })));
-const DashboardPage = lazy(() => import("./pages/DashboardPage").then((module) => ({ default: module.DashboardPage })));
-const DuplicatesPage = lazy(() => import("./pages/DuplicatesPage").then((module) => ({ default: module.DuplicatesPage })));
-const GalleryPage = lazy(() => import("./pages/GalleryPage").then((module) => ({ default: module.GalleryPage })));
-const ImageDetailPage = lazy(() => import("./pages/ImageDetailPage").then((module) => ({ default: module.ImageDetailPage })));
-const AlbumsPage = lazy(() => import("./pages/AlbumsPage").then((module) => ({ default: module.AlbumsPage })));
-const SettingsPage = lazy(() => import("./pages/SettingsPage").then((module) => ({ default: module.SettingsPage })));
-const SystemPage = lazy(() => import("./pages/SystemPage").then((module) => ({ default: module.SystemPage })));
-const UploadPage = lazy(() => import("./pages/UploadPage").then((module) => ({ default: module.UploadPage })));
-
-function RouteLoading() {
-  return <div className="grid min-h-[50vh] place-items-center"><LoaderCircle className="h-6 w-6 animate-spin text-acid" /></div>;
-}
-
-function ProtectedLayout() {
-  const { user, loading } = useAuth();
-  if (loading) return <div className="grid min-h-screen place-items-center bg-canvas"><div className="text-center"><LoaderCircle className="mx-auto h-6 w-6 animate-spin text-acid" /><p className="mt-3 font-mono text-[10px] uppercase tracking-widest text-muted">Opening private vault</p></div></div>;
-  if (!user) return <Navigate to="/login" replace />;
-  return <AppLayout><Outlet /></AppLayout>;
-}
+interface Session { password_required: boolean; logged_in: boolean }
 
 export default function App() {
-  return <Suspense fallback={<RouteLoading />}><Routes>
-    <Route path="/login" element={<AuthPage />} />
-    <Route path="/register" element={<AuthPage />} />
-    <Route element={<ProtectedLayout />}>
-      <Route index element={<DashboardPage />} />
-      <Route path="gallery" element={<GalleryPage />} />
-      <Route path="albums" element={<AlbumsPage />} />
-      <Route path="upload" element={<UploadPage />} />
-      <Route path="duplicates" element={<DuplicatesPage />} />
-      <Route path="images/:id" element={<ImageDetailPage />} />
-      <Route path="system" element={<SystemPage />} />
-      <Route path="settings" element={<SettingsPage />} />
-    </Route>
-    <Route path="*" element={<Navigate to="/" replace />} />
-  </Routes></Suspense>;
+  const [session, setSession] = useState<Session | null>(null);
+  const [error, setError] = useState("");
+
+  const check = useCallback(() => {
+    api<Session>("/session").then(setSession).catch((e: Error) => setError(e.message));
+  }, []);
+
+  useEffect(() => {
+    check();
+    window.addEventListener("imagevault:logged-out", check);
+    return () => window.removeEventListener("imagevault:logged-out", check);
+  }, [check]);
+
+  if (error) return <div className="grid min-h-screen place-items-center p-6 text-center text-muted">{error}</div>;
+  if (!session) return <Spinner />;
+  if (!session.logged_in) return <LoginPage onLoggedIn={check} />;
+
+  return (
+    <SettingsProvider>
+      <Layout showLogout={session.password_required}>
+        <Routes>
+          <Route index element={<HomePage />} />
+          <Route path="photos" element={<PhotosPage />} />
+          <Route path="upload" element={<UploadPage />} />
+          <Route path="duplicates" element={<DuplicatesPage />} />
+          <Route path="settings" element={<SettingsPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Layout>
+    </SettingsProvider>
+  );
 }

@@ -1,82 +1,101 @@
-import { AnimatePresence, motion } from "framer-motion";
-import { AlertCircle, CheckCircle2, CloudUpload, FileImage, Film, ScanSearch, X } from "lucide-react";
-import { DragEvent, useEffect, useRef, useState } from "react";
+import { useRef, useState, type DragEvent } from "react";
 import { Link } from "react-router-dom";
+import { CheckCircle2, Cloud, Copy, HardDrive, ImagePlus, LoaderCircle, Sparkles, XCircle } from "lucide-react";
 import { Button, PageHeading } from "../components/ui";
-import { api, ApiError, uploadFiles } from "../lib/api";
-import { formatBytes } from "../lib/utils";
-import type { UploadResponse } from "../types";
+import { uploadPhoto } from "../lib/api";
+import { useSettings } from "../lib/settings";
+import { cn, formatBytes, percent } from "../lib/utils";
+import type { UploadResult } from "../types";
 
-interface UploadConfig {
-  max_batch_files: number;
-  max_upload_bytes: number;
-  max_video_upload_bytes: number;
-  allowed_extensions: string[];
+interface Item {
+  key: string;
+  file: File;
+  state: "waiting" | "uploading" | "done" | "failed";
+  progress: number;
+  result?: UploadResult;
+  error?: string;
+}
+
+function ItemStatus({ item }: { item: Item }) {
+  if (item.state === "waiting") return <span className="text-muted">Waiting…</span>;
+  if (item.state === "uploading") return <span className="flex items-center gap-1.5 text-muted"><LoaderCircle className="h-4 w-4 animate-spin text-acid" />{item.progress}%</span>;
+  if (item.state === "failed") return <span className="flex items-center gap-1.5 text-coral"><XCircle className="h-4 w-4 shrink-0" />{item.error}</span>;
+  const match = item.result?.match;
+  if (match?.kind === "exact") return <span className="flex items-center gap-1.5 text-coral"><Copy className="h-4 w-4 shrink-0" />Exact copy of “{match.filename}”</span>;
+  if (match) return <span className="flex items-center gap-1.5 text-lilac"><Sparkles className="h-4 w-4 shrink-0" />{percent(match.similarity)} similar to “{match.filename}”</span>;
+  return <span className="flex items-center gap-1.5 text-acid"><CheckCircle2 className="h-4 w-4 shrink-0" />Saved</span>;
 }
 
 export function UploadPage() {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [files, setFiles] = useState<File[]>([]);
+  const { settings } = useSettings();
+  const [items, setItems] = useState<Item[]>([]);
+  const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [uploading, setUploading] = useState(false);
-  const [result, setResult] = useState<UploadResponse | null>(null);
-  const [error, setError] = useState("");
-  const abortRef = useRef<AbortController | null>(null);
-  const [config, setConfig] = useState<UploadConfig | null>(null);
-  const [previews, setPreviews] = useState<{ file: File; url: string }[]>([]);
-  useEffect(() => {
-    const values = files.map((file) => ({ file, url: URL.createObjectURL(file) }));
-    setPreviews(values);
-    return () => values.forEach(({ url }) => URL.revokeObjectURL(url));
-  }, [files]);
-  useEffect(() => {
-    const controller = new AbortController();
-    api<UploadConfig>("/images/config", { signal: controller.signal })
-      .then((value) => { if (!controller.signal.aborted) setConfig(value); })
-      .catch(() => { if (!controller.signal.aborted) setError("Cannot load upload limits. Reload the page to try again."); });
-    return () => { controller.abort(); abortRef.current?.abort(); };
-  }, []);
+  const input = useRef<HTMLInputElement>(null);
 
-  function addFiles(incoming: FileList | File[]) {
-    if (uploading || !config) return;
-    setError(""); setResult(null);
-    const all = Array.from(incoming);
-    if (files.length + all.length > config.max_batch_files) {
-      setError(`Choose at most ${config.max_batch_files} files per batch. No files were added.`); return;
+  const update = (key: string, change: Partial<Item>) => setItems((all) => all.map((item) => item.key === key ? { ...item, ...change } : item));
+
+  async function start(files: File[]) {
+    if (!files.length || busy) return;
+    const added = files.map((file, i) => ({ key: `${Date.now()}-${i}-${file.name}`, file, state: "waiting" as const, progress: 0 }));
+    setItems((all) => [...added, ...all]);
+    setBusy(true);
+    for (const item of added) { // one at a time, so each photo is compared with the ones before it
+      update(item.key, { state: "uploading" });
+      try {
+        const result = await uploadPhoto(item.file, (progress) => update(item.key, { progress }));
+        update(item.key, { state: "done", result });
+      } catch (e) {
+        update(item.key, { state: "failed", error: (e as Error).message });
+      }
     }
-    const largeExtensions = new Set(["dng","cr2","nef","arw","raw","mp4","mov","webm","mkv","avi"]);
-    const valid = all.every((file) => {
-      const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
-      const limit = largeExtensions.has(extension) ? config.max_video_upload_bytes : config.max_upload_bytes;
-      return config.allowed_extensions.includes(`.${extension}`) && file.size > 0 && file.size <= limit;
-    });
-    if (!valid) {
-      setError(`Choose supported, non-empty files. Photos: ${formatBytes(config.max_upload_bytes)}; RAW/video: ${formatBytes(config.max_video_upload_bytes)}. No files were added.`); return;
-    }
-    setFiles((current) => [...current, ...all]);
+    setBusy(false);
   }
-  function drop(event: DragEvent) { event.preventDefault(); setDragging(false); addFiles(event.dataTransfer.files); }
-  async function upload() {
-    if (uploading || !config || !files.length) return;
-    setUploading(true); setError(""); setProgress(0); abortRef.current = new AbortController();
-    try { setResult(await uploadFiles(files, setProgress, abortRef.current.signal) as UploadResponse); setFiles([]); }
-    catch (reason) { setError(reason instanceof ApiError ? reason.message : "Upload failed"); }
-    finally { setUploading(false); abortRef.current = null; }
+
+  function onDrop(event: DragEvent) {
+    event.preventDefault();
+    setDragging(false);
+    start(Array.from(event.dataTransfer.files));
   }
+
+  const done = items.filter((i) => i.state === "done");
+  const duplicates = done.filter((i) => i.result?.match).length;
+  const azure = settings?.storage === "azure";
 
   return <>
-    <PageHeading eyebrow="Upload" title="Add photos and videos" />
-    <section className="panel mx-auto max-w-5xl rounded-[28px] p-4 sm:p-6">
-      <button type="button" disabled={uploading || !config} onClick={() => inputRef.current?.click()} onDragOver={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={drop} className={`focus-ring relative flex min-h-72 w-full flex-col items-center justify-center overflow-hidden rounded-[22px] border border-dashed px-6 text-center transition ${dragging ? "border-acid bg-acid/[.06]" : "border-[#3b424d] bg-white/[.015] hover:border-muted"}`}>
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(185,243,106,.06),transparent_52%)]" /><div className="relative grid h-16 w-16 place-items-center rounded-2xl border border-line bg-panel shadow-glow"><CloudUpload className="h-7 w-7 text-acid" /></div><h2 className="relative mt-6 text-xl font-semibold">Drop your media here</h2><p className="relative mt-2 text-sm text-muted">Photos, RAW, animations, and videos stay in your private vault</p><div className="relative mt-5 flex flex-wrap justify-center gap-2 font-mono text-[10px] uppercase tracking-wider text-muted"><span className="rounded-full border border-line px-2.5 py-1">JPG · PNG · GIF</span><span className="rounded-full border border-line px-2.5 py-1">HEIC · RAW</span><span className="rounded-full border border-line px-2.5 py-1">MP4 · MOV · WEBM</span><span className="rounded-full border border-line px-2.5 py-1">{config ? `${formatBytes(config.max_upload_bytes)} photos · ${formatBytes(config.max_video_upload_bytes)} RAW/video · ${config.max_batch_files} files/batch` : "Loading limits…"}</span></div>
-      </button>
-      <input ref={inputRef} className="hidden" type="file" accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.heif,.dng,.cr2,.nef,.arw,.raw,.mp4,.mov,.webm,.mkv,.avi,image/*,video/*" disabled={uploading || !config} multiple onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.target.value = ""; }} />
-      <AnimatePresence>{files.length > 0 && <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="mt-5"><div className="mb-3 flex items-center justify-between"><p className="text-sm font-semibold">{files.length} ready</p><button disabled={uploading} onClick={() => setFiles([])} className="focus-ring rounded-lg px-2 py-1 text-xs text-muted hover:text-ink">Clear all</button></div><div className="max-h-64 space-y-2 overflow-y-auto pr-1">{previews.map(({ file, url }, index) => { const extension = file.name.split(".").pop()?.toLowerCase(); const previewable = ["jpg","jpeg","png","webp","gif"].includes(extension ?? ""); const video = ["mp4","mov","webm","mkv","avi"].includes(extension ?? ""); return <div key={`${file.name}-${file.lastModified}-${index}`} className="flex items-center gap-3 rounded-xl border border-line bg-canvas/50 p-2">{previewable ? <img src={url} alt="" className="h-12 w-12 rounded-lg object-cover" /> : <div className="grid h-12 w-12 place-items-center rounded-lg bg-white/[.04]">{video ? <Film className="h-5 w-5 text-lilac" /> : <FileImage className="h-5 w-5 text-acid" />}</div>}<div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{file.name}</p><p className="mt-1 font-mono text-[10px] uppercase text-muted">{formatBytes(file.size)} · {video ? "video" : extension}</p></div><button disabled={uploading} onClick={() => setFiles((items) => items.filter((_, itemIndex) => itemIndex !== index))} className="focus-ring rounded-lg p-2 text-muted hover:bg-white/5 hover:text-ink" aria-label={`Remove ${file.name}`}><X className="h-4 w-4" /></button></div>; })}</div>
-        {uploading && <div className="mt-4"><div className="mb-2 flex justify-between font-mono text-[10px] uppercase tracking-wider text-muted"><span>Uploading</span><span>{progress}%</span></div><div className="h-2 overflow-hidden rounded-full bg-white/5"><motion.div className="h-full bg-acid" animate={{ width: `${progress}%` }} /></div></div>}
-        <div className="mt-4 flex flex-col gap-2 sm:flex-row"><Button onClick={upload} loading={uploading} className="flex-1"><CloudUpload className="h-4 w-4" />Upload {files.length}</Button>{uploading && <Button variant="secondary" onClick={() => abortRef.current?.abort()}>Cancel</Button>}</div></motion.div>}</AnimatePresence>
-      {error && <div role="alert" className="mt-4 flex items-start gap-3 rounded-xl border border-coral/20 bg-coral/10 p-4 text-sm text-orange-100"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-coral" />{error}</div>}
-      {result?.items && <div className="mt-5 rounded-2xl border border-acid/20 bg-acid/[.055] p-5"><div className="flex items-center gap-2"><CheckCircle2 className="h-5 w-5 text-acid" /><h3 className="font-semibold">Upload complete</h3></div><p className="mt-2 text-sm text-muted">{result.items.length} file{result.items.length === 1 ? "" : "s"} saved. {result.items.some((item) => item.image.status === "FAILED" || /queue unavailable/i.test(item.message)) ? "Some analyses could not be queued. Use Rebuild smart index in Review duplicates to retry." : "Private media analysis is queued."}</p><div className="mt-4 flex flex-wrap gap-2"><Link to={`/duplicates?batch=${result.batch_id}`}><Button><ScanSearch className="h-4 w-4" />View batch</Button></Link><Link to="/gallery"><Button variant="secondary">Open gallery</Button></Link></div></div>}
-    </section>
+    <PageHeading title="Upload photos" description="Add JPG, PNG, WEBP, GIF or BMP photos up to 25 MB each. Every photo is checked against your vault for duplicates." />
+
+    <button type="button" onClick={() => input.current?.click()} disabled={busy}
+      onDragOver={(e) => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={onDrop}
+      className={cn("focus-ring grid w-full place-items-center rounded-3xl border-2 border-dashed px-6 py-16 text-center transition",
+        dragging ? "border-acid bg-acid/[.07]" : "border-line bg-panel/60 hover:border-acid/40 hover:bg-panel", busy && "cursor-wait opacity-70")}>
+      <div className="grid h-16 w-16 place-items-center rounded-2xl border border-acid/20 bg-acid/10"><ImagePlus className="h-7 w-7 text-acid" /></div>
+      <p className="mt-5 text-lg font-semibold">{dragging ? "Drop to upload" : "Drag photos here, or click to choose"}</p>
+      {settings && <p className="mt-2 flex items-center gap-1.5 text-sm text-muted">
+        {azure ? <Cloud className="h-4 w-4 text-lilac" /> : <HardDrive className="h-4 w-4 text-acid" />}
+        Saving to {azure ? `Azure (${settings.azure_account})` : "this computer"}
+      </p>}
+    </button>
+    <input ref={input} type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif,image/bmp" className="hidden"
+      onChange={(e) => { start(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
+
+    {items.length > 0 && <div className="mt-8">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-lg font-semibold">{busy ? `Uploading ${done.length + 1} of ${items.length}…` : `${done.length} uploaded${duplicates ? `, ${duplicates} with duplicates` : ""}`}</h2>
+        {!busy && <div className="flex gap-2">
+          {duplicates > 0 && <Link to="/duplicates"><Button variant="secondary">Review duplicates</Button></Link>}
+          <Link to="/photos"><Button variant="secondary">View photos</Button></Link>
+        </div>}
+      </div>
+      <ul className="panel divide-y divide-line">
+        {items.map((item) => (
+          <li key={item.key} className="relative flex flex-col gap-1 overflow-hidden px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+            {item.state === "uploading" && <span className="absolute inset-y-0 left-0 bg-acid/[.06] transition-all" style={{ width: `${item.progress}%` }} />}
+            <span className="relative min-w-0 truncate"><span className="font-medium">{item.file.name}</span><span className="ml-2 text-muted">{formatBytes(item.file.size)}</span></span>
+            <span className="relative shrink-0 text-right"><ItemStatus item={item} /></span>
+          </li>
+        ))}
+      </ul>
+    </div>}
   </>;
 }

@@ -12,7 +12,8 @@ export function formatBytes(bytes: number): string {
 }
 
 export function formatDate(value: string): string {
-  return new Intl.DateTimeFormat("en", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(value));
+  return new Intl.DateTimeFormat("en", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value));
 }
 
-export function percent(value: number): string { return `${(value * 100).toFixed(1)}%`; }
+// Round down, so a near-identical photo shows 99% rather than a misleading 100%.
+export function percent(value: number): string { return `${Math.floor(value * 100)}%`; }

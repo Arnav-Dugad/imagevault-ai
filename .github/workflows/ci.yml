@@ -1,195 +1,34 @@
-name: ImageVault CI
+name: CI
 
 on:
   push:
-    branches: [main, codex/azure-student-website, codex/classroom-reliable]
+    branches: [main]
   pull_request:
-  workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  backend:
-    name: Backend lint and tests
+  test:
+    name: Tests and lint
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: imagevault
-          POSTGRES_PASSWORD: ci-disposable-password
-          POSTGRES_DB: imagevault_test
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U imagevault -d imagevault_test"
-          --health-interval 5s --health-timeout 5s --health-retries 20
-    env:
-      TEST_POSTGRES_URL: postgresql+asyncpg://imagevault:ci-disposable-password@localhost:5432/imagevault_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.13"
           cache: pip
-          cache-dependency-path: backend/pyproject.toml
-      - name: Install backend
-        working-directory: backend
-        run: pip install -e '.[dev]'
-      - name: Ruff
-        working-directory: backend
-        run: ruff check app tests
-      - name: Tests
-        working-directory: backend
-        run: pytest -q
-
-  frontend:
-    name: Frontend lint, tests, build, and audit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: Install exact dependencies
+      - run: pip install -r requirements.txt pytest httpx ruff
+      - run: ruff check app tests
+      - run: pytest -q
+      - name: Website lint and build
         working-directory: frontend
-        run: npm ci
-      - name: Security audit
-        working-directory: frontend
-        run: npm audit --audit-level=high
-      - name: Lint
-        working-directory: frontend
-        run: npm run lint
-      - name: Unit tests
-        working-directory: frontend
-        run: npm test
-      - name: Production build
-        working-directory: frontend
-        run: npm run build
-
-  browser:
-    name: Desktop and mobile browser flows
-    needs: [backend, frontend]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - name: Install browser-test API dependencies
-        run: pip install -e 'backend[dev]'
-      - name: Install frontend and browser
-        working-directory: frontend
-        run: npm ci && npx playwright install --with-deps chromium
-      - name: Build and test website against disposable API
-        working-directory: frontend
-        env:
-          IMAGEVAULT_TEST_PYTHON: python
-        run: npm run build && npm run test:e2e
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: browser-failure-evidence
-          path: frontend/test-results/
-          retention-days: 7
-
-  infrastructure:
-    name: Infrastructure validation
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Prepare non-production validation environment
-        run: cp .env.example .env
-      - name: Validate Docker Compose
         run: |
-          docker compose config --quiet
-          APP_DOMAIN=imagevault.example.com AZURE_STORAGE_ACCOUNT_URL=https://example.blob.core.windows.net REGISTRATION_CODE=ci-validation docker compose -f docker-compose.azure.yml config --quiet
-      - name: Validate Azure template and deployment script
-        run: |
-          az bicep install
-          az bicep build --file infra/azure/main.bicep --outfile /tmp/imagevault-azure.json
-          shellcheck scripts/deploy_azure.sh
-      - name: Validate Dockerfiles
-        run: |
-          docker build --check -f backend/Dockerfile backend
-          docker build --check -f backend/Dockerfile.worker backend
-          docker build --check -f frontend/Dockerfile frontend
-          docker build --check -f frontend/Dockerfile.azure frontend
-          docker build --check -f frontend/Dockerfile.azure-download frontend
-      - name: Validate Caddy website routes
-        run: |
-          APP_DOMAIN=website.example.com docker run --rm -e APP_DOMAIN=website.example.com -v "$PWD/infra/azure/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2.10-alpine caddy validate --config /etc/caddy/Caddyfile
-      - name: Validate Kubernetes render
-        run: kubectl kustomize infra/kubernetes > /tmp/imagevault-kubernetes.yaml
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: "1.10.5"
-      - name: Terraform formatting
-        working-directory: infra/terraform
-        run: terraform fmt -check -recursive
-      - name: Terraform initialize
-        working-directory: infra/terraform
-        run: terraform init -backend=false
-      - name: Terraform validate
-        working-directory: infra/terraform
-        run: terraform validate
-
-  release:
-    name: Publish website/server downloads
-    needs: [backend, frontend, browser, infrastructure]
-    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/azure-student-website')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Build downloadable web app
-        working-directory: frontend
-        run: npm ci && npm run build
-      - name: Package complete application and classroom samples
-        run: |
-          pip install Pillow==11.2.1
-          python scripts/generate_demo.py
-          python scripts/package_release.py
-      - name: Publish immutable release and downloads
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          version=$(node -p "JSON.parse(require('fs').readFileSync('frontend/package.json')).version")
-          tag="v${version}-build.${GITHUB_RUN_NUMBER}"
-          release_flags=(--latest)
-          if [ "$GITHUB_REF" != refs/heads/main ]; then
-            release_flags=(--prerelease --latest=false)
-          fi
-          cat > /tmp/release-notes.md <<'NOTES'
-          Download **imagevault-ai.zip** or **imagevault-ai.tar.gz** to deploy your own ImageVault website.
-          These are complete website/server bundles with compiled frontend, server source, Docker configuration, and Azure for Students deployment files. Visitors use the deployed HTTPS website in a browser; no desktop app is required.
-
-          Read **INSTALL.md** inside the download. For Azure hosting, follow **docs/azure-students.md**. Keep your Azure spending limit enabled: the AI-capable VM uses student credit and is not an unlimited free service.
-
-          Verify archives using **SHA256SUMS**. **release.json** records the application version and source commit. No credentials, uploaded photos, or runtime data are included.
-          NOTES
-          if gh release view "$tag" > /dev/null 2>&1; then
-            gh release upload "$tag" release-dist/* --clobber
-          else
-            gh release create "$tag" release-dist/* --target "$GITHUB_SHA" --title "ImageVault AI ${version} · build ${GITHUB_RUN_NUMBER}" --notes-file /tmp/release-notes.md "${release_flags[@]}"
-          fi
+          npm ci
+          npm run lint
+          npm run build
