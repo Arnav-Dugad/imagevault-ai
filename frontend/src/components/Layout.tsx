@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { NavLink } from "react-router-dom";
-import { Cloud, Copy, House, Images, LogOut, Menu, Upload, X } from "lucide-react";
+import { Cloud, Copy, House, Images, LogOut, Menu, Upload, Users, X } from "lucide-react";
 import { api } from "../lib/api";
 import { useSystem } from "../lib/system";
 import { cn } from "../lib/utils";
@@ -10,6 +10,7 @@ const nav = [
   { to: "/photos", label: "Photos", icon: Images },
   { to: "/upload", label: "Upload", icon: Upload },
   { to: "/duplicates", label: "Duplicates", icon: Copy },
+  { to: "/people", label: "People", icon: Users },
   { to: "/cloud", label: "Cloud", icon: Cloud },
 ];
 

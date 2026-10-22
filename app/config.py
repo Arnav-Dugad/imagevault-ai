@@ -10,6 +10,8 @@ local folder inside ./data, so you can run it without any cloud account.
   AZURE_STORAGE_CONTAINER                Blob container name (default: photos)
   APPLICATIONINSIGHTS_CONNECTION_STRING  Sends logs, requests and errors to Application Insights
   APP_PASSWORD                           Password that visitors must enter (leave empty to disable)
+  IMAGEVAULT_AI                          Set to "off" to turn off the free AI (people, smart search, same subject)
+  IMAGEVAULT_MODEL_DIR                   Where the AI models are kept (default: ./data/models)
   IMAGEVAULT_DATA_DIR                    Folder for local data (default: ./data)
 """
 

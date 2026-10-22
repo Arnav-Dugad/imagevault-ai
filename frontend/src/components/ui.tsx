@@ -62,8 +62,12 @@ export function MatchBadge({ kind, similarity }: { kind: MatchKind | "keep"; sim
     keep: "border-acid/40 text-acid",
     exact: "border-coral/40 text-coral",
     similar: "border-lilac/40 text-lilac",
+    subject: "border-sky-300/40 text-sky-300",
   };
-  const label = kind === "keep" ? "Best copy" : kind === "exact" ? "Exact copy" : similarity ? `${percent(similarity)} similar` : "Similar";
+  const label = kind === "keep" ? "Best copy"
+    : kind === "exact" ? "Exact copy"
+    : kind === "subject" ? "Same subject"
+    : similarity ? `${percent(similarity)} similar` : "Similar";
   return <span className={cn("inline-flex items-center rounded-full border bg-canvas/85 px-2.5 py-0.5 text-xs font-semibold shadow-sm backdrop-blur", styles[kind])}>{label}</span>;
 }
 

@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight, Cloud, Copy, Download, HardDrive, Images, Sparkles, Upload, type LucideIcon } from "lucide-react";
+import { ArrowRight, Cloud, Copy, Download, HardDrive, Images, Search, Sparkles, Upload, Users, type LucideIcon } from "lucide-react";
 import { PhotoGrid } from "../components/PhotoCard";
 import { PhotoViewer } from "../components/PhotoViewer";
 import { Button, EmptyState, ErrorNote, PageHeading, Spinner } from "../components/ui";
 import { api } from "../lib/api";
-import { formatBytes } from "../lib/utils";
+import { cn, formatBytes } from "../lib/utils";
 import type { Stats } from "../types";
 
 function StatCard({ icon: Icon, label, value, note, index }: { icon: LucideIcon; label: string; value: string; note: string; index: number }) {
@@ -24,6 +24,13 @@ export function HomePage() {
   const [openId, setOpenId] = useState<string | null>(null);
   const load = useCallback(() => { api<Stats>("/stats").then(setStats).catch((e: Error) => setError(e.message)); }, []);
   useEffect(load, [load]);
+  // While the AI is still working, refresh every few seconds so new results appear on their own.
+  const working = stats?.ai.enabled && (stats.ai.waiting > 0 || !stats.ai.ready);
+  useEffect(() => {
+    if (!working) return;
+    const timer = setInterval(load, 3000);
+    return () => clearInterval(timer);
+  }, [working, load]);
 
   if (error) return <ErrorNote message={error} />;
   if (!stats) return <Spinner />;
@@ -52,6 +59,27 @@ export function HomePage() {
       <StatCard index={3} icon={Sparkles} label="Similar pairs" value={stats.similar_pairs.toLocaleString()} note="Resized, compressed or edited" />
     </div>
 
+    {stats.ai.enabled && (
+      <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-sky-300/25 bg-sky-300/[.05] p-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3">
+          <Sparkles className={cn("mt-0.5 h-5 w-5 shrink-0 text-sky-300", stats.ai.waiting > 0 && "animate-pulse")} />
+          <div>
+            <p className="font-semibold">
+              {stats.ai.waiting > 0 ? `The free AI is looking at ${stats.ai.waiting} ${stats.ai.waiting === 1 ? "photo" : "photos"}…`
+                : !stats.ai.ready ? "The free AI is getting ready" : "Free AI recognition is on"}
+            </p>
+            <p className="mt-1 text-sm text-muted">
+              {stats.ai.ready ? `${stats.ai.analysed} photos analysed · ${stats.people} ${stats.people === 1 ? "person" : "people"} recognised`
+                : stats.ai.message}
+            </p>
+          </div>
+        </div>
+        {stats.ai.ready && <div className="flex gap-2">
+          <Link to="/people"><Button variant="secondary"><Users className="h-4 w-4" />People</Button></Link>
+          <Link to="/photos"><Button variant="secondary"><Search className="h-4 w-4" />Smart search</Button></Link>
+        </div>}
+      </div>
+    )}
     {duplicates > 0 && (
       <Link to="/duplicates" className="focus-ring group mt-4 flex items-center justify-between gap-4 rounded-2xl border border-coral/25 bg-coral/[.07] p-5 transition hover:bg-coral/10">
         <div><p className="font-semibold">You have duplicates to review</p><p className="mt-1 text-sm text-muted">Compare them side by side and delete the copies you don't need.</p></div>

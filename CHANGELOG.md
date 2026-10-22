@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.1.0 (2026-10-22)
+
+**Free AI recognition**, running inside the app: no paid AI service, nothing sent to third parties.
+
+- **People:** faces are found (YuNet) and recognised (SFace), so the same person is grouped across photos, even in group photos. People can be named, and photo outlines show who is where.
+- **Smart search:** find photos by describing them ("a cat", "a palace at sunset"). Searches for something that isn't in any photo return nothing instead of guesses.
+- **Same subject, different shot:** CLIP suggests different photos of the same scene. They're shown separately from copies and never deleted automatically.
+- AI analysis runs in the background with live progress on the Home page, and appears as a fifth service on the Cloud page.
+- Models are downloaded once from pinned versions and verified by SHA-256 (about 190 MB); they use about 320 MB of memory, so they fit the free App Service plan.
+- The demo zip now has 32 photos, including Taj Mahal shots, cats and public-domain portraits for the People page.
+- Three new tests use real public-domain photos; the CI pipeline caches the models.
+
 ## 3.0.0 (2026-10-22)
 
 ImageVault is now a cloud website on Microsoft Azure, built to the CCD mini-project guidelines.
