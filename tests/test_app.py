@@ -1,4 +1,6 @@
 import io
+import os
+import uuid
 
 import pytest
 from fastapi.testclient import TestClient
@@ -31,13 +33,20 @@ def encode(image: Image.Image, fmt: str = "PNG", **options) -> bytes:
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
+    """By default tests use SQLite and a local folder. CI also runs them against PostgreSQL and
+    Azurite (the Azure Storage emulator) by setting TEST_DATABASE_URL and TEST_AZURE_STORAGE."""
     monkeypatch.setenv("IMAGEVAULT_DATA_DIR", str(tmp_path))
-    monkeypatch.delenv("AZURE_STORAGE_CONNECTION_STRING", raising=False)
     monkeypatch.delenv("APP_PASSWORD", raising=False)
-    from app.database import init_db
+    monkeypatch.delenv("AZURE_STORAGE_ACCOUNT_URL", raising=False)
+    monkeypatch.delenv("APPLICATIONINSIGHTS_CONNECTION_STRING", raising=False)
+    monkeypatch.setenv("DATABASE_URL", os.environ.get("TEST_DATABASE_URL", ""))
+    monkeypatch.setenv("AZURE_STORAGE_CONNECTION_STRING", os.environ.get("TEST_AZURE_STORAGE", ""))
+    monkeypatch.setenv("AZURE_STORAGE_CONTAINER", f"test-{uuid.uuid4().hex[:12]}")
+    from app.database import engine, metadata
     from app.server import app
 
-    init_db()
+    metadata.drop_all(engine())
+    metadata.create_all(engine())
     return TestClient(app)
 
 
@@ -51,7 +60,7 @@ def test_upload_list_and_download(client):
     assert response.status_code == 201
     photo = response.json()["photo"]
     assert response.json()["match"] is None
-    assert (photo["width"], photo["height"], photo["storage"]) == (512, 384, "local")
+    assert (photo["width"], photo["height"], photo["filename"]) == (512, 384, "house.png")
 
     listing = client.get("/api/photos").json()
     assert listing["total"] == 1 and listing["items"][0]["match"] is None
@@ -59,19 +68,25 @@ def test_upload_list_and_download(client):
     assert client.get(photo["thumb_url"]).headers["content-type"] == "image/jpeg"
 
 
-def test_exact_copy_is_detected_and_stored_once(client, tmp_path):
+def test_exact_copy_is_detected_and_stored_once(client):
     data = encode(scene())
     first = upload(client, "a.png", data).json()["photo"]
     second = upload(client, "copy of a.png", data).json()
     assert second["match"] == {"id": first["id"], "filename": "a.png", "kind": "exact", "similarity": 1.0}
-    assert len(list((tmp_path / "photos").rglob("*"))) == 2  # one folder + one stored file
 
     stats = client.get("/api/stats").json()
     assert stats["photos"] == 2 and stats["exact_copies"] == 1 and stats["saved_bytes"] == len(data)
 
-    # Deleting one copy must keep the shared file for the other one.
+    # Deleting one copy must keep the shared file for the other one...
     client.delete(f"/api/photos/{second['photo']['id']}")
     assert client.get(first["file_url"]).content == data
+
+    # ...and deleting the last copy removes the file from storage.
+    from app.storage import get_storage, original_key
+
+    client.delete(f"/api/photos/{first['id']}")
+    with pytest.raises(Exception):
+        get_storage().read(original_key(first["sha256"]))
 
 
 EDITED_COPIES = {
@@ -118,12 +133,22 @@ def test_bad_uploads_are_rejected(client):
     assert client.get("/api/photos/missing").status_code == 404
 
 
-def test_azure_settings_are_validated(client):
-    assert client.get("/api/settings").json()["storage"] == "local"
-    bad = client.put("/api/settings/azure", json={"connection_string": "hello", "container": "photos"})
-    assert bad.status_code == 422
-    bad_name = {"connection_string": "AccountName=a;AccountKey=b", "container": "My_Photos"}
-    assert client.put("/api/settings/azure", json=bad_name).status_code == 422
+def test_search_and_duplicates_filter(client):
+    upload(client, "Beach Holiday.png", encode(scene()))
+    upload(client, "beach copy.png", encode(scene()))
+    upload(client, "notes.png", encode(document()))
+    assert client.get("/api/photos?search=BEACH").json()["total"] == 2
+    assert client.get("/api/photos?duplicates_only=true").json()["total"] == 2
+
+
+def test_health_and_cloud_status(client):
+    assert client.get("/api/health").json()["status"] == "ok"
+    status = client.get("/api/system").json()
+    services = {s["id"]: s for s in status["services"]}
+    assert set(services) == {"app-service", "database", "storage", "monitoring"}
+    assert services["database"]["healthy"] and services["storage"]["healthy"]
+    assert services["database"]["active"] == bool(os.environ.get("TEST_DATABASE_URL"))
+    assert services["storage"]["active"] == bool(os.environ.get("TEST_AZURE_STORAGE"))
 
 
 def test_password_protection(client, monkeypatch):
@@ -133,3 +158,4 @@ def test_password_protection(client, monkeypatch):
     assert client.post("/api/login", json={"password": "wrong"}).status_code == 401
     assert client.post("/api/login", json={"password": "secret"}).status_code == 200
     assert client.get("/api/photos").status_code == 200
+    assert client.get("/api/health").status_code == 200  # the deploy pipeline needs this without a password

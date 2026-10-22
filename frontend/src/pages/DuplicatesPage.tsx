@@ -41,7 +41,7 @@ export function DuplicatesPage() {
 
   return <>
     <PageHeading title="Duplicates"
-      description={groups?.length ? <>{groups.length} {groups.length === 1 ? "group" : "groups"} of matching photos. Removing the extra copies would free up to {formatBytes(extraBytes)}. The best copy (largest size) is shown first.</> : "Photos that are copies of each other appear here."}
+      description={groups?.length ? <>{groups.length} {groups.length === 1 ? "group" : "groups"} of matching photos. Removing the extra copies would free up to {formatBytes(extraBytes)}. The best copy (highest resolution and quality) is shown first.</> : "Photos that are copies of each other appear here."}
       action={exactCount > 0 && <Button variant="danger" onClick={() => setConfirm({ kind: "exact", count: exactCount })}><Trash2 className="h-4 w-4" />Remove {exactCount} exact {exactCount === 1 ? "copy" : "copies"}</Button>} />
 
     {error && <div className="mb-6"><ErrorNote message={error} /></div>}

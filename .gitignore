@@ -5,14 +5,21 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
+# Local data when running on your computer (database + photos)
+data/
+
 # Website build output (created by `npm run build`)
 app/static/
+app/build.json
 node_modules/
 *.tsbuildinfo
 
-# Desktop app build output (created by packaging/build.py)
-build/
-dist/
+# Terraform: state and your variables contain secrets
+infra/.terraform/
+infra/*.tfstate
+infra/*.tfstate.*
+infra/terraform.tfvars
+infra/*.tfplan
 
 # Editors and operating systems
 .idea/

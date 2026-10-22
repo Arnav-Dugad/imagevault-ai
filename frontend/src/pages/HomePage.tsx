@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight, Cloud, Copy, HardDrive, Images, Sparkles, Upload, type LucideIcon } from "lucide-react";
+import { ArrowRight, Cloud, Copy, Download, HardDrive, Images, Sparkles, Upload, type LucideIcon } from "lucide-react";
 import { PhotoGrid } from "../components/PhotoCard";
 import { PhotoViewer } from "../components/PhotoViewer";
 import { Button, EmptyState, ErrorNote, PageHeading, Spinner } from "../components/ui";
@@ -8,11 +8,9 @@ import { api } from "../lib/api";
 import { formatBytes } from "../lib/utils";
 import type { Stats } from "../types";
 
-const RELEASES_URL = "https://github.com/Arnav-Dugad/imagevault-ai/releases/latest";
-
-function StatCard({ icon: Icon, label, value, note }: { icon: LucideIcon; label: string; value: string; note: string }) {
+function StatCard({ icon: Icon, label, value, note, index }: { icon: LucideIcon; label: string; value: string; note: string; index: number }) {
   return (
-    <div className="panel p-5">
+    <div className="pop-in panel p-5" style={{ animationDelay: `${index * 60}ms`, animationFillMode: "backwards" }}>
       <div className="flex items-center gap-2 text-sm text-muted"><Icon className="h-4 w-4 text-acid" />{label}</div>
       <p className="mt-3 text-3xl font-semibold tracking-tight">{value}</p>
       <p className="mt-1 text-xs text-muted">{note}</p>
@@ -35,8 +33,11 @@ export function HomePage() {
     return <>
       <PageHeading title="Welcome to ImageVault" description="Keep your photos in one place and let ImageVault spot exact copies and look-alike photos for you." />
       <EmptyState icon={Images} title="Your vault is empty">
-        <p>Upload a few photos to get started. Want to try it first? Download <a className="text-acid hover:underline" href={RELEASES_URL} target="_blank" rel="noreferrer">demo-photos.zip</a>: it includes an exact copy, a resized copy and a compressed copy of the same picture.</p>
-        <div className="mt-6">{uploadButton}</div>
+        <p>Upload a few photos to get started. Want to see duplicate detection straight away? Download the demo photos, unzip them and upload them all: they include exact copies, resized, compressed and edited versions, and look-alikes that are <i>not</i> duplicates.</p>
+        <div className="mt-6 flex flex-wrap justify-center gap-2">
+          {uploadButton}
+          <a href="/demo-photos.zip" download><Button variant="secondary"><Download className="h-4 w-4" />Demo photos (5 MB)</Button></a>
+        </div>
       </EmptyState>
     </>;
   }
@@ -45,10 +46,10 @@ export function HomePage() {
   return <>
     <PageHeading title="Home" description="An overview of your photo vault." action={uploadButton} />
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      <StatCard icon={Images} label="Photos" value={stats.photos.toLocaleString()} note={`${formatBytes(stats.total_bytes)} in total`} />
-      <StatCard icon={stats.storage === "azure" ? Cloud : HardDrive} label="Space used" value={formatBytes(stats.stored_bytes)} note={stats.storage === "azure" ? "New photos go to Azure" : "On this computer"} />
-      <StatCard icon={Copy} label="Exact copies" value={stats.exact_copies.toLocaleString()} note={stats.saved_bytes > 0 ? `${formatBytes(stats.saved_bytes)} saved by storing them once` : "Same file uploaded more than once"} />
-      <StatCard icon={Sparkles} label="Similar pairs" value={stats.similar_pairs.toLocaleString()} note="Resized, compressed or edited" />
+      <StatCard index={0} icon={Images} label="Photos" value={stats.photos.toLocaleString()} note={`${formatBytes(stats.total_bytes)} in total`} />
+      <StatCard index={1} icon={stats.storage === "azure" ? Cloud : HardDrive} label="Storage used" value={formatBytes(stats.stored_bytes)} note={stats.storage === "azure" ? "In Azure Blob Storage" : "In a local folder"} />
+      <StatCard index={2} icon={Copy} label="Exact copies" value={stats.exact_copies.toLocaleString()} note={stats.saved_bytes > 0 ? `${formatBytes(stats.saved_bytes)} saved by storing them once` : "Identical files are stored once"} />
+      <StatCard index={3} icon={Sparkles} label="Similar pairs" value={stats.similar_pairs.toLocaleString()} note="Resized, compressed or edited" />
     </div>
 
     {duplicates > 0 && (
@@ -57,12 +58,10 @@ export function HomePage() {
         <ArrowRight className="h-5 w-5 shrink-0 text-coral transition group-hover:translate-x-1" />
       </Link>
     )}
-    {stats.storage === "local" && (
-      <Link to="/settings" className="focus-ring group mt-4 flex items-center justify-between gap-4 rounded-2xl border border-lilac/25 bg-lilac/[.06] p-5 transition hover:bg-lilac/10">
-        <div><p className="font-semibold">Back up to the cloud</p><p className="mt-1 text-sm text-muted">Connect an Azure Storage account so new photos are stored in Microsoft Azure.</p></div>
-        <ArrowRight className="h-5 w-5 shrink-0 text-lilac transition group-hover:translate-x-1" />
-      </Link>
-    )}
+    <Link to="/cloud" className="focus-ring group mt-4 flex items-center justify-between gap-4 rounded-2xl border border-lilac/25 bg-lilac/[.06] p-5 transition hover:bg-lilac/10">
+      <div><p className="font-semibold">See the cloud behind ImageVault</p><p className="mt-1 text-sm text-muted">Live status of App Service, PostgreSQL, Blob Storage and Application Insights.</p></div>
+      <ArrowRight className="h-5 w-5 shrink-0 text-lilac transition group-hover:translate-x-1" />
+    </Link>
 
     <div className="mb-4 mt-10 flex items-center justify-between">
       <h2 className="text-lg font-semibold">Recently added</h2>

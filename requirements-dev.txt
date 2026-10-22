@@ -1,7 +1,5 @@
-# Everything needed to work on ImageVault and build the desktop app.
+# Everything needed to work on ImageVault: the app plus test and lint tools.
 -r requirements.txt
-pywebview==6.2.1
 pytest==9.1.1
 httpx==0.28.1
 ruff==0.17.1
-pyinstaller==6.22.3

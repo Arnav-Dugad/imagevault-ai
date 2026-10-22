@@ -9,7 +9,6 @@ export interface Photo {
   width: number;
   height: number;
   sha256: string;
-  storage: StorageKind;
   uploaded_at: string;
   thumb_url: string;
   file_url: string;
@@ -44,11 +43,20 @@ export interface DuplicateGroup {
   items: { kind: "keep" | MatchKind; similarity: number; photo: Photo }[];
 }
 
-export interface Settings {
+export interface CloudService {
+  id: "app-service" | "database" | "storage" | "monitoring";
+  name: string;
+  role: string;
+  active: boolean;
+  healthy: boolean;
+  latency_ms: number | null;
+  detail: string;
+  error: string | null;
+}
+
+export interface SystemStatus {
   version: string;
-  storage: StorageKind;
-  azure_account: string | null;
-  azure_container: string;
-  azure_set_by_environment: boolean;
-  data_folder: string;
+  environment: "Azure" | "Local";
+  build: { commit: string; deployed_at: string; run_url: string; repository: string } | null;
+  services: CloudService[];
 }

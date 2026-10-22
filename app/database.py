@@ -1,53 +1,76 @@
-"""SQLite database with two tables.
+"""Database tables, using SQLAlchemy so the same code works with PostgreSQL (Azure) and SQLite (local).
 
 photos  - one row per uploaded photo
 matches - pairs of photos that are duplicates ("exact") or look alike ("similar")
 """
 
-import sqlite3
 from contextlib import contextmanager
+from functools import lru_cache
 
-from app.config import data_dir
+from sqlalchemy import (
+    BigInteger,
+    Column,
+    Float,
+    ForeignKey,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    create_engine,
+    event,
+)
+from sqlalchemy.pool import NullPool
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS photos (
-    id           TEXT PRIMARY KEY,
-    filename     TEXT NOT NULL,
-    content_type TEXT NOT NULL,
-    size         INTEGER NOT NULL,
-    width        INTEGER NOT NULL,
-    height       INTEGER NOT NULL,
-    sha256       TEXT NOT NULL,
-    phash        TEXT NOT NULL,
-    dhash        TEXT NOT NULL,
-    storage      TEXT NOT NULL,   -- 'local' or 'azure'
-    uploaded_at  TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS photos_sha256 ON photos (sha256);
+from app.config import database_url
 
-CREATE TABLE IF NOT EXISTS matches (
-    photo_a    TEXT NOT NULL REFERENCES photos (id) ON DELETE CASCADE,
-    photo_b    TEXT NOT NULL REFERENCES photos (id) ON DELETE CASCADE,
-    kind       TEXT NOT NULL,     -- 'exact' or 'similar'
-    similarity REAL NOT NULL,     -- 0.0 to 1.0
-    PRIMARY KEY (photo_a, photo_b)
-);
-CREATE INDEX IF NOT EXISTS matches_b ON matches (photo_b);
-"""
+metadata = MetaData()
+
+photos = Table(
+    "photos", metadata,
+    Column("id", String(32), primary_key=True),
+    Column("filename", String(255), nullable=False),
+    Column("content_type", String(50), nullable=False),
+    Column("size", BigInteger, nullable=False),
+    Column("width", Integer, nullable=False),
+    Column("height", Integer, nullable=False),
+    Column("sha256", String(64), nullable=False, index=True),
+    Column("phash", String(16), nullable=False),
+    Column("dhash", String(16), nullable=False),
+    Column("uploaded_at", String(40), nullable=False),  # ISO 8601 text, sorts correctly
+)
+
+matches = Table(
+    "matches", metadata,
+    Column("photo_a", String(32), ForeignKey("photos.id", ondelete="CASCADE"), primary_key=True),
+    Column("photo_b", String(32), ForeignKey("photos.id", ondelete="CASCADE"), primary_key=True, index=True),
+    Column("kind", String(10), nullable=False),  # 'exact' or 'similar'
+    Column("similarity", Float, nullable=False),  # 0.0 to 1.0
+)
+
+
+@lru_cache(maxsize=4)
+def _engine(url: str):
+    if url.startswith("sqlite"):
+        engine = create_engine(url, poolclass=NullPool)
+
+        @event.listens_for(engine, "connect")
+        def _enable_foreign_keys(connection, _):
+            connection.execute("PRAGMA foreign_keys = ON")
+
+        return engine
+    return create_engine(url, pool_pre_ping=True, pool_size=5)
+
+
+def engine():
+    return _engine(database_url())
 
 
 @contextmanager
 def connect():
-    conn = sqlite3.connect(data_dir() / "imagevault.db", timeout=30)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    try:
+    """A database connection inside a transaction (committed at the end)."""
+    with engine().begin() as conn:
         yield conn
-        conn.commit()
-    finally:
-        conn.close()
 
 
 def init_db() -> None:
-    with connect() as conn:
-        conn.executescript(SCHEMA)
+    metadata.create_all(engine())

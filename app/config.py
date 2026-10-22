@@ -1,60 +1,37 @@
-"""Where ImageVault keeps its files, and the user's saved settings.
+"""All settings come from environment variables.
 
-Everything lives in one data folder:
-  imagevault.db   - the SQLite database (photo list, hashes, duplicate matches)
-  photos/         - original photos (when using local storage)
-  thumbs/         - small preview images
-  settings.json   - saved settings, such as the Azure connection string
+On Azure, Terraform sets them on the App Service (see infra/main.tf).
+On your computer nothing needs to be set: ImageVault uses a SQLite file and a
+local folder inside ./data, so you can run it without any cloud account.
 
-Environment variables override the saved settings. They are mainly useful when
-ImageVault runs as a website on Azure App Service (see docs/azure.md).
+  DATABASE_URL                           PostgreSQL connection (default: SQLite in ./data)
+  AZURE_STORAGE_ACCOUNT_URL              Blob Storage account, accessed with the App Service's managed identity
+  AZURE_STORAGE_CONNECTION_STRING        ...or a connection string (handy for local testing with Azurite)
+  AZURE_STORAGE_CONTAINER                Blob container name (default: photos)
+  APPLICATIONINSIGHTS_CONNECTION_STRING  Sends logs, requests and errors to Application Insights
+  APP_PASSWORD                           Password that visitors must enter (leave empty to disable)
+  IMAGEVAULT_DATA_DIR                    Folder for local data (default: ./data)
 """
 
-import json
 import os
-import sys
 from pathlib import Path
 
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB per photo
 
 
+def env(name: str, default: str = "") -> str:
+    return os.environ.get(name, default).strip()
+
+
 def data_dir() -> Path:
-    if custom := os.environ.get("IMAGEVAULT_DATA_DIR"):
-        path = Path(custom)
-    elif sys.platform == "win32":
-        path = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "ImageVault"
-    elif sys.platform == "darwin":
-        path = Path.home() / "Library" / "Application Support" / "ImageVault"
-    else:
-        path = Path.home() / ".local" / "share" / "imagevault"
+    path = Path(env("IMAGEVAULT_DATA_DIR") or Path(__file__).resolve().parent.parent / "data")
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
-def _settings_file() -> Path:
-    return data_dir() / "settings.json"
+def database_url() -> str:
+    return env("DATABASE_URL") or f"sqlite:///{(data_dir() / 'imagevault.db').as_posix()}"
 
 
-def load_settings() -> dict:
-    try:
-        return json.loads(_settings_file().read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-
-def save_settings(settings: dict) -> None:
-    _settings_file().write_text(json.dumps(settings, indent=2), encoding="utf-8")
-
-
-def azure_settings() -> tuple[str, str, bool]:
-    """Return (connection_string, container, set_by_environment)."""
-    env_value = os.environ.get("AZURE_STORAGE_CONNECTION_STRING", "")
-    if env_value:
-        return env_value, os.environ.get("AZURE_STORAGE_CONTAINER", "photos"), True
-    saved = load_settings()
-    return saved.get("azure_connection_string", ""), saved.get("azure_container", "photos"), False
-
-
-def app_password() -> str:
-    """Optional password. Set APP_PASSWORD when the app is hosted on the internet."""
-    return os.environ.get("APP_PASSWORD", "")
+def running_on_azure() -> bool:
+    return bool(env("WEBSITE_SITE_NAME"))  # set automatically by Azure App Service
