@@ -1,15 +1,16 @@
 import { useState, type ReactNode } from "react";
-import { Activity, ArrowDown, ArrowRight, Cloud, Database, ExternalLink, GitBranch, Globe, HardDrive, Layers, RefreshCw, Server, Wallet, type LucideIcon } from "lucide-react";
+import { Activity, ArrowDown, ArrowRight, Cloud, Database, ExternalLink, GitBranch, Globe, HardDrive, Layers, RefreshCw, Server, Sparkles, Wallet, type LucideIcon } from "lucide-react";
 import { Button, PageHeading, Spinner } from "../components/ui";
 import { useSystem } from "../lib/system";
 import { cn, formatDate } from "../lib/utils";
 import type { CloudService } from "../types";
 
 const REPO = "https://github.com/Arnav-Dugad/imagevault-ai";
-const ICONS: Record<CloudService["id"], LucideIcon> = { "app-service": Server, database: Database, storage: Cloud, monitoring: Activity };
+const ICONS: Record<CloudService["id"], LucideIcon> = { "app-service": Server, database: Database, storage: Cloud, monitoring: Activity, ai: Sparkles };
 
 function StatusPill({ service }: { service: CloudService }) {
-  if (!service.active) return <span className="inline-flex items-center gap-1.5 rounded-full border border-line px-2.5 py-0.5 text-xs text-muted"><span className="h-1.5 w-1.5 rounded-full bg-muted" />Local mode</span>;
+  if (!service.active) return <span className="inline-flex items-center gap-1.5 rounded-full border border-line px-2.5 py-0.5 text-xs text-muted"><span className="h-1.5 w-1.5 rounded-full bg-muted" />{service.id === "ai" ? "Turned off" : "Local mode"}</span>;
+  if (!service.healthy && !service.error) return <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-300/40 bg-sky-300/10 px-2.5 py-0.5 text-xs font-medium text-sky-300"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-300" />Getting ready</span>;
   if (!service.healthy) return <span className="inline-flex items-center gap-1.5 rounded-full border border-coral/40 bg-coral/10 px-2.5 py-0.5 text-xs font-medium text-coral"><span className="h-1.5 w-1.5 rounded-full bg-coral" />Problem</span>;
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full border border-acid/40 bg-acid/10 px-2.5 py-0.5 text-xs font-medium text-acid">
@@ -58,7 +59,7 @@ function Architecture() {
         <div className="grid place-items-center text-muted"><ArrowRight className="hidden h-5 w-5 lg:block" /><ArrowDown className="h-5 w-5 lg:hidden" /></div>
         <div className="rounded-2xl border border-dashed border-lilac/30 p-3 sm:p-4">
           <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-lilac">Microsoft Azure · resource group imagevault-rg</p>
-          <Box icon={Server} title="App Service" subtitle="Python FastAPI · HTTPS · managed identity" accent />
+          <Box icon={Server} title="App Service" subtitle="Python FastAPI · HTTPS · managed identity · free AI models (CLIP, YuNet, SFace)" accent />
           <div className="my-2 grid place-items-center text-muted"><ArrowDown className="h-4 w-4" /></div>
           <div className="grid gap-2 sm:grid-cols-3">
             <Box icon={Database} title="PostgreSQL" subtitle="Photo details" />
@@ -106,7 +107,7 @@ export function CloudPage() {
         : <span>Running <b>locally</b> with SQLite and a local folder. On Azure, these become the managed services below.</span>}
     </div>
 
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {system.services.map((service, i) => <ServiceCard key={service.id} service={service} index={i} />)}
     </div>
 

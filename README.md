@@ -16,9 +16,13 @@
 - **Finds exact copies:** the same file uploaded twice. Each identical file is stored only once.
 - **Finds similar photos:** resized, compressed or edited versions of the same picture, using perceptual hashing.
 - **Review duplicates** side by side and delete the copies you don't need.
+- **Free AI recognition** that runs inside the app (no paid API, photos never leave your cloud):
+  - 👤 **People:** recognises the same person across photos, even in a group photo, and lets you name them;
+  - 🔍 **Smart search:** find photos by describing them, like "a cat", "a palace at sunset" or "a man in a suit";
+  - 🏛️ **Same subject, different shot:** suggests photos of the same scene taken from another angle or in other colours.
 - **Cloud page:** a live view of every Azure service behind the site, with health and response time.
 
-Try it with the [demo photos](frontend/public/demo-photos.zip). They're real photos from Unsplash plus copies that ImageVault should catch, and look-alikes it should *not* match.
+Try it with the [demo photos](frontend/public/demo-photos.zip). They're real photos from Unsplash and Wikimedia Commons, with copies ImageVault should catch, look-alikes it should *not* match, and portraits for the People page.
 
 ## Cloud architecture
 
@@ -38,6 +42,7 @@ flowchart LR
 | **Azure Database for PostgreSQL** (Flexible Server) | Stores photo details and duplicate matches |
 | **Azure Blob Storage** | Stores the photos and thumbnails |
 | **Application Insights** (+ Log Analytics) | Monitors requests, errors, response times and logs |
+| **Free AI models inside App Service** (CLIP, YuNet, SFace via ONNX Runtime + OpenCV) | People, smart search and same-subject suggestions, at no extra cost |
 | **Terraform** | Creates all of the above with one command (Infrastructure as Code) |
 | **GitHub Actions** | Tests every push and deploys `main` to Azure (CI/CD) |
 | **Cost Management budget** | Emails alerts at 50%, 80% and forecast 100% of the monthly budget |
@@ -60,6 +65,8 @@ cd frontend && npm install && npm run build && cd ..
 python -m app                     # then open http://127.0.0.1:8000
 ```
 
+The first time it starts, ImageVault downloads its free AI models (about 190 MB, once) into `data/models`. To run without AI, set `IMAGEVAULT_AI=off`.
+
 While working on the website, run `python -m uvicorn app.server:app --reload` in one terminal and `npm run dev` in `frontend/` in another, then open http://localhost:5173.
 
 **Tests:** `pytest` and `ruff check app tests` (backend), `npm run lint` (website).
@@ -81,7 +88,7 @@ git push                                          # GitHub Actions deploys the s
 ## Project structure
 
 ```
-app/            Python backend: API, duplicate detection, database, storage, monitoring
+app/            Python backend: API, duplicate detection, free AI, database, storage, monitoring
 frontend/       React website (Vite + Tailwind CSS); public/demo-photos.zip
 infra/          Terraform: every Azure resource
 tests/          Automated tests (run against SQLite and against PostgreSQL + Azure Storage emulator)
@@ -93,9 +100,9 @@ docs/           Deployment guide, technical design document, how it works, demo 
 
 - [Azure deployment guide](docs/azure-deployment.md): step by step, for Azure beginners
 - [Technical design document](docs/technical-design-document.md): the course deliverable
-- [How it works](docs/how-it-works.md): duplicate detection explained
+- [How it works](docs/how-it-works.md): duplicate detection and the free AI explained, with measured accuracy
 - [Demo guide](docs/demo-guide.md): a script for the live presentation
 
 ## License
 
-[MIT](LICENSE). Demo photos are from [Unsplash](https://unsplash.com/license); credits are in the zip's `README.txt`.
+[MIT](LICENSE). Demo photos are from [Unsplash](https://unsplash.com/license) and Wikimedia Commons; credits are in the zip's `README.txt`. AI models: CLIP (MIT, OpenAI), YuNet (MIT) and SFace (Apache 2.0) from the [OpenCV Zoo](https://github.com/opencv/opencv_zoo).

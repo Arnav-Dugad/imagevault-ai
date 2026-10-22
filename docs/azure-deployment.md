@@ -18,6 +18,7 @@ Terraform (`infra/main.tf`) creates everything in one resource group called **im
 | Azure Database for PostgreSQL Flexible Server | Burstable B1ms, 32 GB | Free for 12 months under Azure's free services (750 h/month); otherwise about US$13–15/month from your credit |
 | Storage account (Blob) | Standard LRS | A few cents per GB per month |
 | Log Analytics + Application Insights | Pay-as-you-go | Free up to 5 GB of logs a month |
+| Free AI recognition (CLIP, YuNet, SFace) | Runs inside the Web App | Free: no AI service is created or billed |
 | Managed identity for GitHub Actions | | Free |
 | Budget with email alerts | | Free |
 
@@ -123,7 +124,7 @@ The **CI/CD** workflow:
 
 Then open your `website_url`, log in with your `app_password`, and visit the **Cloud** page. All four Azure services should say **Healthy**, along with the commit that was deployed.
 
-The first start after a deployment can take 1–2 minutes on the free plan.
+The first start after a deployment can take 1–2 minutes on the free plan. On the very first start, the app also downloads its free AI models (about 190 MB) into `/home/models`; meanwhile, the AI card on the Cloud page says *Getting ready*. They're kept across restarts and deployments. All together, the app uses about 320 MB of the free plan's 1 GB of memory.
 
 ## Step 7: Monitoring, and cleaning up
 
@@ -155,6 +156,7 @@ Terraform sets these **App Settings** on the Web App. `app/config.py` reads them
 | `AZURE_STORAGE_CONTAINER` | `photos` |
 | `APPLICATIONINSIGHTS_CONNECTION_STRING` | Where telemetry is sent |
 | `APP_PASSWORD` | Website password |
+| `IMAGEVAULT_MODEL_DIR` | `/home/models`: where the free AI models are kept (persistent storage) |
 | `SCM_DO_BUILD_DURING_DEPLOYMENT` | Tells Azure to `pip install -r requirements.txt` on deploy |
 
 The startup command is `python -m uvicorn app.server:app --host 0.0.0.0 --port 8000 …` (set in `infra/main.tf`).

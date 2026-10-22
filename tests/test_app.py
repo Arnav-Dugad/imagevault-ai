@@ -1,9 +1,7 @@
 import io
 import os
-import uuid
 
 import pytest
-from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 
 
@@ -29,25 +27,6 @@ def encode(image: Image.Image, fmt: str = "PNG", **options) -> bytes:
     buffer = io.BytesIO()
     image.save(buffer, fmt, **options)
     return buffer.getvalue()
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    """By default tests use SQLite and a local folder. CI also runs them against PostgreSQL and
-    Azurite (the Azure Storage emulator) by setting TEST_DATABASE_URL and TEST_AZURE_STORAGE."""
-    monkeypatch.setenv("IMAGEVAULT_DATA_DIR", str(tmp_path))
-    monkeypatch.delenv("APP_PASSWORD", raising=False)
-    monkeypatch.delenv("AZURE_STORAGE_ACCOUNT_URL", raising=False)
-    monkeypatch.delenv("APPLICATIONINSIGHTS_CONNECTION_STRING", raising=False)
-    monkeypatch.setenv("DATABASE_URL", os.environ.get("TEST_DATABASE_URL", ""))
-    monkeypatch.setenv("AZURE_STORAGE_CONNECTION_STRING", os.environ.get("TEST_AZURE_STORAGE", ""))
-    monkeypatch.setenv("AZURE_STORAGE_CONTAINER", f"test-{uuid.uuid4().hex[:12]}")
-    from app.database import engine, metadata
-    from app.server import app
-
-    metadata.drop_all(engine())
-    metadata.create_all(engine())
-    return TestClient(app)
 
 
 def upload(client, name: str, data: bytes):
@@ -145,7 +124,7 @@ def test_health_and_cloud_status(client):
     assert client.get("/api/health").json()["status"] == "ok"
     status = client.get("/api/system").json()
     services = {s["id"]: s for s in status["services"]}
-    assert set(services) == {"app-service", "database", "storage", "monitoring"}
+    assert set(services) == {"app-service", "database", "storage", "monitoring", "ai"}
     assert services["database"]["healthy"] and services["storage"]["healthy"]
     assert services["database"]["active"] == bool(os.environ.get("TEST_DATABASE_URL"))
     assert services["storage"]["active"] == bool(os.environ.get("TEST_AZURE_STORAGE"))

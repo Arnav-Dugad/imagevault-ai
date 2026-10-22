@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { CheckCircle2, Trash2 } from "lucide-react";
+import { CheckCircle2, Sparkles, Trash2 } from "lucide-react";
 import { PhotoThumb } from "../components/PhotoCard";
 import { PhotoViewer } from "../components/PhotoViewer";
 import { Button, ConfirmDialog, EmptyState, ErrorNote, MatchBadge, PageHeading, Spinner } from "../components/ui";
@@ -9,14 +9,40 @@ import type { DuplicateGroup, Photo } from "../types";
 
 type Confirm = { kind: "one"; photo: Photo } | { kind: "exact"; count: number };
 
+function GroupRow({ group, onOpen, onDelete }: { group: DuplicateGroup; onOpen: (id: string) => void; onDelete: (photo: Photo) => void }) {
+  return (
+    <section className="pop-in panel p-4">
+      <div className="flex gap-3 overflow-x-auto pb-1">
+        {group.items.map(({ kind, similarity, photo }) => (
+          <div key={photo.id} className={cn("w-44 shrink-0 overflow-hidden rounded-xl border bg-canvas/60 sm:w-52", kind === "keep" ? "border-acid/40" : "border-line")}>
+            <button onClick={() => onOpen(photo.id)} className="focus-ring relative block w-full">
+              <PhotoThumb photo={photo} className="aspect-[4/3] w-full" />
+              <span className="absolute left-2 top-2"><MatchBadge kind={kind} similarity={similarity} /></span>
+            </button>
+            <div className="p-3">
+              <p className="truncate text-sm font-medium" title={photo.filename}>{photo.filename}</p>
+              <p className="mt-0.5 text-xs text-muted">{photo.width} × {photo.height} · {formatBytes(photo.size)}</p>
+              <Button variant="ghost" className="-ml-2 mt-1 h-8 px-2 text-xs hover:text-coral" onClick={() => onDelete(photo)}><Trash2 className="h-3.5 w-3.5" />Delete</Button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function DuplicatesPage() {
   const [groups, setGroups] = useState<DuplicateGroup[] | null>(null);
+  const [related, setRelated] = useState<DuplicateGroup[]>([]);
   const [error, setError] = useState("");
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   const [busy, setBusy] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
 
-  const load = useCallback(() => { api<DuplicateGroup[]>("/duplicates").then(setGroups).catch((e: Error) => setError(e.message)); }, []);
+  const load = useCallback(() => {
+    api<DuplicateGroup[]>("/duplicates").then(setGroups).catch((e: Error) => setError(e.message));
+    api<DuplicateGroup[]>("/related").then(setRelated).catch(() => {});
+  }, []);
   useEffect(load, [load]);
 
   async function confirmed() {
@@ -48,26 +74,20 @@ export function DuplicatesPage() {
     {groups?.length === 0 && <EmptyState icon={CheckCircle2} title="No duplicates found">Every photo in your vault is unique. New uploads are checked automatically.</EmptyState>}
 
     <div className="space-y-4">
-      {groups?.map((group) => (
-        <section key={group.id} className="panel p-4">
-          <div className="flex gap-3 overflow-x-auto pb-1">
-            {group.items.map(({ kind, similarity, photo }) => (
-              <div key={photo.id} className={cn("w-44 shrink-0 overflow-hidden rounded-xl border bg-canvas/60 sm:w-52", kind === "keep" ? "border-acid/40" : "border-line")}>
-                <button onClick={() => setOpenId(photo.id)} className="focus-ring relative block w-full">
-                  <PhotoThumb photo={photo} className="aspect-[4/3] w-full" />
-                  <span className="absolute left-2 top-2"><MatchBadge kind={kind} similarity={similarity} /></span>
-                </button>
-                <div className="p-3">
-                  <p className="truncate text-sm font-medium" title={photo.filename}>{photo.filename}</p>
-                  <p className="mt-0.5 text-xs text-muted">{photo.width} × {photo.height} · {formatBytes(photo.size)}</p>
-                  <Button variant="ghost" className="-ml-2 mt-1 h-8 px-2 text-xs hover:text-coral" onClick={() => setConfirm({ kind: "one", photo })}><Trash2 className="h-3.5 w-3.5" />Delete</Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      ))}
+      {groups?.map((group) => <GroupRow key={group.id} group={group} onOpen={setOpenId} onDelete={(photo) => setConfirm({ kind: "one", photo })} />)}
     </div>
+
+    {related.length > 0 && <>
+      <div className="mb-4 mt-12">
+        <h2 className="flex items-center gap-2 text-xl font-semibold"><Sparkles className="h-5 w-5 text-sky-300" />Same subject, different shot</h2>
+        <p className="mt-1 max-w-2xl text-sm leading-6 text-muted">
+          The free AI thinks these photos show the same subject or scene, taken at a different moment, angle or in different colours. They are <b className="text-ink">not copies</b>, so nothing here is removed automatically. Keep the ones you like.
+        </p>
+      </div>
+      <div className="space-y-4">
+        {related.map((group) => <GroupRow key={group.id} group={group} onOpen={setOpenId} onDelete={(photo) => setConfirm({ kind: "one", photo })} />)}
+      </div>
+    </>}
 
     {confirm && <ConfirmDialog busy={busy} onCancel={() => setConfirm(null)} onConfirm={confirmed}
       title={confirm.kind === "one" ? "Delete this photo?" : `Remove ${confirm.count} exact ${confirm.count === 1 ? "copy" : "copies"}?`}

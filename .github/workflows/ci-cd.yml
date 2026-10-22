@@ -48,6 +48,11 @@ jobs:
         run: |
           npx -y azurite@3.35.0 --silent --location /tmp/azurite --skipApiVersionCheck &
           for i in $(seq 1 30); do curl -s -o /dev/null http://127.0.0.1:10000 && break; sleep 1; done
+      - name: Cache the free AI models (about 190 MB)
+        uses: actions/cache@v4
+        with:
+          path: data/models
+          key: ai-models-${{ hashFiles('app/ai.py') }}
       - run: pip install -r requirements-dev.txt
       - run: ruff check app tests
       - run: pytest -q
