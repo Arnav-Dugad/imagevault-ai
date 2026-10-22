@@ -51,7 +51,7 @@ def _to_hex(bits: list[bool]) -> str:
 
 def difference_hash(image: Image.Image) -> str:
     """dHash: shrink to 9x8 grey pixels and record whether each pixel is brighter than its right neighbour."""
-    pixels = list(image.convert("L").resize((9, 8), Image.Resampling.LANCZOS).getdata())
+    pixels = list(image.convert("L").resize((9, 8), Image.Resampling.LANCZOS).get_flattened_data())
     return _to_hex([pixels[row * 9 + col] > pixels[row * 9 + col + 1] for row in range(8) for col in range(8)])
 
 
@@ -62,7 +62,7 @@ _COS = [[math.cos(math.pi * k * (2 * n + 1) / 64) for n in range(32)] for k in r
 def perceptual_hash(image: Image.Image) -> str:
     """pHash: shrink to 32x32 grey pixels, keep the 8x8 lowest frequencies (the overall
     shapes and light), and record whether each one is above the median."""
-    pixels = list(image.convert("L").resize((32, 32), Image.Resampling.LANCZOS).getdata())
+    pixels = list(image.convert("L").resize((32, 32), Image.Resampling.LANCZOS).get_flattened_data())
     rows = [pixels[i * 32:(i + 1) * 32] for i in range(32)]
     partial = [[sum(_COS[u][x] * rows[x][y] for x in range(32)) for y in range(32)] for u in range(8)]
     low = [sum(partial[u][y] * _COS[v][y] for y in range(32)) for u in range(8) for v in range(8)]
