@@ -1,5 +1,0 @@
-# Downloaded releases already contain the compiled website.
-services:
-  caddy:
-    build:
-      dockerfile: Dockerfile.azure-download

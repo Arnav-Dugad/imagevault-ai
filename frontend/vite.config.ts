@@ -1,19 +1,10 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
+// `npm run build` writes the website into the Python app, which serves it.
+// `npm run dev` serves it with live reload and forwards /api to the Python server on port 8000.
 export default defineConfig({
   plugins: [react()],
-  server: {
-    port: 5173,
-    proxy: {
-      "/api": "http://localhost:8000",
-      "/health": "http://localhost:8000",
-      "/metrics": "http://localhost:8000",
-    },
-  },
-  test: {
-    include: ["src/**/*.test.{ts,tsx}"],
-    environment: "jsdom",
-    setupFiles: "./src/test/setup.ts",
-  },
+  build: { outDir: "../app/static", emptyOutDir: true },
+  server: { port: 5173, proxy: { "/api": "http://127.0.0.1:8000" } },
 });

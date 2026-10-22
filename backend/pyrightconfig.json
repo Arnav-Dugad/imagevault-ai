@@ -1,7 +1,0 @@
-{
-  "include": ["app", "tests"],
-  "pythonVersion": "3.12",
-  "typeCheckingMode": "basic",
-  "reportMissingImports": "none",
-  "reportMissingTypeStubs": "none"
-}

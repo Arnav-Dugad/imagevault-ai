@@ -1,47 +1,97 @@
-import type { ButtonHTMLAttributes, ReactNode } from "react";
-import { motion } from "framer-motion";
+import { useEffect, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { LoaderCircle, type LucideIcon } from "lucide-react";
-import { cn } from "../lib/utils";
-import type { ProcessingStatus } from "../types";
+import { cn, percent } from "../lib/utils";
+import type { MatchKind } from "../types";
 
-export function Button({ className, variant = "primary", loading, children, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "secondary" | "ghost" | "danger"; loading?: boolean }) {
+type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: "primary" | "secondary" | "ghost" | "danger";
+  loading?: boolean;
+};
+
+export function Button({ className, variant = "primary", loading, children, ...props }: ButtonProps) {
   const styles = {
     primary: "bg-acid text-[#11150c] hover:bg-[#c8ff80]",
-    secondary: "border border-line bg-[#181c22] text-ink hover:bg-[#20252c]",
+    secondary: "border border-line bg-raised text-ink hover:bg-[#20252c]",
     ghost: "text-muted hover:bg-white/5 hover:text-ink",
-    danger: "bg-[#ff765f] text-[#1a0907] hover:bg-[#ff927e]",
+    danger: "bg-coral text-[#1a0907] hover:bg-[#ffa78c]",
   };
-  return <button className={cn("focus-ring button-lift inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50", styles[variant], className)} disabled={loading || props.disabled} {...props}>
-    {loading && <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" />}{children}
-  </button>;
+  return (
+    <button
+      className={cn("focus-ring inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition active:scale-[.98] disabled:cursor-not-allowed disabled:opacity-50", styles[variant], className)}
+      disabled={loading || props.disabled}
+      {...props}
+    >
+      {loading && <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" />}
+      {children}
+    </button>
+  );
 }
 
-export function StatusBadge({ status }: { status: ProcessingStatus }) {
-  const styles: Record<ProcessingStatus, string> = {
-    READY: "bg-acid/10 text-acid border-acid/20",
-    PROCESSING: "bg-lilac/10 text-lilac border-lilac/20",
-    PENDING: "bg-white/5 text-muted border-line",
-    EXACT_DUPLICATE: "bg-coral/10 text-coral border-coral/20",
-    FAILED: "bg-red-500/10 text-red-300 border-red-500/20",
+export function PageHeading({ title, description, action }: { title: string; description?: ReactNode; action?: ReactNode }) {
+  return (
+    <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">{title}</h1>
+        {description && <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">{description}</p>}
+      </div>
+      {action && <div className="flex shrink-0 flex-wrap gap-2">{action}</div>}
+    </div>
+  );
+}
+
+export function EmptyState({ icon: Icon, title, children }: { icon: LucideIcon; title: string; children?: ReactNode }) {
+  return (
+    <div className="panel grid place-items-center px-6 py-16 text-center">
+      <div className="grid h-14 w-14 place-items-center rounded-2xl border border-acid/20 bg-acid/10"><Icon className="h-6 w-6 text-acid" /></div>
+      <h2 className="mt-5 text-lg font-semibold">{title}</h2>
+      <div className="mt-2 max-w-md text-sm leading-6 text-muted">{children}</div>
+    </div>
+  );
+}
+
+export function ErrorNote({ message }: { message: string }) {
+  return <p role="alert" className="rounded-xl border border-coral/30 bg-coral/10 px-4 py-3 text-sm text-coral">{message}</p>;
+}
+
+export function Spinner({ label = "Loading" }: { label?: string }) {
+  return <div className="grid min-h-[40vh] place-items-center"><LoaderCircle className="h-6 w-6 animate-spin text-acid" aria-label={label} /></div>;
+}
+
+export function MatchBadge({ kind, similarity }: { kind: MatchKind | "keep"; similarity?: number }) {
+  const styles = {
+    keep: "border-acid/40 text-acid",
+    exact: "border-coral/40 text-coral",
+    similar: "border-lilac/40 text-lilac",
   };
-  const label = status === "EXACT_DUPLICATE" ? "Exact duplicate" : status.toLowerCase();
-  return <span className={cn("inline-flex rounded-full border px-2.5 py-1 font-mono text-[10px] font-medium uppercase tracking-wider", styles[status])}>{label}</span>;
+  const label = kind === "keep" ? "Best copy" : kind === "exact" ? "Exact copy" : similarity ? `${percent(similarity)} similar` : "Similar";
+  return <span className={cn("inline-flex items-center rounded-full border bg-canvas/85 px-2.5 py-0.5 text-xs font-semibold shadow-sm backdrop-blur", styles[kind])}>{label}</span>;
 }
 
-export function PageHeading({ eyebrow, title, description, action }: { eyebrow: string; title: string; description?: string; action?: ReactNode }) {
-  return <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .28, ease: [0.22, 1, 0.36, 1] }} className="mb-7 flex flex-col justify-between gap-5 md:flex-row md:items-end">
-    <div><p className="eyebrow mb-3">{eyebrow}</p><h1 className="text-3xl font-semibold tracking-[-.04em] md:text-4xl">{title}</h1>{description && <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">{description}</p>}</div>
-    {action}
-  </motion.div>;
+export function Modal({ onClose, children, className }: { onClose: () => void; children: ReactNode; className?: string }) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = ""; };
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-3 backdrop-blur-sm sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <div role="dialog" aria-modal="true" className={cn("pop-in panel max-h-full w-full overflow-auto bg-panel shadow-2xl", className)}>{children}</div>
+    </div>
+  );
 }
 
-export function EmptyState({ icon: Icon, title, description, action }: { icon: LucideIcon; title: string; description: string; action?: ReactNode }) {
-  return <motion.div initial={{ opacity: 0, scale: .985 }} animate={{ opacity: 1, scale: 1 }} className="panel flex min-h-80 flex-col items-center justify-center rounded-[28px] px-6 py-14 text-center">
-    <div className="mb-5 grid h-14 w-14 place-items-center rounded-2xl border border-line bg-white/[.03]"><Icon className="h-6 w-6 text-acid" /></div>
-    <h2 className="text-xl font-semibold tracking-tight">{title}</h2><p className="mt-2 max-w-md text-sm leading-6 text-muted">{description}</p>{action && <div className="mt-6">{action}</div>}
-  </motion.div>;
-}
-
-export function LoadingGrid({ count = 8 }: { count?: number }) {
-  return <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">{Array.from({ length: count }, (_, index) => <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * .035 }} key={index} className="panel overflow-hidden rounded-2xl"><div className="skeleton aspect-[4/3]" /><div className="space-y-2 p-4"><div className="skeleton h-4 w-3/4 rounded" /><div className="skeleton h-3 w-1/2 rounded" /></div></motion.div>)}</div>;
+export function ConfirmDialog({ title, message, confirmLabel, onConfirm, onCancel, busy }: {
+  title: string; message: ReactNode; confirmLabel: string; onConfirm: () => void; onCancel: () => void; busy?: boolean;
+}) {
+  return (
+    <Modal onClose={onCancel} className="max-w-md p-6">
+      <h2 className="text-lg font-semibold">{title}</h2>
+      <div className="mt-2 text-sm leading-6 text-muted">{message}</div>
+      <div className="mt-6 flex justify-end gap-2">
+        <Button variant="secondary" onClick={onCancel}>Cancel</Button>
+        <Button variant="danger" onClick={onConfirm} loading={busy} autoFocus>{confirmLabel}</Button>
+      </div>
+    </Modal>
+  );
 }
