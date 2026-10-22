@@ -2,85 +2,91 @@
 
 ## The big picture
 
-ImageVault is a single Python program. Inside it, a small web server ([FastAPI](https://fastapi.tiangolo.com/)) does two jobs: it serves the website (built with React) and it answers the website's requests through a JSON API.
+ImageVault is a website. A single Python program ([FastAPI](https://fastapi.tiangolo.com/)) serves the React website and a JSON API (`/api/...`). On Azure it runs on **App Service** and uses three managed services: **PostgreSQL** for data, **Blob Storage** for files and **Application Insights** for monitoring.
+
+The same code also runs on a laptop: without any Azure settings it falls back to a SQLite file and a local folder. That keeps development and testing simple.
 
 ```mermaid
 flowchart LR
-    W["App window<br/>(or web browser)"] -- "website + /api requests" --> S["ImageVault server<br/>Python · FastAPI"]
-    S --> DB[("SQLite database<br/>photo list, hashes, matches")]
-    S --> T["Thumbnails folder"]
-    S -- "original photos" --> L["Local folder"]
-    S -- "original photos" --> A["Azure Blob Storage"]
+    W["Browser<br/>React website"] -- "HTTPS: pages + /api" --> S["App Service<br/>Python FastAPI"]
+    S -- "SQL" --> DB[("PostgreSQL<br/>photos, matches")]
+    S -- "managed identity" --> B["Blob Storage<br/>originals/ thumbnails/"]
+    S -- "telemetry" --> AI["Application Insights"]
 ```
-
-- **Desktop app:** `python -m app` starts the server on a free port on your computer and opens it in a window (using [pywebview](https://pywebview.flowrl.com/), which uses Microsoft Edge's WebView2). The `.exe` is the same program bundled with [PyInstaller](https://pyinstaller.org/).
-- **Website on Azure App Service:** `python -m app --server` runs the same server for the internet, with a password.
-- **Storage:** original photos go to a local folder or, once connected, to Azure Blob Storage. The database records where each photo lives, so both kinds keep working.
 
 ## What happens when you upload a photo
 
 ```mermaid
 sequenceDiagram
-    participant U as Website
-    participant S as Server
-    participant B as Storage (local or Azure)
-    participant D as Database
-    U->>S: POST /api/photos (the file)
-    S->>S: Check it is a real image, make a thumbnail
-    S->>S: Compute SHA-256 + perceptual hashes
-    S->>B: Save the file (skipped if identical file already stored)
-    S->>D: Save photo details
-    S->>D: Compare with every other photo, save matches
-    S-->>U: "Saved" / "Exact copy of …" / "97% similar to …"
+    participant W as Website
+    participant S as App Service
+    participant B as Blob Storage
+    participant D as PostgreSQL
+    W->>S: POST /api/photos (one file)
+    S->>S: Check it's an image, make a thumbnail
+    S->>S: SHA-256 fingerprint + perceptual hashes
+    alt fingerprint not stored yet
+        S->>B: Save originals/<sha256> and thumbnails/<sha256>.jpg
+    end
+    S->>D: INSERT photo
+    S->>D: Compare with every other photo, INSERT matches
+    S-->>W: "Saved" / "Exact copy of …" / "99% similar to …"
 ```
+
+The website uploads photos one at a time, so each one is compared with the photos uploaded before it, and each gets its own progress bar.
 
 ## How duplicates are detected
 
 ### Exact copies: SHA-256
 
-A **SHA-256 hash** turns a file's bytes into a 64-character fingerprint. Change even one byte and the fingerprint is completely different, so two files with the same fingerprint are identical.
+A **SHA-256 hash** turns a file's bytes into a 64-character fingerprint. If even one byte changes, the fingerprint is completely different. So two files with the same fingerprint are identical.
 
-ImageVault also uses the fingerprint as the **file name** in storage. When the same photo is uploaded twice, the file is stored only once and both entries point to it.
+The fingerprint is also the **file name in Blob Storage** (*content-addressed storage*). When the same photo is uploaded twice, the file is stored only once and both database rows point to it. The file is deleted only when the last photo using it is deleted.
 
 ### Similar photos: perceptual hashes
 
-A resized or re-compressed copy has different bytes, so its SHA-256 differs. To catch it, ImageVault computes two **perceptual hashes**: 64-bit summaries of what the picture *looks like*.
+A resized or re-compressed copy has different bytes, so its SHA-256 differs. To catch it, ImageVault computes two **perceptual hashes**: 64-bit summaries of what the picture *looks like* (see `app/photos.py`).
 
-- **dHash (difference hash):** shrink the photo to 9×8 grey pixels. For each pixel, record 1 if it's brighter than the pixel to its right, otherwise 0. That gives 64 bits.
-- **pHash (perceptual hash):** shrink to 32×32 grey pixels and use a *discrete cosine transform* (the maths behind JPEG) to find the 8×8 lowest frequencies, which are the overall shapes and lighting. Record 1 for each frequency above the median.
+- **dHash (difference hash):** shrink the photo to 9×8 grey pixels. For each pixel, write 1 if it's brighter than its right-hand neighbour, otherwise 0. That gives 64 bits.
+- **pHash (perceptual hash):** shrink to 32×32 grey pixels and apply a *discrete cosine transform* (the maths behind JPEG). Keep the 8×8 lowest frequencies, which describe the overall shapes and lighting, and write 1 for each one above the median.
 
-Small changes like resizing, compression or a slight brightness change barely affect these bits. To compare two photos, ImageVault counts how many of the 64 bits differ (the **Hamming distance**):
+Resizing, compression and small edits barely change these bits. To compare two photos, ImageVault counts how many of the 64 bits differ (the **Hamming distance**):
 
-| Check | Rule |
+| Result | Rule |
 |---|---|
 | Exact copy | Same SHA-256 |
-| Similar | pHash differs by ≤ 10 bits **and** dHash differs by ≤ 12 bits **and** the photos have a similar shape |
+| Similar | pHash differs by ≤ 10 bits **and** dHash differs by ≤ 12 bits **and** the photos have a similar shape (aspect ratio within 15%) |
 | Different | Anything else |
 
-The similarity percentage shown in the app is `1 − (pHash bits + dHash bits) / 128`, capped at 99% (100% means byte-for-byte identical).
+The similarity shown is `1 − (pHash bits + dHash bits) / 128`, capped at 99%, because 100% means byte-for-byte identical.
 
-**Limits:** heavy crops, rotations, mirrored photos and different shots of the same scene are usually *not* detected. That's on purpose: it keeps false matches rare.
+The demo photos show both sides: a resized, a compressed and an edited copy are caught, while two different pug photos and two different waterfalls are *not* matched.
 
-### Grouping
+**Limits:** heavy crops, rotations, mirrored photos and different shots of the same scene usually aren't detected. That's on purpose, to keep false matches rare. Comparing a new photo with every stored photo is fine for thousands of photos; for millions you'd add an index (see the technical design document).
 
-Matching photos are joined into groups (with a *union-find* algorithm), and the largest photo in each group is suggested as the **best copy** to keep. "Remove exact copies" deletes only identical files; similar photos are never deleted automatically.
+### Grouping and the "best copy"
+
+Matching photos are joined into groups with a **union-find** algorithm. In each group, ImageVault suggests keeping the photo with the most pixels, then the largest file (least compressed), then the oldest upload. **Remove exact copies** deletes only identical files and keeps the first upload. Similar photos are never deleted automatically.
+
+## Security
+
+- **HTTPS only**, set by Terraform on the Web App.
+- **Website password** (`APP_PASSWORD`): an HTTP-only, SameSite session cookie signed with HMAC-SHA256.
+- **No storage keys**: the Web App reads and writes blobs with its *system-assigned managed identity*.
+- **No deployment passwords**: GitHub Actions signs in with *OpenID Connect* using a federated identity limited to the `main` branch of this repository. FTP and basic-auth publishing are turned off.
+- **Private blobs**: public access is disabled, and photos are only served through the authenticated API.
+- **Database**: TLS required (`sslmode=require`); the password is generated by Terraform and stored only in the App Settings.
 
 ## Where things are in the code
 
 | File | What it does |
 |---|---|
-| `app/server.py` | All API routes: upload, list, delete, duplicates, settings, login |
-| `app/photos.py` | Reading images, thumbnails, SHA-256, pHash, dHash, comparing |
-| `app/storage.py` | Saving and loading files: local folder or Azure Blob Storage |
-| `app/database.py` | SQLite tables `photos` and `matches` |
-| `app/config.py` | The data folder and saved settings |
-| `app/__main__.py` | Starts the desktop app or the website server |
-| `frontend/src/pages/` | The five pages: Home, Photos, Upload, Duplicates, Settings |
-| `tests/test_app.py` | Automated tests for uploading, matching, deleting and settings |
-
-## Cloud concepts used
-
-- **Object storage (Azure Blob Storage):** files are stored as *blobs* in a *container*, addressed by name. The app uses the official `azure-storage-blob` Python library with a connection string.
-- **Platform as a Service (Azure App Service):** Azure runs the Python web server for us; we upload code and Azure installs packages and starts it.
-- **Resource groups:** all project resources live in one group, so they can be deleted together.
-- **CI/CD (GitHub Actions):** every push runs the tests; every version tag builds the Windows app and publishes it as a GitHub release.
+| `app/server.py` | All API routes: upload, list, details, delete, duplicates, stats, health, cloud status, login |
+| `app/photos.py` | Reading images, thumbnails, SHA-256, pHash, dHash, comparing two photos |
+| `app/storage.py` | Saving and loading files: Azure Blob Storage or a local folder |
+| `app/database.py` | Tables `photos` and `matches` (SQLAlchemy, so it works with PostgreSQL and SQLite) |
+| `app/config.py` | Every setting, read from environment variables |
+| `frontend/src/pages/` | Home, Photos, Upload, Duplicates and Cloud pages |
+| `infra/main.tf` | Every Azure resource (Terraform) |
+| `.github/workflows/ci-cd.yml` | The CI/CD pipeline |
+| `tests/test_app.py` | Tests for uploads, matching, grouping, deleting, search, health and the password |

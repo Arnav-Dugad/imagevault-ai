@@ -1,94 +1,101 @@
-<p align="center"><img src="packaging/icon.png" width="96" alt="ImageVault icon"></p>
+<p align="center"><img src="frontend/public/icon.svg" width="88" alt="ImageVault icon"></p>
 
 <h1 align="center">ImageVault</h1>
 
-<p align="center">A simple desktop app that keeps your photos in one place and finds duplicates,<br>with optional cloud storage on Microsoft Azure.</p>
+<p align="center">A cloud photo vault that finds duplicate photos, built on Microsoft Azure<br>with Terraform and GitHub Actions.</p>
 
-<p align="center"><a href="https://github.com/Arnav-Dugad/imagevault-ai/releases/latest"><b>⬇ Download for Windows</b></a></p>
+<p align="center">
+  <a href="https://github.com/Arnav-Dugad/imagevault-ai/actions/workflows/ci-cd.yml"><img src="https://github.com/Arnav-Dugad/imagevault-ai/actions/workflows/ci-cd.yml/badge.svg" alt="CI/CD status"></a>
+</p>
 
 ---
 
 ## What it does
 
-- **Upload photos** by dragging them into the app (JPG, PNG, WEBP, GIF, BMP).
-- **Finds exact copies:** the same file uploaded twice. Each copy is stored only once.
-- **Finds similar photos:** resized, compressed or slightly edited versions of the same picture.
+- **Upload photos** in the browser by dragging them in (JPG, PNG, WEBP, GIF, BMP).
+- **Finds exact copies:** the same file uploaded twice. Each identical file is stored only once.
+- **Finds similar photos:** resized, compressed or edited versions of the same picture, using perceptual hashing.
 - **Review duplicates** side by side and delete the copies you don't need.
-- **Store in the cloud (optional):** connect an Azure Storage account and new photos are saved in Azure Blob Storage instead of on your computer.
+- **Cloud page:** a live view of every Azure service behind the site, with health and response time.
 
-Everything runs on your own computer. Nothing is sent anywhere unless you connect Azure.
+Try it with the [demo photos](frontend/public/demo-photos.zip). They're real photos from Unsplash plus copies that ImageVault should catch, and look-alikes it should *not* match.
 
-## Download and run (Windows)
+## Cloud architecture
 
-1. Go to the [latest release](https://github.com/Arnav-Dugad/imagevault-ai/releases/latest) and download **`ImageVault-…-Windows.exe`**.
-2. Double-click it. There is nothing to install.
-3. Windows may say *"Windows protected your PC"* because the app isn't code-signed. Click **More info → Run anyway**.
+```mermaid
+flowchart LR
+    U["Browser"] -->|HTTPS| APP["Azure App Service<br/>Python FastAPI + React"]
+    APP --> DB[("Azure Database for<br/>PostgreSQL")]
+    APP -->|managed identity| BLOB["Azure Blob Storage"]
+    APP --> AI["Application Insights"]
+    GH["GitHub Actions<br/>CI/CD"] -->|OIDC deploy| APP
+    TF["Terraform<br/>IaC"] -. creates .-> APP & DB & BLOB & AI & BUD["Budget alert"]
+```
 
-To try duplicate detection straight away, download **`demo-photos.zip`** from the same page, unzip it and upload all the photos.
+| Cloud service / tool | What it does in ImageVault |
+|---|---|
+| **Azure App Service** (Linux, Python) | Hosts the website and API over HTTPS |
+| **Azure Database for PostgreSQL** (Flexible Server) | Stores photo details and duplicate matches |
+| **Azure Blob Storage** | Stores the photos and thumbnails |
+| **Application Insights** (+ Log Analytics) | Monitors requests, errors, response times and logs |
+| **Terraform** | Creates all of the above with one command (Infrastructure as Code) |
+| **GitHub Actions** | Tests every push and deploys `main` to Azure (CI/CD) |
+| **Cost Management budget** | Emails alerts at 50%, 80% and forecast 100% of the monthly budget |
+| **Managed identities + OIDC** | No storage keys and no deployment passwords |
 
-Your photos and database are kept in `%LOCALAPPDATA%\ImageVault` (the exact path is shown on the Settings page).
+## Run it on your computer
 
-## Connect Azure (optional)
-
-Have an Azure account (for example **Azure for Students**)? Open **Settings** in the app and paste your storage account's connection string. The [Azure guide](docs/azure.md) walks you through it step by step, and also shows how to put ImageVault online as a website.
-
-## Run from source
-
-Use this on Mac/Linux, or if you want to change the code. You need [Python 3.11+](https://www.python.org/downloads/) and [Node.js 20+](https://nodejs.org/).
+No Azure account needed: locally ImageVault uses a SQLite file and a folder instead of PostgreSQL and Blob Storage. You need [Python 3.11+](https://www.python.org/downloads/) and [Node.js 20+](https://nodejs.org/).
 
 ```bash
 git clone https://github.com/Arnav-Dugad/imagevault-ai.git
 cd imagevault-ai
 
-# 1. Install the Python packages (in a virtual environment)
 python -m venv .venv
-.venv\Scripts\activate            # Windows
-# source .venv/bin/activate       # Mac / Linux
+.venv\Scripts\activate            # Windows   (Mac/Linux: source .venv/bin/activate)
 pip install -r requirements-dev.txt
 
-# 2. Build the website once
-cd frontend
-npm install
-npm run build
-cd ..
+cd frontend && npm install && npm run build && cd ..
 
-# 3. Start the app
-python -m app                     # opens the app window
-python -m app --browser           # or open it in your web browser
+python -m app                     # then open http://127.0.0.1:8000
 ```
 
-**While changing the website**, run the API and the live-reloading website side by side:
+While working on the website, run `python -m uvicorn app.server:app --reload` in one terminal and `npm run dev` in `frontend/` in another, then open http://localhost:5173.
 
-```bash
-python -m uvicorn app.server:app --reload --port 8000    # terminal 1
-cd frontend && npm run dev                               # terminal 2, then open http://localhost:5173
+**Tests:** `pytest` and `ruff check app tests` (backend), `npm run lint` (website).
+
+## Deploy to Azure
+
+Follow **[docs/azure-deployment.md](docs/azure-deployment.md)**. In short:
+
+```powershell
+az login
+cd infra
+copy terraform.tfvars.example terraform.tfvars   # fill in your details
+terraform init
+terraform apply                                   # creates everything (≈10 minutes)
+terraform output github_setup_commands            # run the printed commands once
+git push                                          # GitHub Actions deploys the site
 ```
 
-**Tests:** `pytest` (backend) and `npm run lint` in `frontend/`.
-
-**Build the Windows app yourself:** `python packaging/build.py` creates `dist/ImageVault.exe`.
-
-## How it works
-
-ImageVault is one Python program (a [FastAPI](https://fastapi.tiangolo.com/) web server with a SQLite database) that serves a React website. The desktop app shows that website in its own window.
-
-To compare photos it uses a SHA-256 fingerprint for exact copies and perceptual hashes for similar photos. [docs/how-it-works.md](docs/how-it-works.md) explains this with diagrams.
+## Project structure
 
 ```
-app/            Python server: API, duplicate detection, storage (local folder or Azure)
-frontend/       React website (Vite + Tailwind CSS)
-tests/          Automated tests
-packaging/      Builds the Windows app and deploys to Azure
-demo-photos/    Sample photos for trying duplicate detection
-docs/           Azure guide and how-it-works guide
+app/            Python backend: API, duplicate detection, database, storage, monitoring
+frontend/       React website (Vite + Tailwind CSS); public/demo-photos.zip
+infra/          Terraform: every Azure resource
+tests/          Automated tests (run against SQLite and against PostgreSQL + Azure Storage emulator)
+.github/        CI/CD pipeline
+docs/           Deployment guide, technical design document, how it works, demo guide
 ```
 
-## Releasing a new version
+## Documentation
 
-1. Update the version in `app/__init__.py` and add a section to `CHANGELOG.md`.
-2. Push a tag: `git tag v2.1.0 && git push origin v2.1.0`.
-3. GitHub Actions builds the Windows app and publishes the release.
+- [Azure deployment guide](docs/azure-deployment.md): step by step, for Azure beginners
+- [Technical design document](docs/technical-design-document.md): the course deliverable
+- [How it works](docs/how-it-works.md): duplicate detection explained
+- [Demo guide](docs/demo-guide.md): a script for the live presentation
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). Demo photos are from [Unsplash](https://unsplash.com/license); credits are in the zip's `README.txt`.

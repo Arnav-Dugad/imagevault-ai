@@ -1,8 +1,8 @@
 import { useState, type ReactNode } from "react";
 import { NavLink } from "react-router-dom";
-import { Cloud, Copy, HardDrive, House, Images, LogOut, Menu, Settings, Upload, X } from "lucide-react";
+import { Cloud, Copy, House, Images, LogOut, Menu, Upload, X } from "lucide-react";
 import { api } from "../lib/api";
-import { useSettings } from "../lib/settings";
+import { useSystem } from "../lib/system";
 import { cn } from "../lib/utils";
 
 const nav = [
@@ -10,7 +10,7 @@ const nav = [
   { to: "/photos", label: "Photos", icon: Images },
   { to: "/upload", label: "Upload", icon: Upload },
   { to: "/duplicates", label: "Duplicates", icon: Copy },
-  { to: "/settings", label: "Settings", icon: Settings },
+  { to: "/cloud", label: "Cloud", icon: Cloud },
 ];
 
 export function Logo() {
@@ -25,16 +25,20 @@ export function Logo() {
   );
 }
 
-function StorageStatus() {
-  const { settings } = useSettings();
-  if (!settings) return null;
-  const azure = settings.storage === "azure";
+function CloudStatus() {
+  const { system } = useSystem();
+  if (!system) return null;
+  const healthy = system.services.every((s) => !s.active || s.healthy);
+  const onAzure = system.environment === "Azure";
   return (
-    <NavLink to="/settings" className="focus-ring block rounded-xl border border-line bg-white/[.02] p-3 hover:bg-white/[.04]">
-      <p className="text-[11px] font-medium uppercase tracking-wider text-muted">New photos are saved to</p>
+    <NavLink to="/cloud" className="focus-ring block rounded-xl border border-line bg-white/[.02] p-3 hover:bg-white/[.04]">
+      <p className="text-[11px] font-medium uppercase tracking-wider text-muted">Running on</p>
       <p className="mt-1.5 flex items-center gap-2 text-sm font-medium">
-        {azure ? <Cloud className="h-4 w-4 text-lilac" /> : <HardDrive className="h-4 w-4 text-acid" />}
-        {azure ? `Azure · ${settings.azure_account}` : "This computer"}
+        <span className="relative flex h-2 w-2">
+          {healthy && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-acid opacity-60" />}
+          <span className={cn("relative h-2 w-2 rounded-full", healthy ? "bg-acid" : "bg-coral")} />
+        </span>
+        {onAzure ? "Microsoft Azure" : "This computer"}
       </p>
     </NavLink>
   );
@@ -56,7 +60,7 @@ function Navigation({ onNavigate, showLogout }: { onNavigate?: () => void; showL
         ))}
       </nav>
       <div className="mt-auto space-y-2 pt-6">
-        <StorageStatus />
+        <CloudStatus />
         {showLogout && <button onClick={logout} className="focus-ring flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-muted hover:bg-white/[.04] hover:text-ink"><LogOut className="h-4 w-4" />Log out</button>}
       </div>
     </>
