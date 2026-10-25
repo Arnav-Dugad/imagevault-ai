@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.7.1 (2026-10-25)
+
+- Fixed: a laptop worker started before an update kept running the old code and saved photos without their text positions. Workers now report which analysis version they run; older ones get no photos (and the website takes over in Automatic mode), and photos analysed by an older version are analysed again automatically.
+
 ## 3.7.0 (2026-10-25)
 
 - **Hindi and Tamil text:** two more free readers (PaddleOCR PP-OCRv3, Apache 2.0) read Devanagari and Tamil on signs and boards, next to English. Search works in all three scripts.

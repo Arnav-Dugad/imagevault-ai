@@ -162,7 +162,7 @@ def test_laptop_worker_sends_its_results_over_https(client):
     photo = upload(client, "person-a-1.jpg")
     client.put("/api/ai/mode", json={"mode": "laptop"})
 
-    reply = client.post("/api/worker/next", json={"name": "my-laptop"}).json()
+    reply = client.post("/api/worker/next", json={"name": "my-laptop", "version": intelligence.ANALYSIS_VERSION}).json()
     assert reply["photo"]["id"] == photo
     found = intelligence.compute(client.get(reply["photo"]["file_url"]).content)  # done on the laptop
     assert client.post(f"/api/worker/result/{photo}", json=found.to_json()).json() == {"saved": True}
@@ -172,6 +172,8 @@ def test_laptop_worker_sends_its_results_over_https(client):
     assert client.get(details["people"][0]["image_url"]).headers["content-type"] == "image/jpeg"
     assert client.get("/api/ai").json()["analysed"] == 1
     assert client.post(f"/api/worker/result/{photo}", json={"clip": "?"}).status_code == 422
+    old = {k: v for k, v in found.to_json().items() if k != "version"}  # from a laptop running older code
+    assert client.post(f"/api/worker/result/{photo}", json=old).status_code == 422
 
 
 def test_hindi_and_tamil_text_is_read_and_searchable(client):
