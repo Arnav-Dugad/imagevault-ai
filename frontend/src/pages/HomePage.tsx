@@ -96,6 +96,6 @@ export function HomePage() {
       <Link to="/photos" className="focus-ring rounded-lg text-sm text-muted hover:text-ink">See all photos →</Link>
     </div>
     <PhotoGrid photos={stats.recent} onOpen={setOpenId} />
-    {openId && <PhotoViewer id={openId} onClose={() => setOpenId(null)} onDeleted={load} />}
+    {openId && <PhotoViewer id={openId} ids={stats.recent.map((p) => p.id)} onClose={() => setOpenId(null)} onDeleted={load} />}
   </>;
 }

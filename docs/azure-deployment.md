@@ -201,6 +201,7 @@ Terraform sets these **App Settings** on the Web App. `app/config.py` reads them
 | `APPLICATIONINSIGHTS_CONNECTION_STRING` | Where telemetry is sent |
 | `APP_PASSWORD` | Website password |
 | `IMAGEVAULT_MODEL_DIR` | `/home/models`: where the free AI models are kept (persistent storage) |
+| `AZURE_COST_SCOPE`, `MONTHLY_BUDGET` | The resource group and budget for the live cost card. The site reads costs with its managed identity (*Cost Management Reader* role) |
 | `SCM_DO_BUILD_DURING_DEPLOYMENT` | Tells Azure to `pip install -r requirements.txt` on deploy |
 
 The startup command is `python -m uvicorn app.server:app --host 0.0.0.0 --port 8000 …` (set in `infra/main.tf`).

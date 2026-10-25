@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.3.0 (2026-10-25)
+
+- **Live Azure cost card** on the Cloud page: this month's spending for the project, by service, against the US$5 budget, read from Azure Cost Management with the website's managed identity (Terraform grants the read-only *Cost Management Reader* role). Cached for an hour.
+- **Compare slider** on the Duplicates page: drag a divider across a photo and its copy (or same-subject shot) to see exactly how they differ.
+- **Full-screen viewer:** a full-screen button (or the F key), and ← → / swipe to move between photos in the viewer and in full screen.
+- Login blocks an address for 15 minutes after 5 wrong passwords.
+
 ## 3.2.0 (2026-10-25)
 
 **AI on your laptop, Azure for everything else** (edge computing), plus guards that keep Azure credit use at about zero.
