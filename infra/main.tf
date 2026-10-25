@@ -171,12 +171,11 @@ resource "azurerm_user_assigned_identity" "github" {
 }
 
 resource "azurerm_federated_identity_credential" "github_main" {
-  name                = "github-main-branch"
-  resource_group_name = azurerm_resource_group.main.name
-  parent_id           = azurerm_user_assigned_identity.github.id
-  audience            = ["api://AzureADTokenExchange"]
-  issuer              = "https://token.actions.githubusercontent.com"
-  subject             = "repo:${var.github_repository}:ref:refs/heads/main"
+  name      = "github-main-branch"
+  parent_id = azurerm_user_assigned_identity.github.id
+  audience  = ["api://AzureADTokenExchange"]
+  issuer    = "https://token.actions.githubusercontent.com"
+  subject   = "repo:${var.github_repository}:ref:refs/heads/main"
 }
 
 resource "azurerm_role_assignment" "github_deploys_website" {
