@@ -25,7 +25,7 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 from sqlalchemy import bindparam, make_url, text  # noqa: E402
 
-from app import __version__, intelligence  # noqa: E402
+from app import __version__, ai, intelligence  # noqa: E402
 from app.database import connect, init_db  # noqa: E402
 from app.photos import NotAPhoto, analyze, compare  # noqa: E402
 from app.storage import get_storage, original_key, thumbnail_key  # noqa: E402
@@ -154,7 +154,7 @@ def list_photos(search: str = "", smart: bool = False, duplicates_only: bool = F
                 offset: int = 0, limit: int = 60):
     limit, offset = max(1, min(limit, 200)), max(0, offset)
     if smart and search.strip():  # AI search: "dog on a beach"
-        if not intelligence.status()["ready"]:
+        if not (ai.enabled() and ai.models_ready()):
             raise HTTPException(503, "Smart search is still getting ready. Try again in a minute.")
         ranked = intelligence.search(search.strip())
         with connect() as conn:
@@ -551,13 +551,16 @@ def system_status():
     storage = get_storage()
     st_ok, st_ms, st_error = _timed(storage.check)
     insights = bool(env("APPLICATIONINSIGHTS_CONNECTION_STRING"))
-    ai = intelligence.status()
-    ai_detail = (f"{ai['analysed']} photos analysed" + (f", {ai['waiting']} waiting" if ai["waiting"] else "")
-                 if ai["ready"] else ai["message"])
+    brain = intelligence.status()
+    where = "on your laptop (edge)" if brain["runs_on"] == "laptop" else "in App Service"
+    ai_detail = (f"Running {where} · {brain['analysed']} photos analysed"
+                 + (f", {brain['waiting']} waiting" if brain["waiting"] else "")
+                 if brain["ready"] else brain["message"])
     return {
         "version": __version__,
         "environment": "Azure" if site else "Local",
         "build": _build_info(),
+        "ai_runs_on": brain["runs_on"],
         "services": [
             {"id": "app-service", "name": "Azure App Service", "role": "Hosts the website and API",
              "active": bool(site), "healthy": True, "latency_ms": None,
@@ -571,9 +574,11 @@ def system_status():
             {"id": "monitoring", "name": "Application Insights", "role": "Tracks requests, errors and logs",
              "active": insights, "healthy": insights, "latency_ms": None,
              "detail": "Sending telemetry" if insights else "Not configured", "error": None},
-            {"id": "ai", "name": "Free AI recognition", "role": "CLIP + face recognition, running inside the app",
-             "active": ai["enabled"], "healthy": ai["ready"] and not ai["failed"], "latency_ms": None,
-             "detail": ai_detail, "error": f"{ai['failed']} photos could not be analysed" if ai["failed"] else None},
+            {"id": "ai", "name": "Free AI recognition",
+             "role": "CLIP + face recognition on your laptop, with App Service as backup",
+             "active": brain["enabled"], "healthy": brain["ready"] and not brain["failed"], "latency_ms": None,
+             "detail": ai_detail,
+             "error": f"{brain['failed']} photos could not be analysed" if brain["failed"] else None},
         ],
     }
 

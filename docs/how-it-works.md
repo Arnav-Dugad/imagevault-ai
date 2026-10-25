@@ -70,7 +70,7 @@ Matching photos are joined into groups with a **union-find** algorithm. In each 
 
 ## Free AI recognition
 
-ImageVault runs three small open-source AI models **inside the App Service itself**, using ONNX Runtime and OpenCV. There's no paid AI API, no per-photo charge and no usage limit, and photos are never sent to another company. The models (about 190 MB) are downloaded once from fixed versions and checked against SHA-256 fingerprints (`app/ai.py`). With all of them loaded, the app uses about 320 MB of memory, which fits the free F1 plan's 1 GB.
+ImageVault runs three small open-source AI models **on your own machines**, using ONNX Runtime and OpenCV: on your laptop when it's online, otherwise inside the App Service. There's no paid AI API, no per-photo charge and no usage limit, and photos are never sent to another company. The models (about 190 MB) are downloaded once from fixed versions and checked against SHA-256 fingerprints (`app/ai.py`). With all of them loaded, the app uses about 320 MB of memory, which fits the free F1 plan's 1 GB.
 
 | Model | License | What it does | Used for |
 |---|---|---|---|
@@ -78,7 +78,25 @@ ImageVault runs three small open-source AI models **inside the App Service itsel
 | **YuNet** (OpenCV Zoo) | MIT | Finds faces in a photo | People |
 | **SFace** (OpenCV Zoo) | Apache 2.0 | Turns a face into 128 numbers; the same person gives similar numbers | People |
 
-Analysis runs in a **background thread** (`app/intelligence.py`): uploads return immediately, and the Home page shows progress. On Azure, the models are kept in `/home/models` so they survive restarts.
+Analysis runs in a **background worker** (`app/intelligence.py`): uploads return immediately, and the Home page shows progress. On Azure, the models are kept in `/home/models` so they survive restarts.
+
+### Laptop first, cloud as backup (edge computing)
+
+```mermaid
+flowchart LR
+    L["Your laptop<br/>python -m app.worker"] -- "claims new photos,<br/>saves results" --> DB[("PostgreSQL")]
+    L -- "reads photos,<br/>saves face crops" --> B["Blob Storage"]
+    S["App Service<br/>(backup worker)"] -. "only if the laptop is offline<br/>or a photo waited 5 min" .-> DB
+```
+
+The same worker code runs in two places:
+
+- **Your laptop** (`python -m app.worker`) connects to the Azure database and Blob Storage, using your `az login` account and a firewall rule for your IP address, both created by Terraform. It reports a *heartbeat* every 5 seconds to a `workers` table.
+- **The website** checks that table. While a laptop is online, it leaves new photos alone. It only steps in if the laptop has been silent for 20 seconds, or if a photo has waited more than 5 minutes.
+
+Each worker *claims* a photo with an atomic `UPDATE … WHERE ai_status IS NULL`, so no photo is analysed twice. If a worker disappears mid-photo, its claim is released and another worker retries it. Tested locally: with the laptop worker running, it analysed all 32 demo photos in about 5 seconds while the website stayed idle; after stopping it, the website analysed the next upload on its own.
+
+Why bother, if both are free? The free App Service plan has 1 GB of memory and 60 CPU-minutes a day. Doing the AI on the laptop keeps the website fast and well inside those limits, and it's a real example of edge computing, one of the course's suggested domains.
 
 ### People (face recognition)
 
@@ -117,7 +135,8 @@ Two photos are suggested as the same subject when their CLIP descriptions are ve
 | `app/server.py` | All API routes: upload, list, details, delete, duplicates, stats, health, cloud status, login |
 | `app/photos.py` | Reading images, thumbnails, SHA-256, pHash, dHash, comparing two photos |
 | `app/ai.py` | Downloading, verifying and running the free AI models |
-| `app/intelligence.py` | Background analysis: people, same subject, smart search |
+| `app/intelligence.py` | Background analysis: people, same subject, smart search; laptop/cloud hand-over |
+| `app/worker.py` | `python -m app.worker`: the laptop AI worker |
 | `app/storage.py` | Saving and loading files: Azure Blob Storage or a local folder |
 | `app/database.py` | Tables `photos`, `matches`, `faces` and `people` (SQLAlchemy, so it works with PostgreSQL and SQLite) |
 | `app/config.py` | Every setting, read from environment variables |
@@ -126,3 +145,4 @@ Two photos are suggested as the same subject when their CLIP descriptions are ve
 | `.github/workflows/ci-cd.yml` | The CI/CD pipeline |
 | `tests/test_app.py` | Tests for uploads, matching, grouping, deleting, search, health and the password |
 | `tests/test_ai.py` | Tests for People, same subject and smart search, using real public-domain photos |
+| `tests/test_worker.py` | Tests for the laptop/cloud hand-over and the worker settings file |

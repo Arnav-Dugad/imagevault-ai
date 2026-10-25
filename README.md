@@ -42,7 +42,7 @@ flowchart LR
 | **Azure Database for PostgreSQL** (Flexible Server) | Stores photo details and duplicate matches |
 | **Azure Blob Storage** | Stores the photos and thumbnails |
 | **Application Insights** (+ Log Analytics) | Monitors requests, errors, response times and logs |
-| **Free AI models inside App Service** (CLIP, YuNet, SFace via ONNX Runtime + OpenCV) | People, smart search and same-subject suggestions, at no extra cost |
+| **Free AI models** (CLIP, YuNet, SFace via ONNX Runtime + OpenCV) on **your laptop** (edge), with App Service as backup | People, smart search and same-subject suggestions, at no extra cost |
 | **Terraform** | Creates all of the above with one command (Infrastructure as Code) |
 | **GitHub Actions** | Tests every push and deploys `main` to Azure (CI/CD) |
 | **Cost Management budget** | Emails alerts at 50%, 80% and forecast 100% of the monthly budget |
@@ -66,6 +66,8 @@ python -m app                     # then open http://127.0.0.1:8000
 ```
 
 The first time it starts, ImageVault downloads its free AI models (about 190 MB, once) into `data/models`. To run without AI, set `IMAGEVAULT_AI=off`.
+
+**AI on your laptop for the Azure website (edge computing):** after deploying, run `python -m app.worker` on your laptop. It analyses new photos for the live site, and the website takes over automatically whenever the laptop is off. See [step 8 of the deployment guide](docs/azure-deployment.md#step-8-recommended-run-the-ai-on-your-laptop).
 
 While working on the website, run `python -m uvicorn app.server:app --reload` in one terminal and `npm run dev` in `frontend/` in another, then open http://localhost:5173.
 
