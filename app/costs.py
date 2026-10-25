@@ -6,6 +6,9 @@ day, and the API allows a limited number of calls.
 
   AZURE_COST_SCOPE   the resource group to report on, e.g. /subscriptions/<id>/resourceGroups/imagevault-rg
   MONTHLY_BUDGET     the budget shown next to the cost (set by Terraform from var.monthly_budget)
+  INR_PER_USD        optional: a fixed exchange rate, instead of today's rate
+
+Azure for Students bills in US dollars; the website shows rupees, converted at today's rate.
 """
 
 import json
@@ -82,4 +85,33 @@ def month_to_date() -> dict:
     value["updated_at"] = datetime.now(timezone.utc).isoformat()
     with _lock:
         _cache[scope] = {"value": value, "expires": time.monotonic() + lifetime}
+    return value
+
+
+# --- Showing costs in rupees -----------------------------------------------------------------
+
+FALLBACK_INR_PER_USD = 88.0  # used when today's rate can't be fetched
+RATE_URL = "https://open.er-api.com/v6/latest/USD"  # free, no key needed; updates daily
+_rate: dict = {}
+
+
+def inr_per(currency: str = "USD") -> float:
+    """How many rupees one unit of the billing currency is worth."""
+    if currency == "INR":
+        return 1.0
+    if env("INR_PER_USD"):
+        return float(env("INR_PER_USD"))
+    if not running_on_azure():  # keep local runs and tests offline
+        return FALLBACK_INR_PER_USD
+    with _lock:
+        if _rate and time.monotonic() < _rate["expires"]:
+            return _rate["value"]
+    try:
+        with urllib.request.urlopen(RATE_URL, timeout=10) as response:
+            value = float(json.load(response)["rates"]["INR"])
+        lifetime = 12 * 3600
+    except Exception:
+        value, lifetime = _rate.get("value", FALLBACK_INR_PER_USD), ERROR_CACHE_SECONDS
+    with _lock:
+        _rate.update(value=value, expires=time.monotonic() + lifetime)
     return value

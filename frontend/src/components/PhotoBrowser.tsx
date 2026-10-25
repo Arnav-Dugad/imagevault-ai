@@ -50,7 +50,6 @@ export function PhotoBrowser({ albumId, rememberAs, header, emptyText }: {
   const [error, setError] = useState("");
   const [loadingMore, setLoadingMore] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
-  const searchBox = useRef<HTMLInputElement>(null);
   const end = useRef<HTMLDivElement>(null);
 
   const order = useMemo(() => photos?.map((p) => p.id) ?? [], [photos]);
@@ -92,18 +91,6 @@ export function PhotoBrowser({ albumId, rememberAs, header, emptyText }: {
     return () => observer.disconnect();
   }, [loadMore]);
 
-  // "/" jumps to the search box.
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "/" && !(event.target as HTMLElement).closest("input, textarea")) {
-        event.preventDefault();
-        searchBox.current?.focus();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
   const clearFilters = () => { setSearch(""); setDateFrom(""); setDateTo(""); setOptions({ filter: "all" }); };
   const filtered = search !== "" || filter !== "all" || dateFrom !== "" || dateTo !== "";
   const pill = (active: boolean) => cn("focus-ring whitespace-nowrap rounded-lg px-3 py-1.5 text-sm transition", active ? "bg-white/10 font-medium text-ink" : "text-muted hover:text-ink");
@@ -117,8 +104,8 @@ export function PhotoBrowser({ albumId, rememberAs, header, emptyText }: {
           <span className="sr-only">{smart ? "Describe what is in the photo" : "Search by file name"}</span>
           {smart ? <Sparkles className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-sky-300" />
             : <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />}
-          <input ref={searchBox} value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder={smart ? "Describe it: a dog on a beach, food, a bridge in fog…" : "Search by name  ( / )"}
+          <input value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder={smart ? "Describe it: a dog on a beach, food, a bridge in fog…" : "Search by name"}
             className="h-11 w-full rounded-xl bg-transparent pl-10 pr-9 text-sm outline-none placeholder:text-muted" />
           {search && <button onClick={() => setSearch("")} aria-label="Clear search" className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted hover:text-ink"><X className="h-4 w-4" /></button>}
         </label>
@@ -139,13 +126,13 @@ export function PhotoBrowser({ albumId, rememberAs, header, emptyText }: {
         className="focus-ring h-9 rounded-lg border border-line bg-panel px-2.5 text-sm disabled:opacity-50">
         {SORTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
       </select>
-      <label className="flex h-9 items-center gap-2 rounded-lg border border-line bg-panel px-2.5 text-muted">
+      <label className="order-last flex h-9 w-full items-center gap-2 rounded-lg border border-line bg-panel px-2.5 text-muted sm:order-none sm:w-auto">
         <CalendarRange className="h-4 w-4" /><span className="sr-only">From</span>
         <input type="date" value={dateFrom} max={dateTo || undefined} onChange={(e) => setDateFrom(e.target.value)} className="bg-transparent text-ink outline-none [color-scheme:dark]" />
         <span>–</span>
         <input type="date" value={dateTo} min={dateFrom || undefined} onChange={(e) => setDateTo(e.target.value)} aria-label="To" className="bg-transparent text-ink outline-none [color-scheme:dark]" />
       </label>
-      {(dateFrom || dateTo) && <button onClick={() => { setDateFrom(""); setDateTo(""); }} className="text-muted hover:text-ink">Clear dates</button>}
+      {(dateFrom || dateTo) && <button onClick={() => { setDateFrom(""); setDateTo(""); }} className="order-last text-muted hover:text-ink sm:order-none">Clear dates</button>}
       <div className="ml-auto flex rounded-lg border border-line bg-panel p-0.5" role="group" aria-label="Thumbnail size">
         {([["small", Grid3x3], ["medium", Grid2x2], ["large", Square]] as const).map(([key, Icon]) => (
           <button key={key} onClick={() => setOptions({ size: key })} aria-pressed={size === key} title={`${key[0].toUpperCase()}${key.slice(1)} thumbnails`}

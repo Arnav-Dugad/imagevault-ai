@@ -78,7 +78,19 @@ export interface Album {
   id: string;            // an album id, or "auto:<key>" for albums made by the AI
   name: string;
   count: number;
+  bytes: number;
   cover_url: string | null;
+}
+
+export interface StorageUsage {
+  kind: "azure" | "local";
+  total_bytes: number;
+  parts: { key: "originals" | "thumbnails" | "faces"; bytes: number }[];
+  price_per_gb: number;
+  monthly_cost: number;
+  saved_bytes: number;
+  saved_monthly: number;
+  inr_rate: number;       // rupees per US dollar
 }
 
 export type SortKey = "newest" | "oldest" | "taken_new" | "taken_old" | "largest" | "smallest" | "name";
@@ -106,6 +118,7 @@ export interface CostReport {
   services?: { name: string; amount: number }[];
   updated_at?: string;
   error?: string | null;
+  inr_rate: number;       // rupees per unit of the billing currency
 }
 
 export interface CloudService {

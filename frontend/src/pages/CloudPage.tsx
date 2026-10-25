@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Activity, ArrowDown, ArrowRight, Cloud, Database, ExternalLink, GitBranch, Globe, HardDrive, Laptop, Layers, RefreshCw, Server, Sparkles, Wallet, type LucideIcon } from "lucide-react";
 import { CostCard } from "../components/CostCard";
+import { StorageCard } from "../components/StorageCard";
 import { Button, PageHeading, Spinner } from "../components/ui";
 import { useSystem } from "../lib/system";
 import { cn, formatDate } from "../lib/utils";
@@ -124,7 +125,10 @@ export function CloudPage() {
       {system.services.map((service, i) => <ServiceCard key={service.id} service={service} index={i} />)}
     </div>
 
-    <div className="mt-6"><CostCard /></div>
+    <div className="mt-6 grid items-start gap-6 xl:grid-cols-2">
+      <CostCard />
+      <StorageCard />
+    </div>
 
     <div className="mt-6"><Architecture laptopOnline={system.ai_runs_on === "laptop"} /></div>
 
@@ -140,7 +144,7 @@ export function CloudPage() {
         Every Azure resource is defined in code. <a className={link} href={`${REPO}/tree/main/infra`} target="_blank" rel="noreferrer">View infra/ <ExternalLink className="h-3 w-3" /></a>
       </DevOpsCard>
       <DevOpsCard icon={Wallet} title="Cost control · Budget alerts">
-        Free tiers only, capped logs, and a US$5 monthly budget with email alerts.
+        Free tiers only, capped logs, and a monthly budget with email alerts.
       </DevOpsCard>
     </div>
   </>;

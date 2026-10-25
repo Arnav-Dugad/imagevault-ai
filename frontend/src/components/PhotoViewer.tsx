@@ -67,12 +67,10 @@ export function PhotoViewer({ id, ids, onClose, onDeleted, onChanged }: {
       if ((event.target as HTMLElement).tagName === "INPUT") return;
       if (event.key === "ArrowLeft") goPrev();
       if (event.key === "ArrowRight") goNext();
-      if (event.key.toLowerCase() === "f") setFullscreen(true);
-      if (event.key.toLowerCase() === "h") void toggleFavorite();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [fullscreen, confirming, renaming, goPrev, goNext, toggleFavorite]);
+  }, [fullscreen, confirming, renaming, goPrev, goNext]);
 
   async function remove() {
     setDeleting(true);
@@ -116,7 +114,7 @@ export function PhotoViewer({ id, ids, onClose, onDeleted, onChanged }: {
             ))}
           </div>}
           {(!photo || !imageLoaded) && !error && <LoaderCircle className="absolute h-6 w-6 animate-spin text-acid" />}
-          {photo && <button onClick={() => setFullscreen(true)} aria-label="Full screen (F)" title="Full screen (F)"
+          {photo && <button onClick={() => setFullscreen(true)} aria-label="Full screen" title="Full screen"
             className="focus-ring absolute right-5 top-5 rounded-full bg-black/50 p-2 text-white backdrop-blur transition hover:bg-black/70"><Maximize2 className="h-4 w-4" /></button>}
           {prevId && <button onClick={goPrev} aria-label="Previous photo (←)" className="focus-ring absolute left-5 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white backdrop-blur transition hover:bg-black/70"><ChevronLeft className="h-5 w-5" /></button>}
           {nextId && <button onClick={goNext} aria-label="Next photo (→)" className="focus-ring absolute right-5 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white backdrop-blur transition hover:bg-black/70"><ChevronRight className="h-5 w-5" /></button>}
@@ -130,7 +128,7 @@ export function PhotoViewer({ id, ids, onClose, onDeleted, onChanged }: {
               : <button onClick={() => { if (photo) { setNewName(photo.filename); setRenaming(true); } }} title="Rename"
                   className="focus-ring min-w-0 rounded-lg text-left"><h2 className="break-all text-lg font-semibold leading-snug hover:underline hover:decoration-line">{photo?.filename ?? "Loading…"}</h2></button>}
             <div className="-mr-1 -mt-1 flex shrink-0">
-              {photo && <button onClick={toggleFavorite} aria-label={photo.favorite ? "Remove from favourites (H)" : "Add to favourites (H)"} title="Favourite (H)"
+              {photo && <button onClick={toggleFavorite} aria-label={photo.favorite ? "Remove from favourites" : "Add to favourites"} title="Favourite"
                 className="focus-ring rounded-lg p-1.5 text-muted hover:bg-white/5 hover:text-coral"><Heart className={cn("h-5 w-5 transition", photo.favorite && "scale-110 fill-coral text-coral")} /></button>}
               <button onClick={onClose} aria-label="Close" className="focus-ring rounded-lg p-1.5 text-muted hover:bg-white/5 hover:text-ink"><X className="h-5 w-5" /></button>
             </div>

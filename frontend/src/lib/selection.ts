@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 
-/** Selecting photos: click to toggle, Shift+click for a range, Ctrl+A for all, Esc to clear. */
+/** Selecting photos: click to toggle, Shift+click for a range, Esc to clear. */
 export function useSelection(order: string[]) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const last = useRef<string | null>(null);
@@ -25,14 +25,10 @@ export function useSelection(order: string[]) {
     const onKey = (event: KeyboardEvent) => {
       if ((event.target as HTMLElement).closest("input, textarea, [role=dialog]")) return;
       if (event.key === "Escape" && selected.size) clear();
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a" && selected.size) {
-        event.preventDefault();
-        selectAll();
-      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selected, clear, selectAll]);
+  }, [selected, clear]);
 
   // Forget photos that are no longer listed (for example after deleting them).
   useEffect(() => {

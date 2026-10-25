@@ -6,6 +6,7 @@ faces   - faces found in photos, each linked to a person
 people  - groups of faces that belong to the same person
 workers - which computers are running the AI right now
 albums, album_photos - albums made by the user
+counters - running totals, such as the space freed by deleting duplicates
 """
 
 from contextlib import contextmanager
@@ -65,6 +66,12 @@ album_photos = Table(
     "album_photos", metadata,
     Column("album_id", String(32), ForeignKey("albums.id", ondelete="CASCADE"), primary_key=True),
     Column("photo_id", String(32), ForeignKey("photos.id", ondelete="CASCADE"), primary_key=True, index=True),
+)
+
+counters = Table(
+    "counters", metadata,
+    Column("name", String(40), primary_key=True),
+    Column("value", BigInteger, nullable=False),
 )
 
 # AI workers (the website on Azure, or your laptop) report here every few seconds.

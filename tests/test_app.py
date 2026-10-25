@@ -172,6 +172,7 @@ def test_cost_card(client, monkeypatch):
     monkeypatch.setenv("MONTHLY_BUDGET", "5")
     report = client.get("/api/costs").json()
     assert report["amount"] == 0.12 and report["budget"] == 5 and report["error"] is None
+    assert report["inr_rate"] > 1  # the website shows rupees; Azure for Students bills in US dollars
     client.get("/api/costs")
     assert len(calls) == 1  # cached for an hour, so Azure's API is not called on every page view
 
@@ -233,3 +234,31 @@ def test_sharpest_photo_in_a_group(client):
     upload(client, "blurry.png", encode(scene().filter(ImageFilter.GaussianBlur(2))))
     group = client.get("/api/duplicates").json()[0]
     assert group["sharpest_id"] == sharp["id"]
+
+
+def test_storage_usage_space_saved_and_delete_everything(client):
+    original = encode(scene())
+    first = upload(client, "scene.png", original).json()["photo"]
+    copy = upload(client, "scene (copy).png", original).json()["photo"]
+    upload(client, "document.png", encode(document()))
+
+    usage = client.get("/api/storage").json()
+    parts = {p["key"]: p["bytes"] for p in usage["parts"]}
+    assert parts["originals"] == first["size"] + len(encode(document()))  # the copy is stored once
+    assert parts["thumbnails"] > 0 and usage["total_bytes"] == sum(parts.values())
+    assert usage["saved_bytes"] == copy["size"] and usage["monthly_cost"] >= 0
+    assert usage["inr_rate"] > 1
+
+    client.delete(f"/api/photos/{copy['id']}?duplicate=true")  # removed on the Duplicates page
+    assert client.get("/api/storage").json()["saved_bytes"] == copy["size"]  # still counted as saved
+
+    album = client.post("/api/photos/batch", json={"ids": [first["id"]], "action": "add_to_album", "new_album": "A"})
+    assert album.status_code == 200
+    assert client.get("/api/albums").json()["mine"][0]["bytes"] == first["size"]
+
+    assert client.post("/api/reset", json={"confirm": "yes"}).status_code == 422
+    assert client.post("/api/reset", json={"confirm": "delete everything"}).json() == {"ok": True}
+    assert client.get("/api/photos").json()["total"] == 0
+    assert client.get("/api/albums").json()["mine"] == []
+    after = client.get("/api/storage").json()
+    assert after["total_bytes"] == 0 and after["saved_bytes"] == 0

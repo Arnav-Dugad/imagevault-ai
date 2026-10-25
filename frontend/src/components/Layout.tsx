@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
-import { ArrowUp, Cloud, Copy, FolderOpen, House, ImagePlus, Images, Keyboard, LoaderCircle, LogOut, Menu, Upload, Users, X } from "lucide-react";
+import { ArrowUp, Cloud, Copy, FolderOpen, House, ImagePlus, Images, LoaderCircle, LogOut, Menu, Upload, Users, X } from "lucide-react";
 import { api } from "../lib/api";
 import { useSystem } from "../lib/system";
 import { useToast } from "../lib/toast";
 import { useUploads } from "../lib/uploads";
 import { cn } from "../lib/utils";
-import { Modal } from "./ui";
 
 const nav = [
   { to: "/", label: "Home", icon: House },
@@ -65,47 +64,6 @@ function DropAnywhere() {
     <div className="pointer-events-none fixed inset-3 z-[65] grid place-items-center rounded-3xl border-2 border-dashed border-acid bg-canvas/80 backdrop-blur-sm">
       <p className="flex items-center gap-3 text-xl font-semibold"><ImagePlus className="h-7 w-7 text-acid" />Drop to upload</p>
     </div>
-  );
-}
-
-const SHORTCUTS: [string, string][] = [
-  ["/", "Search"],
-  ["Ctrl + A", "Select all photos"],
-  ["Shift + click", "Select a range"],
-  ["Delete", "Delete the selected photos"],
-  ["Esc", "Clear the selection or close"],
-  ["← →", "Previous / next photo"],
-  ["F", "Full screen"],
-  ["H", "Favourite"],
-  ["Ctrl + V", "Upload a copied image"],
-  ["?", "Show this list"],
-];
-
-/** Press "?" to see the keyboard shortcuts. */
-function Shortcuts() {
-  const [open, setOpen] = useState(false);
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "?" && !(event.target as HTMLElement).closest("input, textarea, select")) setOpen((o) => !o);
-    };
-    const show = () => setOpen(true);
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("imagevault:shortcuts", show);
-    return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("imagevault:shortcuts", show); };
-  }, []);
-  if (!open) return null;
-  return (
-    <Modal onClose={() => setOpen(false)} className="max-w-sm p-6">
-      <h2 className="mb-4 text-lg font-semibold">Keyboard shortcuts</h2>
-      <dl className="space-y-2 text-sm">
-        {SHORTCUTS.map(([keys, action]) => (
-          <div key={keys} className="flex items-center justify-between gap-4">
-            <dt className="text-muted">{action}</dt>
-            <dd><kbd className="rounded-md border border-line bg-raised px-2 py-0.5 font-mono text-xs">{keys}</kbd></dd>
-          </div>
-        ))}
-      </dl>
-    </Modal>
   );
 }
 
@@ -183,7 +141,6 @@ function Navigation({ onNavigate, showLogout }: { onNavigate?: () => void; showL
       <div className="mt-auto space-y-2 pt-6">
         <UploadProgress />
         <CloudStatus />
-        <button onClick={() => window.dispatchEvent(new Event("imagevault:shortcuts"))} className="focus-ring flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-muted hover:bg-white/[.04] hover:text-ink"><Keyboard className="h-4 w-4" />Shortcuts</button>
         {showLogout && <button onClick={logout} className="focus-ring flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-muted hover:bg-white/[.04] hover:text-ink"><LogOut className="h-4 w-4" />Log out</button>}
       </div>
     </>
@@ -218,7 +175,6 @@ export function Layout({ children, showLogout }: { children: ReactNode; showLogo
         <div className="mx-auto max-w-6xl">{children}</div>
       </main>
       <DropAnywhere />
-      <Shortcuts />
       <BackToTop />
     </div>
   );

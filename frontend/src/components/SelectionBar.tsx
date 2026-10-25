@@ -22,7 +22,7 @@ function AlbumMenu({ onPick, onClose }: { onPick: (album: { id?: string; name?: 
     if (name.trim()) onPick({ name: name.trim() });
   }
   return (
-    <div ref={box} className="pop-in absolute bottom-full left-0 mb-2 w-64 rounded-2xl border border-line bg-raised p-2 shadow-2xl">
+    <div ref={box} className="pop-in absolute bottom-full left-1/2 mb-2 w-64 -translate-x-1/2 rounded-2xl border border-line bg-raised p-2 shadow-2xl">
       <p className="px-2 py-1 text-xs font-medium text-muted">Add to album</p>
       <div className="max-h-56 overflow-y-auto">
         {albums?.map((album) => (
@@ -67,23 +67,14 @@ export function SelectionBar({ selected, total, albumId, onSelectAll, onClear, o
     }
   }
 
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if ((event.target as HTMLElement).closest("input, textarea, [role=dialog]")) return;
-      if (event.key === "Delete" && selected.size) setConfirming(true);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [selected]);
-
   if (!selected.size) return null;
-  const icon = "flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm transition hover:bg-white/10 disabled:opacity-50";
+  const icon = "flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-2 text-sm sm:px-2.5 transition hover:bg-white/10 disabled:opacity-50";
   return <>
-    <div className="pop-in fixed bottom-5 left-1/2 z-40 flex max-w-[calc(100vw-1.5rem)] -translate-x-1/2 items-center gap-1 overflow-x-auto rounded-2xl border border-line bg-raised/95 p-1.5 shadow-2xl backdrop-blur lg:ml-30">
-      <button onClick={onClear} aria-label="Clear selection (Esc)" title="Clear selection (Esc)" className={icon}><X className="h-4 w-4" /></button>
-      <span className="whitespace-nowrap px-1 text-sm font-semibold">{selected.size} selected</span>
-      {selected.size < total && <button onClick={onSelectAll} className={`${icon} whitespace-nowrap text-muted hover:text-ink`} title="Ctrl+A">Select all {total}</button>}
-      <span className="mx-1 h-6 w-px bg-line" />
+    <div className="pop-in fixed bottom-5 left-1/2 z-40 flex max-w-[calc(100vw-1rem)] -translate-x-1/2 items-center gap-0.5 rounded-2xl sm:gap-1 border border-line bg-raised/95 p-1.5 shadow-2xl backdrop-blur lg:ml-30">
+      <button onClick={onClear} aria-label="Clear selection" title="Clear selection" className={icon}><X className="h-4 w-4" /></button>
+      <span className="whitespace-nowrap px-1 text-sm font-semibold">{selected.size}<span className="hidden sm:inline"> selected</span></span>
+      {selected.size < total && <button onClick={onSelectAll} className={`${icon} whitespace-nowrap text-muted hover:text-ink`}><span className="sm:hidden">All</span><span className="hidden sm:inline">Select all {total}</span></button>}
+      <span className="mx-1 hidden h-6 w-px bg-line sm:block" />
       <button disabled={busy} onClick={() => run("favorite", {}, `${plural(selected.size)} added to favourites`)} className={icon} title="Favourite"><Heart className="h-4 w-4" /><span className="hidden sm:inline">Favourite</span></button>
       <button disabled={busy} onClick={() => run("unfavorite", {}, `${plural(selected.size)} removed from favourites`)} className={icon} title="Remove from favourites"><HeartOff className="h-4 w-4" /></button>
       <div className="relative">
@@ -99,7 +90,7 @@ export function SelectionBar({ selected, total, albumId, onSelectAll, onClear, o
       <a href={`/api/zip?ids=${ids.slice(0, 100).join(",")}`} download className={icon} title={selected.size > 100 ? "Downloads the first 100" : "Download as ZIP"}>
         <Download className="h-4 w-4" /><span className="hidden sm:inline">Download</span>
       </a>
-      <button disabled={busy} onClick={() => setConfirming(true)} className={`${icon} text-coral hover:bg-coral/10`} title="Delete (Del)"><Trash2 className="h-4 w-4" /><span className="hidden sm:inline">Delete</span></button>
+      <button disabled={busy} onClick={() => setConfirming(true)} className={`${icon} text-coral hover:bg-coral/10`}><Trash2 className="h-4 w-4" /><span className="hidden sm:inline">Delete</span></button>
     </div>
     {confirming && <ConfirmDialog title={`Delete ${plural(selected.size)}?`} confirmLabel="Delete" busy={busy}
       message="They will be removed from ImageVault and from cloud storage. This can't be undone."
