@@ -1,11 +1,13 @@
 import { useState, type ReactNode } from "react";
-import { Activity, ArrowDown, ArrowRight, Cloud, Database, ExternalLink, GitBranch, Globe, HardDrive, Laptop, Layers, RefreshCw, Server, Sparkles, Wallet, type LucideIcon } from "lucide-react";
+import { Activity, ArrowDown, ArrowRight, Cloud, Cpu, Database, ExternalLink, GitBranch, Globe, HardDrive, Laptop, Layers, RefreshCw, Server, Sparkles, Wallet, Wand2, type LucideIcon } from "lucide-react";
 import { CostCard } from "../components/CostCard";
 import { StorageCard } from "../components/StorageCard";
 import { Button, PageHeading, Spinner } from "../components/ui";
+import { api } from "../lib/api";
 import { useSystem } from "../lib/system";
+import { useToast } from "../lib/toast";
 import { cn, formatDate } from "../lib/utils";
-import type { CloudService } from "../types";
+import type { AiMode, CloudService } from "../types";
 
 const REPO = "https://github.com/Arnav-Dugad/imagevault-ai";
 const ICONS: Record<CloudService["id"], LucideIcon> = { "app-service": Server, database: Database, storage: Cloud, monitoring: Activity, ai: Sparkles };
@@ -78,10 +80,61 @@ function Architecture({ laptopOnline }: { laptopOnline: boolean }) {
         <div className="grid place-items-center text-muted"><ArrowRight className="hidden h-5 w-5 lg:block" /><ArrowDown className="h-5 w-5 lg:hidden" /></div>
         <p className="text-sm leading-6 text-muted">
           {laptopOnline
-            ? <>Your laptop is doing the AI work and saving results to Azure.</>
-            : <>Run <code className="text-ink">python -m app.worker</code> to do the AI work on your laptop. Until then, App Service does it.</>}
+            ? <>Your laptop does the AI work and sends the results to App Service over HTTPS.</>
+            : <>Run <code className="text-ink">python -m app.worker</code> to do the AI work on your laptop, on any Wi-Fi. Until then, App Service does it.</>}
         </p>
       </div>
+    </section>
+  );
+}
+
+const MODES: { key: AiMode; label: string; icon: LucideIcon; hint: string }[] = [
+  { key: "auto", label: "Automatic", icon: Wand2, hint: "Your laptop when its AI worker is on, otherwise Azure." },
+  { key: "laptop", label: "My laptop", icon: Laptop, hint: "Only your laptop. New photos wait until you start the worker." },
+  { key: "azure", label: "Azure", icon: Cloud, hint: "Only App Service. Your laptop's worker rests." },
+];
+
+/** The switch that decides where the AI work happens. */
+function AiSwitch({ mode, laptopOnline, onChanged }: { mode: AiMode; laptopOnline: boolean; onChanged: () => void }) {
+  const [saving, setSaving] = useState<AiMode | null>(null);
+  const toast = useToast();
+  async function choose(next: AiMode) {
+    if (next === mode) return;
+    setSaving(next);
+    try {
+      await api("/ai/mode", { method: "PUT", body: JSON.stringify({ mode: next }) });
+      toast(`AI now runs: ${MODES.find((m) => m.key === next)!.label.toLowerCase()}`);
+      onChanged();
+    } catch (e) {
+      toast((e as Error).message, true);
+    } finally {
+      setSaving(null);
+    }
+  }
+  const current = MODES.find((m) => m.key === mode)!;
+  return (
+    <section className="panel p-5 sm:p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="flex items-center gap-2 font-semibold"><Cpu className="h-4 w-4 text-acid" />Where the AI runs</h2>
+          <p className="mt-1 text-sm text-muted">{current.hint}</p>
+        </div>
+        <span className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs", laptopOnline ? "border-sky-300/40 text-sky-300" : "border-line text-muted")}>
+          <span className={cn("h-1.5 w-1.5 rounded-full", laptopOnline ? "bg-sky-300" : "bg-muted")} />Laptop worker {laptopOnline ? "online" : "offline"}
+        </span>
+      </div>
+      <div className="mt-4 grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Where the AI runs">
+        {MODES.map(({ key, label, icon: Icon }) => (
+          <button key={key} role="radio" aria-checked={mode === key} onClick={() => choose(key)} disabled={!!saving}
+            className={cn("focus-ring flex items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-medium transition",
+              mode === key ? "border-acid/50 bg-acid/10 text-ink" : "border-line text-muted hover:border-acid/30 hover:text-ink")}>
+            <Icon className={cn("h-4 w-4", mode === key && "text-acid", saving === key && "animate-pulse")} />{label}
+          </button>
+        ))}
+      </div>
+      {mode !== "azure" && !laptopOnline && <p className="mt-3 text-xs text-muted">
+        Start it on your laptop with <code className="text-ink">python -m app.worker</code>. It works on any Wi-Fi.
+      </p>}
     </section>
   );
 }
@@ -130,7 +183,9 @@ export function CloudPage() {
       <StorageCard />
     </div>
 
-    <div className="mt-6"><Architecture laptopOnline={system.ai_runs_on === "laptop"} /></div>
+    {onAzure && <div className="mt-6"><AiSwitch mode={system.ai_mode} laptopOnline={system.laptop_online} onChanged={() => void refresh()} /></div>}
+
+    <div className="mt-6"><Architecture laptopOnline={system.laptop_online} /></div>
 
     <h2 className="mb-3 mt-8 text-lg font-semibold">DevOps</h2>
     <div className="grid gap-3 lg:grid-cols-3">

@@ -4,8 +4,9 @@
                                      meaning; used for smart search and "same subject" suggestions
   YuNet (OpenCV Zoo, MIT license)    finds faces in a photo
   SFace (OpenCV Zoo, Apache 2.0)     turns a face into 128 numbers; the same person gives similar numbers
+  PP-OCR + CRNN (OpenCV Zoo, Apache 2.0)  find and read text in photos (signs, receipts), so it is searchable
 
-The models (about 190 MB) are downloaded once into the models folder and checked against a
+The models (about 225 MB) are downloaded once into the models folder and checked against a
 SHA-256 fingerprint, so a changed or corrupted file is never used.
 Set IMAGEVAULT_AI=off to turn all of this off.
 """
@@ -40,6 +41,10 @@ MODELS = {  # file name: (download URL, SHA-256)
                    "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"),
     "sface.onnx": (f"{_ZOO}/face_recognition_sface/face_recognition_sface_2021dec.onnx",
                    "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79"),
+    "text-detect.onnx": (f"{_ZOO}/text_detection_ppocr/text_detection_en_ppocrv3_2023may.onnx",
+                         "03f550c6b406fda8bf54bd8327815f6c7e2edd98cea02348c93d879254366587"),
+    "text-read.onnx": (f"{_ZOO}/text_recognition_crnn/text_recognition_CRNN_EN_2021sep.onnx",
+                       "a84b1f6e11a65c2d733cb0cc1f014aae3f99051e3f11447dc282faa678eee544"),
 }
 
 CLIP_MEAN = np.array([0.48145466, 0.4578275, 0.40821073], dtype=np.float32)
@@ -47,9 +52,14 @@ CLIP_STD = np.array([0.26862954, 0.26130258, 0.27577711], dtype=np.float32)
 FACE_MIN_SCORE = 0.9    # how sure YuNet must be that it found a face
 FACE_MIN_PIXELS = 32    # smaller faces are too blurry to recognise reliably
 FACE_MAX_SIDE = 1600    # photos are shrunk to this size before looking for faces
+TEXT_SIDE = 960         # photos are shrunk to this size before looking for text
+TEXT_MIN_CONFIDENCE = 0.85  # words the reader is less sure about are mostly noise, so they're dropped
+TEXT_MAX_WORDS = 60     # keeps very busy photos (a street full of signs) quick to analyse
+TEXT_CHARS = "0123456789abcdefghijklmnopqrstuvwxyz"
 
 _download_lock = threading.Lock()
 _face_lock = threading.Lock()  # OpenCV's face detector is not safe to share between threads
+_text_lock = threading.Lock()
 
 
 def enabled() -> bool:
@@ -165,6 +175,60 @@ def find_faces(image: Image.Image) -> list[Face]:
             box = (max(0.0, x / width), max(0.0, y / height), min(1.0, w / width), min(1.0, h / height))
             faces.append(Face(box, _normalize(feature)))
     return faces
+
+
+@lru_cache(maxsize=1)
+def _text_models():
+    import cv2
+
+    detector = cv2.dnn_TextDetectionModel_DB(cv2.dnn.readNet(str(model_dir() / "text-detect.onnx")))
+    detector.setBinaryThreshold(0.3)
+    detector.setPolygonThreshold(0.5)
+    detector.setUnclipRatio(2.0)
+    detector.setMaxCandidates(200)
+    return detector, cv2.dnn.readNet(str(model_dir() / "text-read.onnx"))
+
+
+def _read_word(reader, word: np.ndarray) -> tuple[str, float]:
+    """CRNN reads one word image (100x32, grey). Returns the text and how sure it is (0..1)."""
+    import cv2
+
+    reader.setInput(cv2.dnn.blobFromImage(word, size=(100, 32), mean=127.5, scalefactor=1 / 127.5))
+    scores = reader.forward()[:, 0, :]  # one row per position: blank + 36 characters
+    probabilities = np.exp(scores - scores.max(axis=1, keepdims=True))
+    probabilities /= probabilities.sum(axis=1, keepdims=True)
+    chars, sure, previous = [], [], 0
+    for position, best in enumerate(probabilities.argmax(axis=1)):
+        if best and best != previous:  # CTC: skip blanks and repeated characters
+            chars.append(TEXT_CHARS[best - 1])
+            sure.append(probabilities[position, best])
+        previous = best
+    return "".join(chars), float(np.mean(sure)) if sure else 0.0
+
+
+def read_text(image: Image.Image) -> str:
+    """Words written in the photo (lowercase letters and digits), for search. "" if there are none."""
+    import cv2
+
+    bgr = cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2BGR)
+    height, width = bgr.shape[:2]
+    scale = TEXT_SIDE / max(height, width)
+    size = (max(32, round(width * scale / 32) * 32), max(32, round(height * scale / 32) * 32))
+    grey = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    target = np.array([[0, 31], [0, 0], [99, 0], [99, 31]], dtype=np.float32)
+    words = []
+    with _text_lock:
+        detector, reader = _text_models()
+        detector.setInputParams(1.0 / 255.0, size, (122.67891434, 116.66876762, 104.00698793))
+        boxes, scores = detector.detect(cv2.resize(bgr, size))
+        ranked = sorted(zip(boxes, scores), key=lambda b: b[1], reverse=True)[:TEXT_MAX_WORDS]
+        for box, _ in sorted(ranked, key=lambda b: (min(p[1] for p in b[0]), min(p[0] for p in b[0]))):
+            corners = (np.array(box, dtype=np.float32) * [width / size[0], height / size[1]]).astype(np.float32)
+            word = cv2.warpPerspective(grey, cv2.getPerspectiveTransform(corners, target), (100, 32))
+            text, sure = _read_word(reader, word)
+            if len(text) >= 3 and sure >= TEXT_MIN_CONFIDENCE and text not in words:
+                words.append(text)
+    return " ".join(words)
 
 
 def to_bytes(vector: np.ndarray) -> bytes:

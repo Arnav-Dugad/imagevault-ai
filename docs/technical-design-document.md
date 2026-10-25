@@ -4,7 +4,7 @@
 **Project:** ImageVault, a cloud photo vault with duplicate detection  
 **Cloud provider:** Microsoft Azure (Azure for Students)  
 **Repository:** https://github.com/Arnav-Dugad/imagevault-ai  
-**Version:** 3.5.0
+**Version:** 3.6.0
 
 ---
 
@@ -12,7 +12,7 @@
 
 ImageVault is a web application for storing photos in the cloud. It automatically finds **exact duplicates** (the same file uploaded more than once) and **similar photos** (resized, compressed or edited copies). Users upload photos in the browser, review matching photos side by side, and delete the copies they don't need.
 
-It also includes **free AI recognition** that runs inside the application, with no paid AI service: it recognises the **same person** across photos (People), finds photos by **description** (smart search), sorts photos into **automatic albums** (Beach, Food & drink, Pets and others), picks the **sharpest photo in a burst**, and suggests photos of the **same subject taken differently**. Users can correct the AI by merging or splitting people by hand, and can edit many photos at once (favourite, add to an album, download as a ZIP, delete).
+It also includes **free AI recognition** that runs inside the application, with no paid AI service: it recognises the **same person** across photos (People), finds photos by **description** (smart search), sorts photos into **automatic albums** (Beach, Food & drink, Pets and others), picks the **sharpest photo in a burst**, makes **text in photos searchable** (OCR), suggests the **biggest space-wasters** to delete, and suggests photos of the **same subject taken differently**. Users can correct the AI by merging or splitting people by hand, and can edit many photos at once (favourite, add to an album, download as a ZIP, delete).
 
 The project's main focus is **cloud architecture and DevOps**, as the guidelines require:
 
@@ -83,10 +83,9 @@ flowchart TB
     GA -- "OIDC sign-in as UAI<br/>(Website Contributor)" --> WEB
     TF["Terraform"] -. provisions .-> Azure
     subgraph Edge["Edge: your laptop"]
-      LW["AI worker<br/>python -m app.worker<br/>CLIP · YuNet · SFace"]
+      LW["AI worker<br/>python -m app.worker<br/>CLIP · YuNet · SFace · OCR"]
     end
-    LW -- "firewall rule for its IP,<br/>SQL over TLS" --> PG
-    LW -- "az login account<br/>(Storage Blob Data Contributor)" --> ST
+    LW -- "HTTPS, logged in like a browser<br/>(any Wi-Fi)" --> WEB
 ```
 
 ### 3.2 Azure resources
@@ -152,6 +151,7 @@ The frontend is a single-page app that the backend serves as static files, so on
 | Method & path | Purpose |
 |---|---|
 | `POST /api/photos` | Upload one photo (multipart). Returns the photo and its best match |
+| `POST /api/photos/check` | Which SHA-256 fingerprints (worked out in the browser) are already stored, so the upload page can warn before uploading a copy |
 | `GET /api/photos?search=&smart=&filter=&album=&sort=&date_from=&date_to=&offset=&limit=` | Paginated photo list. Search by file name, or by description when `smart=true`; filter all / duplicates / favorites; one album; sort by upload date, date taken, size or name; date range on the camera date |
 | `GET /api/photos/{id}` | Photo details, all of its matches, its albums, and the faces/people in it |
 | `PATCH /api/photos/{id}` | Rename, favourite / unfavourite |
@@ -164,10 +164,12 @@ The frontend is a single-page app that the backend serves as static files, so on
 | `POST /api/duplicates/remove-exact` | Remove all exact copies, keeping the first upload of each |
 | `GET /api/related` | AI "same subject, different shot" groups (never deleted automatically) |
 | `GET /api/bursts` | Photos taken seconds apart, sharpest first |
+| `GET /api/cleanup` | The biggest space-wasters: lower-quality copies, blurrier burst shots and very blurry photos, biggest first |
 | `GET /api/people`, `GET /api/people/{id}`, `PUT /api/people/{id}` | Recognised people, their photos and faces, renaming |
 | `POST /api/people/merge`, `POST /api/people/{id}/split` | Correct the AI: merge several people into one, or move some faces to a new person |
 | `GET /api/faces/{id}/image` | Face crop used as a person's picture |
-| `GET /api/ai` | AI progress: analysed, waiting and failed photos |
+| `GET /api/ai`, `PUT /api/ai/mode` | AI progress, and where the AI runs: `auto`, `laptop` or `azure` |
+| `POST /api/worker/next`, `POST /api/worker/result/{id}`, `POST /api/worker/failed/{id}` | Used by the laptop AI worker over HTTPS: get the next photo, send back what the AI found |
 | `GET /api/costs` | This month's Azure cost by service (Cost Management Query API), cached for an hour |
 | `GET /api/stats` | Dashboard numbers |
 | `GET /api/storage` | Storage used by originals, thumbnails and face crops (listed from Blob Storage, cached for 5 minutes), the estimated monthly cost, and the space saved by duplicates |
@@ -199,6 +201,7 @@ erDiagram
         varchar taken_at "camera date from EXIF"
         float sharpness "Laplacian variance"
         boolean favorite
+        text ocr_text "words read from the photo"
         bytea clip "512 float32 CLIP numbers"
         varchar ai_status "NULL | processing | done | failed"
     }
@@ -227,6 +230,10 @@ erDiagram
     counters {
         varchar name PK "e.g. freed_bytes"
         bigint value
+    }
+    settings {
+        varchar name PK "e.g. ai_mode"
+        varchar value
     }
     albums {
         varchar id PK
@@ -318,12 +325,12 @@ The app is stateless: all data lives in PostgreSQL and Blob Storage. So moving f
 
 ### 5.8 Testing
 
-- **26 automated backend tests** (including `tests/test_worker.py`, 5 tests: the website leaves new photos to an online laptop, takes over when photos wait too long or no laptop is online, releases claims of silent workers, and reads the worker settings file):
-  - `tests/test_app.py` (15 tests): upload/download, exact copies and storage deduplication including file deletion, resized/compressed/brightened copies, non-matches, grouping and best copy, bulk removal, invalid files, search/filter, health/cloud status, password protection and lockout, the cost card, camera-date filters and sorting, batch actions (favourite, album, ZIP download, delete), the sharpest photo in a group, and storage usage, space saved and "delete everything".
-  - `tests/test_ai.py` (6 tests, real public-domain photos): the same person recognised across photos but not confused with another person; a mirrored, cropped, recoloured shot grouped as "same subject" rather than as a copy; smart search finding the right photos, and nothing for an absent subject; automatic albums; a burst keeping its sharpest frame (exact copies are not a burst); merging and splitting people by hand.
+- **33 automated backend tests** (including `tests/test_worker.py`, 7 tests: the website leaves new photos to an online laptop, takes over when photos wait too long or no laptop is online, releases claims of silent workers, the switch keeps the AI on one side, "waiting for your laptop" is shown, and the worker settings file is read):
+  - `tests/test_app.py` (18 tests): upload/download, exact copies and storage deduplication including file deletion, resized/compressed/brightened copies, non-matches, grouping and best copy, bulk removal, invalid files, search/filter, health/cloud status, password protection and lockout, the cost card, camera-date filters and sorting, batch actions (favourite, album, ZIP download, delete), the sharpest photo in a group, storage usage, space saved and "delete everything", and the space-waster list and the "already stored" check.
+  - `tests/test_ai.py` (8 tests, real public-domain photos): the same person recognised across photos but not confused with another person; a mirrored, cropped, recoloured shot grouped as "same subject" rather than as a copy; smart search finding the right photos, and nothing for an absent subject; automatic albums; a burst keeping its sharpest frame (exact copies are not a burst); merging and splitting people by hand; text in a photo found by search; the laptop worker's results sent over HTTPS and stored.
 - The same tests run in two modes in CI: SQLite + local folder, and PostgreSQL 16 + Azurite, so the cloud code paths are exercised on every push. The AI models are cached between runs.
 - Website: TypeScript type-checking, ESLint, production build.
-- Manual end-to-end check with the 83 demo photos (Sections 5.1, 5.9 and 5.11).
+- Manual end-to-end check with the 87 demo photos (Sections 5.1, 5.9, 5.10 and 5.11).
 - **Live deployment check (2026-10-25)** on `https://imagevault-4g8kx.azurewebsites.net`:
   - `terraform apply` created all 19 resources;
   - the CD pipeline deployed and passed its smoke test;
@@ -342,7 +349,7 @@ The app is stateless: all data lives in PostgreSQL and Blob Storage. So moving f
 | Azure AI Face (verify/identify same person) | Rejected. Limited Access: only for customers managed by Microsoft; not available to students |
 | Azure AI Vision multimodal embeddings | Possible, but the free tier exists but is region-limited and capped per month; adds an external dependency |
 | PyTorch CLIP + face libraries (as in v1) | Rejected. About 2 GB of libraries; too heavy for the free App Service plan |
-| **Quantised ONNX models in the app** | **Chosen.** 190 MB of models, about 320 MB of memory, CPU only, free, works offline and locally |
+| **Quantised ONNX models in the app** | **Chosen.** 225 MB of models, about 320 MB of memory, CPU only, free, works offline and locally |
 
 **Design** (`app/ai.py`, `app/intelligence.py`):
 
@@ -366,19 +373,19 @@ The app is stateless: all data lives in PostgreSQL and Blob Storage. So moving f
 
 ### 5.10 Edge computing: AI on the laptop, cloud as backup
 
-**Goal:** keep the free App Service plan (1 GB memory, 60 CPU-minutes a day) light, spend no credit on AI, and never make the website depend on a laptop being switched on.
+**Goal:** keep the free App Service plan (1 GB memory, 60 CPU-minutes a day) light, spend no credit on AI, never make the website depend on a laptop being switched on, and let the laptop help from any network.
 
 **Design** (`app/worker.py`, `app/intelligence.py`):
 
-- **The same worker code** runs either as a thread inside the website (`kind = cloud`) or on a laptop (`python -m app.worker`, `kind = laptop`). The laptop connects directly to the Azure PostgreSQL database and Blob Storage.
-- **Heartbeats:** every worker updates its row in a `workers` table every 5 seconds (the website's worker every 30). A laptop counts as online if it was seen in the last 20 seconds.
-- **Laptop first:** while a laptop is online, the website's worker only claims photos older than 5 minutes (a safety net if the laptop is stuck). Otherwise it claims photos immediately.
+- **Compute and save are separate.** `intelligence.compute(photo bytes)` runs the models and needs no database; `intelligence.save_analysis()` stores the results (faces become people, same-subject matches). The website does both for its own work; the laptop only computes.
+- **The laptop uses HTTPS, not the database.** `python -m app.worker` logs in with the website password, asks `POST /api/worker/next` for a photo, downloads it, and sends the results (CLIP vector, face boxes, embeddings and crops, text, sharpness) to `POST /api/worker/result/{id}`, which checks their sizes before storing them. It works on any Wi-Fi and never holds the database password or storage keys, so the database accepts connections only from Azure.
+- **Heartbeats:** every request from the laptop updates its row in a `workers` table (the website's own worker reports every 30 s). A laptop counts as online if it was seen in the last 20 seconds.
+- **Where the AI runs** is a setting (`settings.ai_mode`) with a switch on the Cloud page: *automatic* (laptop first: while a laptop is online, the website only claims photos older than 5 minutes), *laptop only*, or *Azure only*.
 - **No double work:** a photo is claimed with an atomic `UPDATE photos SET ai_status = 'processing', ai_worker = :me WHERE id = :id AND ai_status IS NULL`. Claims by a worker silent for 10 minutes are released and retried.
-- **Access without new secrets:** Terraform (`laptop_worker = true`) adds a PostgreSQL firewall rule for the deploying computer's public IP (found with the `http` provider), and gives the deploying user's Entra account the *Storage Blob Data Contributor* role. The laptop uses `az login` credentials for Blob Storage; only the database URL is written to a git-ignored `worker.env`.
 
-**Validation:** with the website and the laptop worker running together, all 32 demo photos were analysed by the laptop (`ai_worker = laptop:…`) in about 5 seconds, with the website idle. After the laptop worker was stopped, the next upload was analysed by the website on its own. The Cloud page shows which machine is doing the AI work.
+**Validation:** with the switch on *My laptop*, the website held all 87 demo photos as "Waiting for your laptop"; the laptop worker, connected over HTTP, then analysed all of them with no failures while the website only stored the results. With the switch on *Azure*, the laptop worker reported that it was resting and took no photos.
 
-**Trade-offs:** the database firewall is opened to one extra IP address (narrow, TLS-only, password-protected); if the laptop's IP changes, `terraform apply` must be rerun. Photos uploaded while the laptop is offline are analysed by the cloud, so results never stop appearing.
+**Trade-offs:** each result travels over the internet (about 20–500 KB per photo, mostly face crops), which is far less than the photo itself. An earlier version connected the laptop straight to PostgreSQL through a firewall rule for one IP address; it stopped working on any other Wi-Fi, which is why it was replaced.
 
 ### 5.11 Albums, bursts and correcting the AI
 
@@ -404,6 +411,7 @@ The app is stateless: all data lives in PostgreSQL and Blob Storage. So moving f
 10. **Edge plus cloud gives the best of both.** Moving the heavy AI work to the laptop made it about 10× faster and kept the free cloud plan light, while the cloud fallback means the website keeps working when the laptop is off. Simple database-based coordination (heartbeats and atomic claims) was enough; no message queue was needed.
 11. **Real deployments find what local tests can't.** The first CD run failed: GitHub now sends an ID-based OIDC subject (`owner@id/repo@id`), and Azure only trusted the name-based one. Terraform now trusts both, looking the IDs up from the GitHub API. Azure's Cost Management API also rate-limits (HTTP 429), so the cost card caches results and keeps showing the last good numbers.
 12. **Let users correct the AI.** No threshold is right for every photo. Merge and split for people, and never deleting AI suggestions automatically, made the AI safe to rely on. Testing with a larger, varied demo set also found small mistakes (a leopard in Pets, exact copies counted as a burst, a small copy looking "sharper") that the smaller set had hidden.
+13. **Design for the network you'll actually be on.** The first laptop worker connected straight to the database through a firewall rule for one home IP address, so it failed on the college Wi-Fi. Moving it behind the website's HTTPS API fixed that, removed the database password from the laptop, and let the database close to the internet again. Splitting "compute" from "save" made both versions share the same code.
 
 ## 7. Individual Contributions
 

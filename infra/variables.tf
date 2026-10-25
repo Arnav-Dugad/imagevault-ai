@@ -26,12 +26,6 @@ variable "monthly_budget" {
   default     = 5
 }
 
-variable "laptop_worker" {
-  description = "Let the computer running Terraform run the AI worker (python -m app.worker): opens the database to its IP address and gives your Azure account access to the photos"
-  type        = bool
-  default     = true
-}
-
 variable "create_budget" {
   description = "Set to false if your subscription type does not support Cost Management budgets"
   type        = bool

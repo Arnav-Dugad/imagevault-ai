@@ -7,6 +7,7 @@ people  - groups of faces that belong to the same person
 workers - which computers are running the AI right now
 albums, album_photos - albums made by the user
 counters - running totals, such as the space freed by deleting duplicates
+settings - choices made on the website, such as where the AI runs
 """
 
 from contextlib import contextmanager
@@ -23,6 +24,7 @@ from sqlalchemy import (
     MetaData,
     String,
     Table,
+    Text,
     create_engine,
     event,
     inspect,
@@ -53,6 +55,7 @@ photos = Table(
     Column("taken_at", String(40), nullable=True),                # camera date from EXIF, if any
     Column("sharpness", Float, nullable=True),                    # higher is sharper
     Column("favorite", Boolean, nullable=True),
+    Column("ocr_text", Text, nullable=True),                      # words read from the photo ("" = none)
 )
 
 albums = Table(
@@ -66,6 +69,12 @@ album_photos = Table(
     "album_photos", metadata,
     Column("album_id", String(32), ForeignKey("albums.id", ondelete="CASCADE"), primary_key=True),
     Column("photo_id", String(32), ForeignKey("photos.id", ondelete="CASCADE"), primary_key=True, index=True),
+)
+
+settings = Table(
+    "settings", metadata,
+    Column("name", String(40), primary_key=True),
+    Column("value", String(200), nullable=False),
 )
 
 counters = Table(

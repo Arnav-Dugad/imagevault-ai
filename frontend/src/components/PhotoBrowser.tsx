@@ -101,11 +101,11 @@ export function PhotoBrowser({ albumId, rememberAs, header, emptyText }: {
       <div className={cn("flex flex-1 items-center rounded-xl border bg-panel transition",
         smart ? "border-sky-300/40 focus-within:border-sky-300/80" : "border-line focus-within:border-acid/60")}>
         <label className="relative flex-1">
-          <span className="sr-only">{smart ? "Describe what is in the photo" : "Search by file name"}</span>
+          <span className="sr-only">{smart ? "Describe what is in the photo" : "Search by file name or text in the photo"}</span>
           {smart ? <Sparkles className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-sky-300" />
             : <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />}
           <input value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder={smart ? "Describe it: a dog on a beach, food, a bridge in fog…" : "Search by name"}
+            placeholder={smart ? "Describe it: a dog on a beach, food, a bridge in fog…" : "Search by name or by text in the photo"}
             className="h-11 w-full rounded-xl bg-transparent pl-10 pr-9 text-sm outline-none placeholder:text-muted" />
           {search && <button onClick={() => setSearch("")} aria-label="Clear search" className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted hover:text-ink"><X className="h-4 w-4" /></button>}
         </label>

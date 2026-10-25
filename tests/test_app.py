@@ -262,3 +262,25 @@ def test_storage_usage_space_saved_and_delete_everything(client):
     assert client.get("/api/albums").json()["mine"] == []
     after = client.get("/api/storage").json()
     assert after["total_bytes"] == 0 and after["saved_bytes"] == 0
+
+
+def test_space_wasters_and_already_stored_check(client):
+    import hashlib
+
+    from PIL import ImageFilter
+
+    original = encode(scene(), "JPEG", quality=95)
+    best = upload(client, "scene.jpg", original).json()["photo"]
+    small = upload(client, "scene-small.jpg", encode(scene().resize((256, 192)), "JPEG", quality=60)).json()["photo"]
+    blurry = upload(client, "blurry.png", encode(document().filter(ImageFilter.GaussianBlur(6)))).json()["photo"]
+    upload(client, "scene (copy).jpg", original)  # an exact copy is stored once, so it wastes no space
+
+    cleanup = client.get("/api/cleanup").json()
+    reasons = {item["photo"]["id"]: item["reason"] for item in cleanup["items"]}
+    assert reasons == {small["id"]: "Lower-quality copy", blurry["id"]: "Very blurry"}
+    assert cleanup["total_bytes"] == small["size"] + blurry["size"]
+    assert next(i for i in cleanup["items"] if i["photo"]["id"] == small["id"])["keep"]["id"] == best["id"]
+
+    fingerprints = [hashlib.sha256(original).hexdigest(), "0" * 64]
+    found = client.post("/api/photos/check", json={"sha256": fingerprints}).json()["found"]
+    assert found == {fingerprints[0]: "scene.jpg"}  # the first upload's name

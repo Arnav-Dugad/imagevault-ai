@@ -36,6 +36,7 @@ export interface PhotoDetails extends Photo {
   matches: { kind: MatchKind; similarity: number; photo: Photo }[];
   people: FaceInPhoto[];
   albums: { id: string; name: string }[];
+  text: string;            // words read from the photo
 }
 
 export interface PhotoList { total: number; items: Photo[] }
@@ -52,6 +53,18 @@ export interface AiStatus {
   analysed: number;
   waiting: number;
   failed: number;
+  mode: AiMode;
+  runs_on: AiRunsOn;
+}
+
+export type AiMode = "auto" | "laptop" | "azure";
+export type AiRunsOn = "laptop" | "cloud" | "none";
+
+export interface CleanupItem {
+  photo: Photo;
+  reason: "Lower-quality copy" | "Blurrier shot of a burst" | "Very blurry";
+  bytes: number;
+  keep: { id: string; filename: string } | null;
 }
 
 export interface Stats {
@@ -136,6 +149,8 @@ export interface SystemStatus {
   version: string;
   environment: "Azure" | "Local";
   build: { commit: string; deployed_at: string; run_url: string; repository: string } | null;
-  ai_runs_on: "laptop" | "cloud";
+  ai_runs_on: AiRunsOn;
+  ai_mode: AiMode;
+  laptop_online: boolean;
   services: CloudService[];
 }

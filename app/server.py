@@ -133,7 +133,7 @@ def logout():
 
 def _photo_json(row) -> dict:
     photo = dict(row)
-    for hidden in ("phash", "dhash", "clip"):
+    for hidden in ("phash", "dhash", "clip", "ocr_text"):
         photo.pop(hidden, None)
     photo["thumb_url"] = f"/api/photos/{photo['id']}/thumb"
     photo["file_url"] = f"/api/photos/{photo['id']}/file"
@@ -213,8 +213,10 @@ def list_photos(search: str = "", smart: bool = False, filter: str = "all", albu
 
     where, params = ["1 = 1"], {}
     if search and not smart:
-        where.append("LOWER(photos.filename) LIKE :search")
+        where.append("(LOWER(photos.filename) LIKE :search OR REPLACE(COALESCE(photos.ocr_text, ''), ' ', '') "
+                     "LIKE :squeezed)")
         params["search"] = f"%{search.lower()}%"
+        params["squeezed"] = f"%{re.sub(r'[^a-z0-9]', '', search.lower()) or search.lower()}%"
     if filter == "duplicates":
         where.append(f"photos.id IN (SELECT photo_a FROM matches WHERE {COPIES} "
                      f"UNION SELECT photo_b FROM matches WHERE {COPIES})")
@@ -246,6 +248,25 @@ def list_photos(search: str = "", smart: bool = False, filter: str = "all", albu
                                  "LIMIT :limit OFFSET :offset"),
                             {**params, "limit": limit, "offset": offset}).mappings().all()
     return {"total": total, "items": [_with_match(row) for row in rows]}
+
+
+class Fingerprints(BaseModel):
+    sha256: list[str]
+
+
+@app.post("/api/photos/check")
+def already_stored(body: Fingerprints):
+    """Which of these files (SHA-256 fingerprints, worked out in the browser) are already stored."""
+    wanted = list(dict.fromkeys(h.lower() for h in body.sha256))[:500]
+    if not wanted:
+        return {"found": {}}
+    with connect() as conn:
+        rows = conn.execute(text("SELECT sha256, filename FROM photos WHERE sha256 IN :hashes ORDER BY uploaded_at")
+                            .bindparams(bindparam("hashes", expanding=True)), {"hashes": wanted}).all()
+    found: dict[str, str] = {}
+    for sha, filename in rows:
+        found.setdefault(sha, filename)
+    return {"found": found}
 
 
 @app.post("/api/photos", status_code=201)
@@ -342,6 +363,7 @@ def photo_details(photo_id: str):
     result["matches"] = [{"kind": m["kind"], "similarity": m["similarity"], "photo": _photo_json(m)} for m in found]
     result["people"] = [{**dict(face), "image_url": f"/api/faces/{face['id']}/image"} for face in in_photo]
     result["albums"] = [dict(a) for a in in_albums]
+    result["text"] = photo["ocr_text"] or ""
     return result
 
 
@@ -727,6 +749,42 @@ def remove_exact_copies():
     return {"removed": removed}
 
 
+BLURRY = 45  # sharpness below this (see photos.sharpness) is very blurry; normal photos score 150+
+
+
+@app.get("/api/cleanup")
+def space_wasters():
+    """Photos that are probably safe to delete, biggest first: lower-quality copies, the blurrier shots
+    of a burst, and very blurry photos. Exact copies are left out: they are stored only once already."""
+    suggestions: dict[str, dict] = {}
+    counted: set[str] = set()  # identical files are stored once, so their space is counted once
+
+    def suggest(photo: dict, reason: str, keep: dict | None = None) -> None:
+        if photo["id"] in suggestions:
+            return
+        freed = 0 if photo["sha256"] in counted else photo["size"]
+        counted.add(photo["sha256"])
+        suggestions[photo["id"]] = {"photo": photo, "reason": reason, "bytes": freed,
+                                    "keep": {"id": keep["id"], "filename": keep["filename"]} if keep else None}
+
+    for group in duplicate_groups():
+        keeper = group["items"][0]["photo"]
+        for item in group["items"][1:]:
+            if item["photo"]["sha256"] != keeper["sha256"]:  # copies of the best photo itself free nothing
+                suggest(item["photo"], "Lower-quality copy", keeper)
+    for group in burst_groups():
+        keeper = group["items"][0]["photo"]
+        for item in group["items"][1:]:
+            suggest(item["photo"], "Blurrier shot of a burst", keeper)
+    with connect() as conn:
+        blurry = conn.execute(text(f"SELECT {PHOTO_COLUMNS} FROM photos WHERE sharpness < :limit"),
+                              {"limit": BLURRY}).mappings().all()
+    for row in blurry:
+        suggest(_photo_json(row), "Very blurry")
+    items = sorted(suggestions.values(), key=lambda s: (s["bytes"] or s["photo"]["size"], s["bytes"]), reverse=True)
+    return {"items": items, "total_bytes": sum(s["bytes"] for s in items)}
+
+
 @app.get("/api/related")
 def related_groups():
     """Different photos of the same subject or scene, found by AI. These are never deleted automatically."""
@@ -884,6 +942,58 @@ def ai_status():
     return intelligence.status()
 
 
+class AiMode(BaseModel):
+    mode: str
+
+
+@app.put("/api/ai/mode")
+def change_ai_mode(body: AiMode):
+    """Where the AI runs: "auto" (laptop when it's on, else Azure), "laptop" or "azure"."""
+    try:
+        intelligence.set_ai_mode(body.mode)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    log.info("AI mode changed", extra={"mode": body.mode})
+    return intelligence.status()
+
+
+# --- Laptop AI worker ------------------------------------------------------------------------
+# `python -m app.worker` logs in like a browser and uses these over HTTPS, so it works on any
+# Wi-Fi and never needs the database password or storage keys.
+
+class WorkerHello(BaseModel):
+    name: str
+
+
+@app.post("/api/worker/next")
+def worker_next_photo(body: WorkerHello):
+    """The laptop says it's alive and asks for the next photo to analyse (none if there's nothing to do)."""
+    name = f"laptop:{body.name.strip()[:80] or 'laptop'}"
+    intelligence.heartbeat(name, "laptop")
+    while (photo_id := intelligence.claim_next(name, "laptop")) == "":
+        pass  # another worker took that photo a moment ago: try the next one
+    photo = None
+    if photo_id:
+        photo = {"id": photo_id, "file_url": f"/api/photos/{photo_id}/file"}
+    return {"mode": intelligence.ai_mode(), "photo": photo}
+
+
+@app.post("/api/worker/result/{photo_id}")
+def worker_result(photo_id: str, body: dict):
+    """What the laptop's AI found in a photo. The website stores it, exactly as if it had done the work."""
+    try:
+        found = intelligence.Analysis.from_json(body)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(422, f"Not a valid analysis: {exc}") from exc
+    return {"saved": intelligence.save_analysis(photo_id, found)}
+
+
+@app.post("/api/worker/failed/{photo_id}")
+def worker_failed(photo_id: str):
+    intelligence.mark_failed(photo_id)
+    return {"ok": True}
+
+
 @app.get("/api/costs")
 def azure_costs():
     """This month's Azure spending for the project (Azure Cost Management), cached for an hour."""
@@ -934,15 +1044,21 @@ def system_status():
     st_ok, st_ms, st_error = _timed(storage.check)
     insights = bool(env("APPLICATIONINSIGHTS_CONNECTION_STRING"))
     brain = intelligence.status()
-    where = "on your laptop (edge)" if brain["runs_on"] == "laptop" else "in App Service"
-    ai_detail = (f"Running {where} · {brain['analysed']} photos analysed"
-                 + (f", {brain['waiting']} waiting" if brain["waiting"] else "")
-                 if brain["ready"] else brain["message"])
+    where = {"laptop": "on your laptop (edge)", "cloud": "in App Service" if site else "on this computer"}
+    waiting = f", {brain['waiting']} waiting" if brain["waiting"] else ""
+    if brain["runs_on"] == "none":
+        ai_detail = f"Waiting for your laptop{waiting}"
+    elif brain["ready"]:
+        ai_detail = f"Running {where[brain['runs_on']]} · {brain['analysed']} photos analysed{waiting}"
+    else:
+        ai_detail = brain["message"]
     return {
         "version": __version__,
         "environment": "Azure" if site else "Local",
         "build": _build_info(),
         "ai_runs_on": brain["runs_on"],
+        "ai_mode": brain["mode"],
+        "laptop_online": any(worker["kind"] == "laptop" for worker in brain["workers"]),
         "services": [
             {"id": "app-service", "name": "Azure App Service", "role": "Hosts the website and API",
              "active": bool(site), "healthy": True, "latency_ms": None,
@@ -957,8 +1073,9 @@ def system_status():
              "active": insights, "healthy": insights, "latency_ms": None,
              "detail": "Sending telemetry" if insights else "Not configured", "error": None},
             {"id": "ai", "name": "Free AI recognition",
-             "role": "CLIP + face recognition on your laptop, with App Service as backup",
-             "active": brain["enabled"], "healthy": brain["ready"] and not brain["failed"], "latency_ms": None,
+             "role": "Finds people, things and text in photos, on your laptop or in App Service",
+             "active": brain["enabled"], "latency_ms": None,
+             "healthy": (brain["ready"] or brain["runs_on"] == "none") and not brain["failed"],
              "detail": ai_detail,
              "error": f"{brain['failed']} photos could not be analysed" if brain["failed"] else None},
         ],

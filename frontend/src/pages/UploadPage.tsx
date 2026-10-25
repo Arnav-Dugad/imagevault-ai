@@ -1,12 +1,14 @@
 import { useRef, useState, type DragEvent } from "react";
 import { Link } from "react-router-dom";
-import { CheckCircle2, Cloud, Copy, HardDrive, ImagePlus, LoaderCircle, RotateCcw, Sparkles, XCircle } from "lucide-react";
+import { CheckCircle2, Cloud, Copy, CopyCheck, HardDrive, ImagePlus, LoaderCircle, RotateCcw, Sparkles, XCircle } from "lucide-react";
 import { Button, PageHeading } from "../components/ui";
 import { useSystem } from "../lib/system";
 import { useUploads, type UploadItem } from "../lib/uploads";
 import { cn, formatBytes, percent } from "../lib/utils";
 
 function ItemStatus({ item }: { item: UploadItem }) {
+  if (item.state === "checking") return <span className="text-muted">Checking…</span>;
+  if (item.state === "stored") return <span className="flex items-center gap-1.5 text-amber-300"><CopyCheck className="h-4 w-4 shrink-0" />Already stored as “{item.existing}”</span>;
   if (item.state === "waiting") return <span className="text-muted">Waiting</span>;
   if (item.state === "uploading") return <span className="flex items-center gap-1.5 text-muted"><LoaderCircle className="h-4 w-4 animate-spin text-acid" />{item.progress}%</span>;
   if (item.state === "failed") return <span className="flex items-center gap-1.5 text-coral"><XCircle className="h-4 w-4 shrink-0" />{item.error}</span>;
@@ -18,7 +20,7 @@ function ItemStatus({ item }: { item: UploadItem }) {
 
 export function UploadPage() {
   const { system, onAzureStorage: azure } = useSystem();
-  const { items, busy, add, retryFailed, clearFinished } = useUploads();
+  const { items, busy, add, uploadStored, skipStored, retryFailed, clearFinished } = useUploads();
   const [dragging, setDragging] = useState(false);
   const input = useRef<HTMLInputElement>(null);
 
@@ -26,12 +28,13 @@ export function UploadPage() {
     event.preventDefault();
     event.stopPropagation(); // the whole-window drop zone must not add them a second time
     setDragging(false);
-    add(Array.from(event.dataTransfer.files));
+    void add(Array.from(event.dataTransfer.files));
   }
 
   const done = items.filter((i) => i.state === "done");
   const failed = items.filter((i) => i.state === "failed").length;
   const duplicates = done.filter((i) => i.result?.match).length;
+  const stored = items.filter((i) => i.state === "stored").length;
 
   return <>
     <PageHeading title="Upload" description="JPG, PNG, WEBP, GIF or BMP, up to 25 MB each. You can also drop photos anywhere on the page." />
@@ -48,11 +51,20 @@ export function UploadPage() {
       </p>}
     </button>
     <input ref={input} type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif,image/bmp" className="hidden"
-      onChange={(e) => { add(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
+      onChange={(e) => { void add(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
+
+    {stored > 0 && <div className="pop-in mt-6 flex flex-col gap-3 rounded-2xl border border-amber-300/30 bg-amber-300/[.06] p-4 sm:flex-row sm:items-center sm:justify-between">
+      <p className="flex items-center gap-2 text-sm"><CopyCheck className="h-5 w-5 shrink-0 text-amber-300" />
+        <span><b>{stored} {stored === 1 ? "photo is" : "photos are"} already in ImageVault.</b> {stored === 1 ? "It wasn't" : "They weren't"} uploaded again.</span></p>
+      <div className="flex shrink-0 gap-2">
+        <Button variant="ghost" onClick={skipStored}>Skip</Button>
+        <Button variant="secondary" onClick={uploadStored}>Upload anyway</Button>
+      </div>
+    </div>}
 
     {items.length > 0 && <div className="mt-8">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold">{busy ? `Uploading ${done.length + failed + 1} of ${items.length}` : `${done.length} uploaded${duplicates ? ` · ${duplicates} duplicates` : ""}${failed ? ` · ${failed} failed` : ""}`}</h2>
+        <h2 className="text-lg font-semibold">{busy ? `Uploading ${done.length + failed + 1} of ${items.length - stored}` : `${done.length} uploaded${duplicates ? ` · ${duplicates} ${duplicates === 1 ? "duplicate" : "duplicates"}` : ""}${failed ? ` · ${failed} failed` : ""}`}</h2>
         <div className="flex flex-wrap gap-2">
           {failed > 0 && !busy && <Button variant="secondary" onClick={retryFailed}><RotateCcw className="h-4 w-4" />Retry failed</Button>}
           {!busy && <Button variant="ghost" onClick={clearFinished}>Clear list</Button>}
