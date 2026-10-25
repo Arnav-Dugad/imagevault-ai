@@ -21,7 +21,7 @@ function UploadProgress() {
   const { items, busy } = useUploads();
   if (!busy) return null;
   const finished = items.filter((i) => i.state === "done" || i.state === "failed").length;
-  const total = items.length;
+  const total = items.filter((i) => i.state !== "stored").length;
   return (
     <NavLink to="/upload" className="focus-ring flex items-center gap-2 rounded-xl border border-acid/30 bg-acid/[.06] px-3 py-2.5 text-sm">
       <LoaderCircle className="h-4 w-4 animate-spin text-acid" />Uploading {Math.min(finished + 1, total)} of {total}
@@ -46,7 +46,11 @@ function DropAnywhere() {
       if (!hasFiles(e)) return;
       e.preventDefault();
       const files = Array.from(e.dataTransfer?.files ?? []);
-      if (files.length) { add(files); toast(`Uploading ${files.length} ${files.length === 1 ? "photo" : "photos"}`); }
+      if (!files.length) return;
+      void add(files).then(({ queued, stored }) => {
+        if (queued) toast(`Uploading ${queued} ${queued === 1 ? "photo" : "photos"}`);
+        if (stored) toast(`${stored} already stored, not uploaded again. See the Upload page.`);
+      });
     };
     window.addEventListener("dragenter", enter);
     window.addEventListener("dragleave", leave);

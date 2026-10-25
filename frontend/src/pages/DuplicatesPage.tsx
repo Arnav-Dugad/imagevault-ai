@@ -3,6 +3,7 @@ import { CheckCircle2, ChevronsLeftRight, Focus, Recycle, Sparkles, Timer, Trash
 import { CompareSlider } from "../components/CompareSlider";
 import { PhotoThumb } from "../components/PhotoCard";
 import { PhotoViewer } from "../components/PhotoViewer";
+import { SpaceWasters } from "../components/SpaceWasters";
 import { Button, ConfirmDialog, EmptyState, ErrorNote, MatchBadge, PageHeading, Spinner } from "../components/ui";
 import { api } from "../lib/api";
 import { useToast } from "../lib/toast";
@@ -72,6 +73,7 @@ export function DuplicatesPage() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [comparing, setComparing] = useState<[GroupItem, GroupItem] | null>(null);
   const [saved, setSaved] = useState<StorageUsage | null>(null);
+  const [version, setVersion] = useState(0); // bumps on every reload, so the space-waster list refreshes too
   const compare = (first: GroupItem, other: GroupItem) => setComparing([first, other]);
 
   const load = useCallback(() => {
@@ -79,6 +81,7 @@ export function DuplicatesPage() {
     api<DuplicateGroup[]>("/related").then(setRelated).catch(() => {});
     api<DuplicateGroup[]>("/bursts").then(setBursts).catch(() => {});
     api<StorageUsage>("/storage").then(setSaved).catch(() => {});
+    setVersion((v) => v + 1);
   }, []);
   useEffect(load, [load]);
 
@@ -123,6 +126,7 @@ export function DuplicatesPage() {
       action={exactCount > 0 && <Button variant="danger" onClick={() => setConfirm({ kind: "exact", count: exactCount })}><Trash2 className="h-4 w-4" />Remove {exactCount} exact {exactCount === 1 ? "copy" : "copies"}</Button>} />
 
     {error && <div className="mb-6"><ErrorNote message={error} /></div>}
+    <SpaceWasters version={version} onOpen={setOpenId} onDeleted={load} />
     {nothing && <EmptyState icon={CheckCircle2} title="No duplicates">New uploads are checked automatically.</EmptyState>}
 
     <div className="space-y-4">{groups?.map((group) => row(group))}</div>

@@ -18,8 +18,7 @@ Terraform (`infra/main.tf`) creates everything in one resource group called **im
 | Azure Database for PostgreSQL Flexible Server | Burstable B1ms, 32 GB | Free for 12 months under Azure's free services (750 h/month); otherwise about US$13–15/month from your credit |
 | Storage account (Blob) | Standard LRS | A few cents per GB per month |
 | Log Analytics + Application Insights | Pay-as-you-go, **capped at 0.1 GB a day** | Free: the cap keeps it under the 5 GB/month free allowance |
-| Free AI recognition (CLIP, YuNet, SFace) | Runs on your laptop, or in the Web App as backup | Free: no AI service is created or billed |
-| Database firewall rule + storage access for your laptop | | Free |
+| Free AI recognition (CLIP, YuNet, SFace, PP-OCR + CRNN) | Runs on your laptop, or in the Web App | Free: no AI service is created or billed |
 | Managed identity for GitHub Actions | | Free |
 | Budget with email alerts | US$5 a month | Free |
 
@@ -148,11 +147,19 @@ terraform destroy
 
 ## Step 8 (recommended): Run the AI on your laptop
 
-Your laptop can do the AI work (People, smart search, same subject) instead of Azure. It's much faster, and it keeps the small free App Service plan light. This is **edge computing**: processing happens near the user, and the cloud stores the results. While your laptop worker runs, the website leaves new photos to it. When you stop it, the website goes back to doing the work itself within about 20 seconds, so the site never breaks.
+Your laptop can do the AI work (people, smart search, same subject, text in photos) instead of Azure. It's much faster, and it keeps the small free App Service plan light. This is **edge computing**: processing happens near the user, and the cloud stores the results.
 
-Terraform already allowed this (`laptop_worker = true`): it opened the database to your current IP address and gave your Azure account access to the photos.
+The laptop worker talks to your website over **HTTPS**, exactly like a browser, so it works on **any Wi-Fi** (home, college lab, phone hotspot). It never needs the database password or storage keys.
 
-**Once:** save the worker's settings (this file contains the database password, and git ignores it):
+**Each time** (for example, before your demo), with your virtual environment activated:
+
+```powershell
+python -m app.worker
+```
+
+The first time, it asks for your `website_url` and `app_password` and offers to save them in `worker.env` (git ignores this file). It prints a line for every photo it analyses, and the website's **Cloud** page shows *Laptop worker online*. Press **Ctrl+C** to stop.
+
+You can also write `worker.env` from Terraform:
 
 ```powershell
 cd infra
@@ -160,16 +167,11 @@ terraform output -raw laptop_worker_env | Out-File -Encoding utf8 ..\worker.env
 cd ..
 ```
 
-**Each time** (for example, before your demo), with your virtual environment activated:
+**Where the AI runs** is a switch on the **Cloud** page:
 
-```powershell
-az login              # only if you haven't signed in recently
-python -m app.worker
-```
-
-It prints a line for every photo it analyses, and the website's **Cloud** page shows *Your laptop: Edge AI · online*. Press **Ctrl+C** to stop.
-
-**If it can't connect:** your IP address has probably changed (a different Wi-Fi network, or your provider changed it). Run `terraform apply` again in `infra/` to update the firewall rule.
+- **Automatic** (default): your laptop while its worker is running, otherwise Azure. When you stop the laptop, the website takes over within about 20 seconds.
+- **My laptop**: only your laptop. New photos wait until you start the worker.
+- **Azure**: only App Service. A running laptop worker rests.
 
 ## Keeping your credit safe
 

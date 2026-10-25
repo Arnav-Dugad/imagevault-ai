@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.6.0 (2026-10-25)
+
+- **Laptop AI works on any Wi-Fi:** `python -m app.worker` now talks to the website over HTTPS, like a browser, instead of connecting to the database. It only needs the website address and password, and Terraform no longer opens the database to your home IP address.
+- **Switch for where the AI runs** on the Cloud page: Automatic (laptop first, Azure as backup), My laptop, or Azure.
+- **Text in photos is searchable (OCR):** free PP-OCR and CRNN models read words on signs, boards and receipts; the normal search box finds them, and the photo viewer lists them.
+- **Biggest space-wasters:** the Duplicates page lists lower-quality copies, blurrier burst shots and very blurry photos, biggest first, with what will be kept, ready to delete together.
+- **Warning before uploading a photo that's already stored:** the browser checks each file's fingerprint first; you can skip them or upload anyway.
+- Demo photos: 87, including four photos with readable signs.
+- 33 automated tests.
+
 ## 3.5.0 (2026-10-25)
 
 - **Storage card** on the Cloud page: a chart of the space used by photos, thumbnails and face crops, the estimated monthly cost, and how much removing duplicates has saved (in MB and money).

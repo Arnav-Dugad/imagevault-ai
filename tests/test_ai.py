@@ -137,3 +137,38 @@ def test_merge_and_split_people_by_hand(client):
     # Analysing photos again must not undo the manual merge and split.
     intelligence.analyze_photo(faces[0]["photo_id"])
     assert sorted(p["photos"] for p in client.get("/api/people").json()) == [1, 3]
+
+
+def text_photo(words: str) -> bytes:
+    image = Image.new("RGB", (900, 400), "white")
+    from PIL import ImageDraw, ImageFont
+    ImageDraw.Draw(image).text((60, 150), words, fill="black", font=ImageFont.load_default(size=72))
+    buffer = io.BytesIO()
+    image.save(buffer, "JPEG", quality=92)
+    return buffer.getvalue()
+
+
+def test_text_in_photos_is_searchable(client):
+    sign = upload(client, "sign.jpg", text_photo("HOTEL PARADISE"))
+    upload(client, "landmark.jpg")
+    intelligence.process_pending()
+
+    assert "paradise" in client.get(f"/api/photos/{sign}").json()["text"]
+    assert [p["id"] for p in client.get("/api/photos?search=paradise").json()["items"]] == [sign]
+    assert [p["id"] for p in client.get("/api/photos?search=hotel paradise").json()["items"]] == [sign]
+
+
+def test_laptop_worker_sends_its_results_over_https(client):
+    photo = upload(client, "person-a-1.jpg")
+    client.put("/api/ai/mode", json={"mode": "laptop"})
+
+    reply = client.post("/api/worker/next", json={"name": "my-laptop"}).json()
+    assert reply["photo"]["id"] == photo
+    found = intelligence.compute(client.get(reply["photo"]["file_url"]).content)  # done on the laptop
+    assert client.post(f"/api/worker/result/{photo}", json=found.to_json()).json() == {"saved": True}
+
+    details = client.get(f"/api/photos/{photo}").json()
+    assert len(details["people"]) == 1
+    assert client.get(details["people"][0]["image_url"]).headers["content-type"] == "image/jpeg"
+    assert client.get("/api/ai").json()["analysed"] == 1
+    assert client.post(f"/api/worker/result/{photo}", json={"clip": "?"}).status_code == 422

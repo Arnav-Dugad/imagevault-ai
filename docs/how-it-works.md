@@ -70,13 +70,15 @@ Matching photos are joined into groups with a **union-find** algorithm. In each 
 
 ## Free AI recognition
 
-ImageVault runs three small open-source AI models **on your own machines**, using ONNX Runtime and OpenCV: on your laptop when it's online, otherwise inside the App Service. There's no paid AI API, no per-photo charge and no usage limit, and photos are never sent to another company. The models (about 190 MB) are downloaded once from fixed versions and checked against SHA-256 fingerprints (`app/ai.py`). With all of them loaded, the app uses about 320 MB of memory, which fits the free F1 plan's 1 GB.
+ImageVault runs small open-source AI models **on your own machines**, using ONNX Runtime and OpenCV: on your laptop when it's online, otherwise inside the App Service. There's no paid AI API, no per-photo charge and no usage limit, and photos are never sent to another company. The models (about 225 MB) are downloaded once from fixed versions and checked against SHA-256 fingerprints (`app/ai.py`). With all of them loaded, the app uses about 320 MB of memory, which fits the free F1 plan's 1 GB.
 
 | Model | License | What it does | Used for |
 |---|---|---|---|
 | **CLIP** ViT-B/32 (OpenAI, 8-bit quantised) | MIT | Turns a photo, or a sentence, into 512 numbers that describe its meaning | Smart search, "same subject" |
 | **YuNet** (OpenCV Zoo) | MIT | Finds faces in a photo | People |
 | **SFace** (OpenCV Zoo) | Apache 2.0 | Turns a face into 128 numbers; the same person gives similar numbers | People |
+| **PP-OCRv3 detector** (OpenCV Zoo) | Apache 2.0 | Finds where text is written in a photo | Text search |
+| **CRNN** (OpenCV Zoo) | Apache 2.0 | Reads each word (letters and digits) | Text search |
 
 Analysis runs in a **background worker** (`app/intelligence.py`): uploads return immediately, and the Home page shows progress. On Azure, the models are kept in `/home/models` so they survive restarts.
 
@@ -84,17 +86,25 @@ Analysis runs in a **background worker** (`app/intelligence.py`): uploads return
 
 ```mermaid
 flowchart LR
-    L["Your laptop<br/>python -m app.worker"] -- "claims new photos,<br/>saves results" --> DB[("PostgreSQL")]
-    L -- "reads photos,<br/>saves face crops" --> B["Blob Storage"]
-    S["App Service<br/>(backup worker)"] -. "only if the laptop is offline<br/>or a photo waited 5 min" .-> DB
+    L["Your laptop<br/>python -m app.worker"] -- "HTTPS: asks for the next photo,<br/>downloads it, sends back the results" --> S["App Service<br/>(the website)"]
+    S --> DB[("PostgreSQL")]
+    S --> B["Blob Storage"]
 ```
 
-The same worker code runs in two places:
+The AI work is split in two:
 
-- **Your laptop** (`python -m app.worker`) connects to the Azure database and Blob Storage, using your `az login` account and a firewall rule for your IP address, both created by Terraform. It reports a *heartbeat* every 5 seconds to a `workers` table.
-- **The website** checks that table. While a laptop is online, it leaves new photos alone. It only steps in if the laptop has been silent for 20 seconds, or if a photo has waited more than 5 minutes.
+- **Computing** (the slow part: running the models) happens on your laptop (`python -m app.worker`), or inside the website. It needs no database.
+- **Saving** (grouping faces into people, finding same-subject photos) always happens in the website, which owns the database and storage.
 
-Each worker *claims* a photo with an atomic `UPDATE … WHERE ai_status IS NULL`, so no photo is analysed twice. If a worker disappears mid-photo, its claim is released and another worker retries it. Tested locally: with the laptop worker running, it analysed the demo photos in a few seconds while the website stayed idle; after stopping it, the website analysed the next upload on its own.
+The laptop logs in to the website like a browser and asks `POST /api/worker/next` for a photo. It downloads the photo, runs the models and sends the results to `POST /api/worker/result/{id}`. Because this is ordinary HTTPS, it works on any Wi-Fi, and the laptop never holds the database password.
+
+Each request is also a *heartbeat* in a `workers` table. While a laptop is online, the website leaves new photos to it, and only steps in if the laptop has been silent for 20 seconds or a photo has waited more than 5 minutes. A switch on the Cloud page can also keep the work on the laptop only, or on Azure only.
+
+Photos are *claimed* with an atomic `UPDATE … WHERE ai_status IS NULL`, so no photo is analysed twice. If a worker disappears mid-photo, its claim is released and another worker retries it. Tested locally with the switch set to *My laptop*: the laptop worker analysed all 87 demo photos over HTTP while the website only stored the results.
+
+### Text in photos (OCR)
+
+The PP-OCR detector finds text regions, each region is straightened and read by CRNN, and words the reader is less than 85% sure about are dropped (on busy street scenes they're mostly noise). The words are stored with the photo, and the normal search box searches them too, ignoring spaces, so "las vegas" finds a sign read as "lasvegas". On the demo set, searching "vegas", "honey", "stop" or "parangipettai" each finds the right photo. Reading takes about 0.2–0.5 s per photo on a laptop.
 
 Why bother, if both are free? The free App Service plan has 1 GB of memory and 60 CPU-minutes a day. Doing the AI on the laptop keeps the website fast and well inside those limits, and it's a real example of edge computing, one of the course's suggested domains.
 

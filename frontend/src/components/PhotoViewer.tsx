@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { ChevronLeft, ChevronRight, Cloud, Download, FolderOpen, HardDrive, Heart, LoaderCircle, Maximize2, Sparkles, Trash2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Cloud, Download, FolderOpen, HardDrive, Heart, LoaderCircle, Maximize2, ScanText, Sparkles, Trash2, X } from "lucide-react";
 import { FullscreenPhoto } from "./FullscreenPhoto";
 import { FaceAvatar, personName } from "../pages/PeoplePage";
 import { api } from "../lib/api";
@@ -145,6 +145,12 @@ export function PhotoViewer({ id, ids, onClose, onDeleted, onChanged }: {
             <dl className="mt-5 space-y-3 text-sm">
               {rows.map(([label, value]) => <div key={label} className="flex justify-between gap-4"><dt className="text-muted">{label}</dt><dd className="text-right">{value}</dd></div>)}
             </dl>
+            {photo.text && <div className="mt-5">
+              <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted"><ScanText className="h-3.5 w-3.5" />Text in the photo</p>
+              <p className="flex flex-wrap gap-1.5">{photo.text.split(" ").map((word, i) => (
+                <span key={`${word}-${i}`} className="rounded-md border border-line bg-canvas/60 px-2 py-0.5 font-mono text-xs">{word}</span>
+              ))}</p>
+            </div>}
             {(photo.ai_status === null || photo.ai_status === "processing") && (
               <p className="mt-4 flex items-center gap-2 rounded-xl border border-sky-300/20 bg-sky-300/[.06] px-3 py-2 text-xs text-sky-200">
                 <Sparkles className="h-3.5 w-3.5 animate-pulse" />The free AI is still looking at this photo…

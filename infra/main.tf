@@ -5,7 +5,6 @@
 #                   ├─ PostgreSQL Flexible Server + database      ← stores photo details
 #                   ├─ Log Analytics workspace + Application Insights ← monitoring (capped, so always free)
 #                   ├─ Managed identity for GitHub Actions        ← passwordless deployments
-#                   ├─ Access for your laptop's AI worker         ← "edge" AI, optional
 #                   └─ Monthly budget with email alerts           ← cost control
 
 data "azurerm_client_config" "current" {}
@@ -210,30 +209,6 @@ resource "azurerm_role_assignment" "github_deploys_website" {
   scope                = azurerm_resource_group.main.id
   role_definition_name = "Website Contributor"
   principal_id         = azurerm_user_assigned_identity.github.principal_id
-}
-
-# --- Laptop AI worker ("edge computing", optional) -------------------------------------------
-# Lets the computer that runs `terraform apply` run `python -m app.worker`. If your IP address
-# changes (for example, on another Wi-Fi), run `terraform apply` again to update the rule.
-
-data "http" "my_ip" {
-  count = var.laptop_worker ? 1 : 0
-  url   = "https://api.ipify.org"
-}
-
-resource "azurerm_postgresql_flexible_server_firewall_rule" "laptop" {
-  count            = var.laptop_worker ? 1 : 0
-  name             = "laptop-ai-worker"
-  server_id        = azurerm_postgresql_flexible_server.main.id
-  start_ip_address = trimspace(data.http.my_ip[0].response_body)
-  end_ip_address   = trimspace(data.http.my_ip[0].response_body)
-}
-
-resource "azurerm_role_assignment" "laptop_reads_and_writes_blobs" {
-  count                = var.laptop_worker ? 1 : 0
-  scope                = azurerm_storage_account.photos.id
-  role_definition_name = "Storage Blob Data Contributor"
-  principal_id         = data.azurerm_client_config.current.object_id # your own "az login" account
 }
 
 # --- Budget alert: email when spending reaches 50%, 80% or (forecast) 100% ------------------
