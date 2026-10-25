@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.7.2 (2026-10-25)
+
+- Fixed: a photo rejected from an outdated laptop worker now goes back in the queue instead of being marked failed, and each worker run has its own name, so two workers on one laptop can't hide each other's stuck photos.
+
 ## 3.7.1 (2026-10-25)
 
 - Fixed: a laptop worker started before an update kept running the old code and saved photos without their text positions. Workers now report which analysis version they run; older ones get no photos (and the website takes over in Automatic mode), and photos analysed by an older version are analysed again automatically.
