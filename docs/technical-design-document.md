@@ -4,7 +4,7 @@
 **Project:** ImageVault, a cloud photo vault with duplicate detection  
 **Cloud provider:** Microsoft Azure (Azure for Students)  
 **Repository:** https://github.com/Arnav-Dugad/imagevault-ai  
-**Version:** 3.0.0
+**Version:** 3.4.0
 
 ---
 
@@ -12,7 +12,7 @@
 
 ImageVault is a web application for storing photos in the cloud. It automatically finds **exact duplicates** (the same file uploaded more than once) and **similar photos** (resized, compressed or edited copies). Users upload photos in the browser, review matching photos side by side, and delete the copies they don't need.
 
-It also includes **free AI recognition** that runs inside the application, with no paid AI service: it recognises the **same person** across photos (People), finds photos by **description** (smart search), and suggests photos of the **same subject taken differently**.
+It also includes **free AI recognition** that runs inside the application, with no paid AI service: it recognises the **same person** across photos (People), finds photos by **description** (smart search), sorts photos into **automatic albums** (Beach, Food & drink, Pets and others), picks the **sharpest photo in a burst**, and suggests photos of the **same subject taken differently**. Users can correct the AI by merging or splitting people by hand, and can edit many photos at once (favourite, add to an album, download as a ZIP, delete).
 
 The project's main focus is **cloud architecture and DevOps**, as the guidelines require:
 
@@ -46,7 +46,8 @@ People keep thousands of photos across phones, laptops and messaging apps. The s
 3. detects visually similar copies (resized, compressed, edited) without flagging different photos of a similar subject;
 4. lets the user review and remove duplicates safely;
 5. is deployed, monitored and updated automatically using cloud-native DevOps practices, within a student budget;
-6. helps organise photos by **people** and **content** using AI, at no extra cost and without sending photos to third parties.
+6. helps organise photos by **people**, **content** and **date** using AI, at no extra cost and without sending photos to third parties;
+7. makes large libraries manageable: batch editing, albums, sorting by date or size, and a date range filter.
 
 **Out of scope:** multiple user accounts and mobile apps. Possible extensions are listed in Section 6.
 
@@ -126,12 +127,12 @@ All resources are defined in `infra/main.tf` and created in a single resource gr
 ```mermaid
 flowchart LR
     subgraph Frontend["Frontend (React 18 + TypeScript + Vite + Tailwind CSS)"]
-      P1["Home"] --- P2["Photos"] --- P3["Upload"] --- P4["Duplicates"] --- P6["People"] --- P5["Cloud"]
+      P1["Home"] --- P2["Photos"] --- P7["Albums"] --- P6["People"] --- P4["Duplicates"] --- P3["Upload"] --- P5["Cloud"]
     end
     subgraph Backend["Backend (Python 3.12, FastAPI)"]
       API["server.py<br/>REST API + static website"]
-      PH["photos.py<br/>hashing + comparison"]
-      INT["intelligence.py<br/>background AI worker"]
+      PH["photos.py<br/>hashing, EXIF date, sharpness"]
+      INT["intelligence.py<br/>AI worker, albums, bursts"]
       AIM["ai.py<br/>CLIP · YuNet · SFace<br/>(ONNX Runtime, OpenCV)"]
       STO["storage.py<br/>Blob / local"]
       DBM["database.py<br/>SQLAlchemy"]
@@ -151,14 +152,20 @@ The frontend is a single-page app that the backend serves as static files, so on
 | Method & path | Purpose |
 |---|---|
 | `POST /api/photos` | Upload one photo (multipart). Returns the photo and its best match |
-| `GET /api/photos?search=&smart=&duplicates_only=&offset=&limit=` | Paginated photo list; search by file name, or by description when `smart=true` |
-| `GET /api/photos/{id}` | Photo details, all of its matches, and the faces/people in it |
+| `GET /api/photos?search=&smart=&filter=&album=&sort=&date_from=&date_to=&offset=&limit=` | Paginated photo list. Search by file name, or by description when `smart=true`; filter all / duplicates / favorites; one album; sort by upload date, date taken, size or name; date range on the camera date |
+| `GET /api/photos/{id}` | Photo details, all of its matches, its albums, and the faces/people in it |
+| `PATCH /api/photos/{id}` | Rename, favourite / unfavourite |
+| `POST /api/photos/batch` | One action on many photos: delete, favourite, unfavourite, add to album (or a new album), remove from album |
+| `GET /api/zip?ids=` | Download up to 100 photos as one ZIP file |
+| `GET /api/albums`, `POST /api/albums`, `PATCH /api/albums/{id}`, `DELETE /api/albums/{id}` | The user's albums and the automatic ones; create, rename, delete (photos are kept) |
 | `GET /api/photos/{id}/thumb`, `/file` | Thumbnail / original (streamed from Blob Storage, cached by the browser) |
 | `DELETE /api/photos/{id}` | Delete a photo; the stored file is removed when its last copy is deleted |
 | `GET /api/duplicates` | Duplicate groups with the suggested best copy |
 | `POST /api/duplicates/remove-exact` | Remove all exact copies, keeping the first upload of each |
 | `GET /api/related` | AI "same subject, different shot" groups (never deleted automatically) |
-| `GET /api/people`, `GET /api/people/{id}`, `PUT /api/people/{id}` | Recognised people, their photos, renaming |
+| `GET /api/bursts` | Photos taken seconds apart, sharpest first |
+| `GET /api/people`, `GET /api/people/{id}`, `PUT /api/people/{id}` | Recognised people, their photos and faces, renaming |
+| `POST /api/people/merge`, `POST /api/people/{id}/split` | Correct the AI: merge several people into one, or move some faces to a new person |
 | `GET /api/faces/{id}/image` | Face crop used as a person's picture |
 | `GET /api/ai` | AI progress: analysed, waiting and failed photos |
 | `GET /api/costs` | This month's Azure cost by service (Cost Management Query API), cached for an hour |
@@ -174,6 +181,8 @@ erDiagram
     photos ||--o{ matches : "photo_a / photo_b"
     photos ||--o{ faces : "contains"
     people ||--o{ faces : "groups"
+    albums ||--o{ album_photos : "contains"
+    photos ||--o{ album_photos : "is in"
     photos {
         varchar id PK
         varchar filename
@@ -185,6 +194,9 @@ erDiagram
         varchar phash "64-bit perceptual hash (hex)"
         varchar dhash "64-bit difference hash (hex)"
         varchar uploaded_at "ISO 8601"
+        varchar taken_at "camera date from EXIF"
+        float sharpness "Laplacian variance"
+        boolean favorite
         bytea clip "512 float32 CLIP numbers"
         varchar ai_status "NULL | processing | done | failed"
     }
@@ -208,8 +220,20 @@ erDiagram
         varchar id PK
         varchar name "set by the user"
         varchar created_at
+        boolean manual "merged or split by hand"
+    }
+    albums {
+        varchar id PK
+        varchar name
+        varchar created_at
+    }
+    album_photos {
+        varchar album_id FK
+        varchar photo_id FK
     }
 ```
+
+Automatic albums are not stored: they are worked out from the stored CLIP vectors when the Albums page asks for them, so they are always up to date.
 
 **Blob layout:** `originals/<sha256>`, `thumbnails/<sha256>.jpg` (content-addressed) and `faces/<face-id>.jpg` (face crops).
 
@@ -226,7 +250,7 @@ erDiagram
 - **Grouping:** union-find over the match pairs. The suggested best copy has the most pixels, then the largest file, then the oldest upload.
 - **Complexity:** each upload is compared with all *n* stored photos (O(n)) using only the stored 16-character hashes, so the images aren't re-read.
 
-**Validation:** the demo set has 17 real photos. All 8 intended pairs are matched: 1 exact copy, plus resized, WhatsApp-style recompressed, brightness/contrast-edited and heavily compressed copies. The 2 look-alike traps (two different pug photos; two different waterfalls) are not matched, so there were no false positives on this set. The automated tests cover the same cases with generated images.
+**Validation:** the original demo set had 17 real photos. All 8 intended pairs are matched: 1 exact copy, plus resized, WhatsApp-style recompressed, brightness/contrast-edited and heavily compressed copies. The 2 look-alike traps (two different pug photos; two different waterfalls) are not matched, so there were no false positives on this set. The automated tests cover the same cases with generated images.
 
 ### 5.2 Storage design
 
@@ -285,12 +309,12 @@ The app is stateless: all data lives in PostgreSQL and Blob Storage. So moving f
 
 ### 5.8 Testing
 
-- **19 automated backend tests** (including `tests/test_worker.py`, 5 tests: the website leaves new photos to an online laptop, takes over when photos wait too long or no laptop is online, releases claims of silent workers, and reads the worker settings file):
-  - `tests/test_app.py` (11 tests): upload/download, exact copies and storage deduplication including file deletion, resized/compressed/brightened copies, non-matches, grouping and best copy, bulk removal, invalid files, search/filter, health/cloud status, and password protection.
-  - `tests/test_ai.py` (3 tests, real public-domain photos): the same person recognised across photos but not confused with another person; a mirrored, cropped, recoloured shot grouped as "same subject" rather than as a copy; smart search finding the right photos, and nothing for an absent subject.
+- **25 automated backend tests** (including `tests/test_worker.py`, 5 tests: the website leaves new photos to an online laptop, takes over when photos wait too long or no laptop is online, releases claims of silent workers, and reads the worker settings file):
+  - `tests/test_app.py` (14 tests): upload/download, exact copies and storage deduplication including file deletion, resized/compressed/brightened copies, non-matches, grouping and best copy, bulk removal, invalid files, search/filter, health/cloud status, password protection and lockout, the cost card, camera-date filters and sorting, batch actions (favourite, album, ZIP download, delete), and the sharpest photo in a group.
+  - `tests/test_ai.py` (6 tests, real public-domain photos): the same person recognised across photos but not confused with another person; a mirrored, cropped, recoloured shot grouped as "same subject" rather than as a copy; smart search finding the right photos, and nothing for an absent subject; automatic albums; a burst keeping its sharpest frame (exact copies are not a burst); merging and splitting people by hand.
 - The same tests run in two modes in CI: SQLite + local folder, and PostgreSQL 16 + Azurite, so the cloud code paths are exercised on every push. The AI models are cached between runs.
 - Website: TypeScript type-checking, ESLint, production build.
-- Manual end-to-end check with the 32 demo photos (Sections 5.1 and 5.9).
+- Manual end-to-end check with the 83 demo photos (Sections 5.1, 5.9 and 5.11).
 - **Live deployment check (2026-10-25)** on `https://imagevault-4g8kx.azurewebsites.net`:
   - `terraform apply` created all 19 resources;
   - the CD pipeline deployed and passed its smoke test;
@@ -306,10 +330,10 @@ The app is stateless: all data lives in PostgreSQL and Blob Storage. So moving f
 
 | Option | Result |
 |---|---|
-| Azure AI Face (verify/identify same person) | ❌ Limited Access: only for customers managed by Microsoft; not available to students |
-| Azure AI Vision multimodal embeddings | ⚠️ Free tier exists but is region-limited and capped per month; adds an external dependency |
-| PyTorch CLIP + face libraries (as in v1) | ❌ About 2 GB of libraries; too heavy for the free App Service plan |
-| **Quantised ONNX models in the app** (chosen) | ✅ 190 MB of models, about 320 MB of memory, CPU only, free, works offline and locally |
+| Azure AI Face (verify/identify same person) | Rejected. Limited Access: only for customers managed by Microsoft; not available to students |
+| Azure AI Vision multimodal embeddings | Possible, but the free tier exists but is region-limited and capped per month; adds an external dependency |
+| PyTorch CLIP + face libraries (as in v1) | Rejected. About 2 GB of libraries; too heavy for the free App Service plan |
+| **Quantised ONNX models in the app** | **Chosen.** 190 MB of models, about 320 MB of memory, CPU only, free, works offline and locally |
 
 **Design** (`app/ai.py`, `app/intelligence.py`):
 
@@ -347,6 +371,16 @@ The app is stateless: all data lives in PostgreSQL and Blob Storage. So moving f
 
 **Trade-offs:** the database firewall is opened to one extra IP address (narrow, TLS-only, password-protected); if the laptop's IP changes, `terraform apply` must be rerun. Photos uploaded while the laptop is offline are analysed by the cloud, so results never stop appearing.
 
+### 5.11 Albums, bursts and correcting the AI
+
+**Automatic albums** (`intelligence.auto_albums`): each album has a few CLIP text prompts (Beach: "a beach with sand and sea", "the seaside"; Food & drink: "food", "a plate of food", "fruit", "a cup of coffee"; and so on for Mountains, Pets, Wildlife, City, Landmarks, Nature, Snow and Sunsets). A photo joins an album when its best prompt fits at least 0.02 better than a generic caption, the same idea as smart search. A photo can be in several albums (a snowy mountain is in Mountains and Snow), except that an animal is either a pet or wildlife, whichever fits better. The People album uses face detection instead of CLIP, because it is far more reliable.
+
+**Bursts** (`intelligence.bursts`): photos are sorted by camera date (EXIF `DateTimeOriginal`). Neighbours taken at most 10 seconds apart whose CLIP vectors have cosine ≥ 0.8 form a burst. Exact copies are skipped, because they are duplicates, not extra shots. Each burst is ordered by **sharpness**: the variance of the Laplacian (edge strength) of a greyscale version of the photo resized to 512 px. The fixed size matters: measured at full size, a downscaled copy looks sharper than its original. Duplicate groups also get a "Sharpest" badge, but only when the sharpest photo scores at least 15% higher than the softest one.
+
+**Correcting the AI:** merging people moves all their faces to one person; splitting moves the chosen faces to a new person. Both mark the person as `manual`. When new faces are analysed later, a face that matches a manual person joins only the closest one and never merges manual people again, so the user's corrections stick. Re-analysing a photo keeps each re-detected face with its person.
+
+**Validation on the 83-photo demo set:** all 11 automatic albums are filled; 14 beach, 13 mountain and 10 food photos are found; the leopard goes to Wildlife and the dogs and cats to Pets; the 5-frame burst is found with the sharp frame first; Kalpana Chawla and Sunita Williams are each recognised in 3 photos, including crew photos with 6 to 7 people.
+
 ## 6. Lessons Learned
 
 1. **Simpler architectures are easier to run, explain and pay for.** Version 1 used nine containers on a VM (PostgreSQL, Redis, Celery, MinIO, PyTorch CLIP, face recognition, OCR, Prometheus, Grafana) plus Kubernetes and Terraform manifests. It was hard to run, expensive on student credit and hard to demo. Moving to managed PaaS services removed most of the operational work.
@@ -360,6 +394,7 @@ The app is stateless: all data lives in PostgreSQL and Blob Storage. So moving f
 9. **Measure AI before trusting it, and keep what fails out.** Testing on real photos showed CLIP's raw scores can't tell "same object" from "same kind of object". Two things came from that: a face rule for portraits, and comparing searches against generic captions so absent subjects return nothing. A plausible-sounding technique (SIFT + RANSAC verification) was dropped because the measurements showed it was unreliable.
 10. **Edge plus cloud gives the best of both.** Moving the heavy AI work to the laptop made it about 10× faster and kept the free cloud plan light, while the cloud fallback means the website keeps working when the laptop is off. Simple database-based coordination (heartbeats and atomic claims) was enough; no message queue was needed.
 11. **Real deployments find what local tests can't.** The first CD run failed: GitHub now sends an ID-based OIDC subject (`owner@id/repo@id`), and Azure only trusted the name-based one. Terraform now trusts both, looking the IDs up from the GitHub API. Azure's Cost Management API also rate-limits (HTTP 429), so the cost card caches results and keeps showing the last good numbers.
+12. **Let users correct the AI.** No threshold is right for every photo. Merge and split for people, and never deleting AI suggestions automatically, made the AI safe to rely on. Testing with a larger, varied demo set also found small mistakes (a leopard in Pets, exact copies counted as a burst, a small copy looking "sharper") that the smaller set had hidden.
 
 ## 7. Individual Contributions
 

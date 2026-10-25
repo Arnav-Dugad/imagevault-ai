@@ -12,6 +12,9 @@ export interface Photo {
   sha256: string;
   uploaded_at: string;
   ai_status: "processing" | "done" | "failed" | null;
+  taken_at: string | null;
+  sharpness: number | null;
+  favorite: boolean | null;
   thumb_url: string;
   file_url: string;
   match?: CopyKind | null;
@@ -32,6 +35,7 @@ export interface FaceInPhoto {
 export interface PhotoDetails extends Photo {
   matches: { kind: MatchKind; similarity: number; photo: Photo }[];
   people: FaceInPhoto[];
+  albums: { id: string; name: string }[];
 }
 
 export interface PhotoList { total: number; items: Photo[] }
@@ -66,8 +70,18 @@ export interface Stats {
 export interface DuplicateGroup {
   id: string;
   extra_bytes: number;
-  items: { kind: "keep" | MatchKind; similarity: number; photo: Photo }[];
+  sharpest_id: string | null;
+  items: { kind: "keep" | MatchKind | "burst"; similarity: number; photo: Photo }[];
 }
+
+export interface Album {
+  id: string;            // an album id, or "auto:<key>" for albums made by the AI
+  name: string;
+  count: number;
+  cover_url: string | null;
+}
+
+export type SortKey = "newest" | "oldest" | "taken_new" | "taken_old" | "largest" | "smallest" | "name";
 
 export interface Person {
   id: string;
@@ -81,6 +95,7 @@ export interface PersonDetails {
   name: string | null;
   image_url: string | null;
   photos: Photo[];
+  faces: { id: string; photo_id: string; image_url: string }[];
 }
 
 export interface CostReport {

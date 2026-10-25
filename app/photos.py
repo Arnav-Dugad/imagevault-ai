@@ -15,6 +15,7 @@ import math
 import statistics
 from dataclasses import dataclass
 
+import numpy as np
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 SUPPORTED_FORMATS = {
@@ -43,6 +44,32 @@ class PhotoInfo:
     phash: str
     dhash: str
     thumbnail: bytes
+    taken_at: str | None   # when the camera took it (from EXIF), e.g. "2026-10-20T14:03:05"
+    sharpness: float       # higher is sharper
+
+
+def taken_at(image: Image.Image) -> str | None:
+    """The date the photo was taken, from the camera's EXIF data (if the file still has it)."""
+    try:
+        exif = image.getexif()
+        value = exif.get_ifd(0x8769).get(36867) or exif.get(306)  # DateTimeOriginal, else DateTime
+        date, time = str(value).strip().split(" ")
+        return f"{date.replace(':', '-')}T{time}"
+    except Exception:
+        return None
+
+
+def sharpness(image: Image.Image) -> float:
+    """How sharp the photo is: the variance of its edges (Laplacian), measured at a fixed size.
+    Blurry photos have soft edges and score low."""
+    grey = image.convert("L")
+    scale = 512 / max(grey.size)  # same size for every photo, so a small copy doesn't look sharper
+    size = (max(3, round(grey.width * scale)), max(3, round(grey.height * scale)))
+    grey = grey.resize(size, Image.Resampling.BILINEAR)
+    pixels = np.asarray(grey, dtype=np.float32)
+    edges = (pixels[:-2, 1:-1] + pixels[2:, 1:-1] + pixels[1:-1, :-2] + pixels[1:-1, 2:]
+             - 4 * pixels[1:-1, 1:-1])
+    return round(float(edges.var()), 1)
 
 
 def _to_hex(bits: list[bool]) -> str:
@@ -80,6 +107,7 @@ def analyze(data: bytes) -> PhotoInfo:
         raise NotAPhoto(f"{image.format} files are not supported (use JPG, PNG, WEBP, GIF or BMP).")
 
     content_type = SUPPORTED_FORMATS[image.format]
+    date = taken_at(image)
     image = ImageOps.exif_transpose(image).convert("RGB")  # respect phone camera rotation
     thumbnail = image.copy()
     thumbnail.thumbnail((THUMBNAIL_SIZE, THUMBNAIL_SIZE))
@@ -94,6 +122,8 @@ def analyze(data: bytes) -> PhotoInfo:
         phash=perceptual_hash(image),
         dhash=difference_hash(image),
         thumbnail=buffer.getvalue(),
+        taken_at=date,
+        sharpness=sharpness(image),
     )
 
 

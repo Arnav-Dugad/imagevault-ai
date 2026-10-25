@@ -57,16 +57,22 @@ export function Spinner({ label = "Loading" }: { label?: string }) {
   return <div className="grid min-h-[40vh] place-items-center"><LoaderCircle className="h-6 w-6 animate-spin text-acid" aria-label={label} /></div>;
 }
 
-export function MatchBadge({ kind, similarity }: { kind: MatchKind | "keep"; similarity?: number }) {
+export type BadgeKind = MatchKind | "keep" | "burst" | "sharpest";
+
+export function MatchBadge({ kind, similarity }: { kind: BadgeKind; similarity?: number }) {
   const styles = {
     keep: "border-acid/40 text-acid",
+    sharpest: "border-acid/40 text-acid",
     exact: "border-coral/40 text-coral",
     similar: "border-lilac/40 text-lilac",
     subject: "border-sky-300/40 text-sky-300",
+    burst: "border-line text-muted",
   };
   const label = kind === "keep" ? "Best copy"
+    : kind === "sharpest" ? "Sharpest"
     : kind === "exact" ? "Exact copy"
     : kind === "subject" ? "Same subject"
+    : kind === "burst" ? "Burst shot"
     : similarity ? `${percent(similarity)} similar` : "Similar";
   return <span className={cn("inline-flex items-center rounded-full border bg-canvas/85 px-2.5 py-0.5 text-xs font-semibold shadow-sm backdrop-blur", styles[kind])}>{label}</span>;
 }

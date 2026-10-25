@@ -78,3 +78,62 @@ def test_ai_status_and_cloud_card(client):
     assert status["ready"] and status["analysed"] == 1 and status["waiting"] == 0
     card = next(s for s in client.get("/api/system").json()["services"] if s["id"] == "ai")
     assert card["healthy"] and "1 photos analysed" in card["detail"]
+
+
+def test_auto_albums(client):
+    landmark = upload(client, "landmark.jpg")
+    person = upload(client, "person-a-1.jpg")
+    intelligence.process_pending()
+    albums = {a["id"]: a for a in client.get("/api/albums").json()["auto"]}
+    assert landmark in [p["id"] for p in client.get("/api/photos?album=auto:landmarks").json()["items"]]
+    assert albums["auto:people"]["count"] == 1
+    assert [p["id"] for p in client.get("/api/photos?album=auto:people").json()["items"]] == [person]
+
+
+def test_burst_keeps_the_sharpest(client):
+    from PIL import ImageFilter
+
+    frame = Image.open(ASSETS / "landmark.jpg")
+
+    def shot(second: int, blur: float) -> bytes:
+        image = frame.filter(ImageFilter.GaussianBlur(blur)) if blur else frame
+        exif = Image.Exif()
+        exif[306] = f"2026:10:20 14:03:{second:02d}"
+        buffer = io.BytesIO()
+        image.save(buffer, "JPEG", quality=90, exif=exif)
+        return buffer.getvalue()
+
+    upload(client, "burst-1.jpg", shot(1, 3))
+    sharp = upload(client, "burst-2.jpg", shot(2, 0))
+    upload(client, "burst-3.jpg", shot(3, 1.5))
+    upload(client, "later.jpg", shot(59, 0))  # a minute later: not part of the burst
+    upload(client, "later (copy).jpg", shot(59, 0))  # an exact copy is a duplicate, not a burst
+    intelligence.process_pending()
+
+    bursts = client.get("/api/bursts").json()
+    assert len(bursts) == 1 and len(bursts[0]["items"]) == 3
+    assert bursts[0]["sharpest_id"] == sharp == bursts[0]["items"][0]["photo"]["id"]
+    in_related = {i["photo"]["id"] for g in client.get("/api/related").json() for i in g["items"]}
+    assert sharp not in in_related  # burst shots are not listed again as "same subject"
+
+
+def test_merge_and_split_people_by_hand(client):
+    upload(client, "person-a-1.jpg")
+    upload(client, "person-a-2.jpg")
+    upload(client, "person-b.jpg")
+    upload(client, "person-b.jpg", (ASSETS / "person-b.jpg").read_bytes()[:-1] + b"\xd9")  # a second copy of B
+    intelligence.process_pending()
+    people = client.get("/api/people").json()
+    assert len(people) == 2
+
+    merged = client.post("/api/people/merge", json={"ids": [p["id"] for p in people]}).json()["id"]
+    assert [p["photos"] for p in client.get("/api/people").json()] == [4]
+
+    faces = client.get(f"/api/people/{merged}").json()["faces"]
+    person_b_faces = [f["id"] for f in faces][:1]
+    client.post(f"/api/people/{merged}/split", json={"face_ids": person_b_faces})
+    assert sorted(p["photos"] for p in client.get("/api/people").json()) == [1, 3]
+
+    # Analysing photos again must not undo the manual merge and split.
+    intelligence.analyze_photo(faces[0]["photo_id"])
+    assert sorted(p["photos"] for p in client.get("/api/people").json()) == [1, 3]
