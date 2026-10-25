@@ -98,5 +98,6 @@ export interface SystemStatus {
   version: string;
   environment: "Azure" | "Local";
   build: { commit: string; deployed_at: string; run_url: string; repository: string } | null;
+  ai_runs_on: "laptop" | "cloud";
   services: CloudService[];
 }

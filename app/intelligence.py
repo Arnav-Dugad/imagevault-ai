@@ -1,18 +1,24 @@
 """Uses the free AI models (app/ai.py) to understand photos: who is in them and what they show.
 
-Analysis runs in a background thread, so uploads stay fast:
+Analysis runs in a background worker, so uploads stay fast:
   1. CLIP describes the photo           -> smart search, "same subject" suggestions
   2. YuNet finds faces, SFace describes -> faces are grouped into people
+
+The worker runs inside the website, and can also run on your laptop (python -m app.worker).
+While a laptop worker is online, the website leaves new photos to it ("edge computing"),
+which keeps the small free App Service plan light. If the laptop is off, the website does the work.
 
 The thresholds below were measured on real photos (see docs/how-it-works.md).
 """
 
 import io
 import logging
+import os
+import socket
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 
 import numpy as np
@@ -31,6 +37,11 @@ SEARCH_MIN = 0.015     # how much better the search must describe a photo than a
 SEARCH_WINDOW = 0.045  # results must also be close to the best result
 GENERIC_CAPTIONS = ["a photo.", "a photo of something.", "a picture.", "an image."]
 
+HEARTBEAT_SECONDS = 5          # workers report "I'm alive" this often
+ONLINE_SECONDS = 20            # a worker not heard from for this long is considered offline
+LAPTOP_GRACE_SECONDS = 300     # if a photo waits this long, the website analyses it even when a laptop is online
+STALE_CLAIM_SECONDS = 600      # photos claimed by a worker that went silent are retried
+
 _wake = threading.Event()
 _worker_started = False
 status_message = "Starting"
@@ -44,18 +55,63 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _ago(seconds: float) -> str:
+    return (datetime.now(timezone.utc) - timedelta(seconds=seconds)).isoformat()
+
+
+def worker_name(kind: str) -> str:
+    where = os.environ.get("WEBSITE_SITE_NAME") if kind == "cloud" else None
+    return f"{kind}:{where or socket.gethostname()}"
+
+
+# --- Which workers are online ------------------------------------------------------------
+
+def heartbeat(name: str, kind: str) -> None:
+    with connect() as conn:
+        updated = conn.execute(text("UPDATE workers SET last_seen = :now, kind = :kind WHERE name = :name"),
+                               {"now": _now(), "kind": kind, "name": name}).rowcount
+        if not updated:
+            conn.execute(text("INSERT INTO workers (name, kind, last_seen) VALUES (:name, :kind, :now)"),
+                         {"name": name, "kind": kind, "now": _now()})
+
+
+def online_workers() -> list[dict]:
+    with connect() as conn:
+        rows = conn.execute(text("SELECT name, kind, last_seen FROM workers WHERE last_seen >= :since "
+                                 "ORDER BY kind DESC, name"), {"since": _ago(ONLINE_SECONDS)}).mappings().all()
+    return [dict(row) for row in rows]
+
+
+def _laptop_online() -> bool:
+    return any(worker["kind"] == "laptop" for worker in online_workers())
+
+
 # --- Analysing one photo -------------------------------------------------------------
 
-def _claim_next() -> str | None:
-    """Pick one photo that still needs analysing and mark it as 'processing'."""
+def _release_stale_claims() -> None:
+    """Give photos back to the queue if the worker analysing them has gone silent."""
+    with connect() as conn:
+        conn.execute(text(
+            "UPDATE photos SET ai_status = NULL, ai_worker = NULL WHERE ai_status = 'processing' AND "
+            "(ai_worker IS NULL OR ai_worker NOT IN (SELECT name FROM workers WHERE last_seen >= :since))"),
+            {"since": _ago(STALE_CLAIM_SECONDS)})
+
+
+def _claim_next(worker: str = "local", kind: str = "cloud") -> str | None:
+    """Pick one photo that still needs analysing and mark it as 'processing' by this worker.
+
+    The website leaves fresh photos to a laptop worker while one is online.
+    """
+    newest = _ago(LAPTOP_GRACE_SECONDS) if kind == "cloud" and _laptop_online() else _now()
     with connect() as conn:
         row = conn.execute(text(
-            "SELECT id FROM photos WHERE ai_status IS NULL ORDER BY uploaded_at LIMIT 1"
-        )).first()
+            "SELECT id FROM photos WHERE ai_status IS NULL AND uploaded_at <= :newest ORDER BY uploaded_at LIMIT 1"
+        ), {"newest": newest}).first()
         if row is None:
             return None
         claimed = conn.execute(
-            text("UPDATE photos SET ai_status = 'processing' WHERE id = :id AND ai_status IS NULL"), {"id": row.id}
+            text("UPDATE photos SET ai_status = 'processing', ai_worker = :worker "
+                 "WHERE id = :id AND ai_status IS NULL"), {"id": row.id, "worker": worker}
         ).rowcount
     return row.id if claimed else ""
 
@@ -150,15 +206,21 @@ def analyze_photo(photo_id: str) -> None:
     log.info("Photo analysed", extra={"faces": len(found)})
 
 
-def process_pending() -> int:
+def process_pending(worker: str = "local", kind: str = "cloud", on_done=None) -> int:
     """Analyse every photo that is waiting. Returns how many were analysed."""
     count = 0
-    while (photo_id := _claim_next()) is not None:
+    last_beat = 0.0
+    while (photo_id := _claim_next(worker, kind)) is not None:
         if not photo_id:
             continue  # another worker took it
+        if time.monotonic() - last_beat > HEARTBEAT_SECONDS:
+            heartbeat(worker, kind)
+            last_beat = time.monotonic()
         try:
             analyze_photo(photo_id)
             count += 1
+            if on_done:
+                on_done(photo_id)
         except Exception:
             log.exception("AI analysis failed")
             with connect() as conn:
@@ -173,48 +235,64 @@ def wake() -> None:
     _wake.set()
 
 
-def _worker() -> None:
-    global status_message
-    with connect() as conn:  # photos interrupted by a restart are tried again
-        conn.execute(text("UPDATE photos SET ai_status = NULL WHERE ai_status = 'processing'"))
+def run_worker(kind: str, on_status=None, on_done=None, poll_seconds: float = 30) -> None:
+    """Analyse photos forever: download the models once, then keep checking for new photos."""
+
+    def say(message: str) -> None:
+        global status_message
+        status_message = message
+        if on_status:
+            on_status(message)
+
+    name = worker_name(kind)
+    with connect() as conn:  # photos this worker was analysing when it stopped are tried again
+        conn.execute(text("UPDATE photos SET ai_status = NULL, ai_worker = NULL "
+                          "WHERE ai_status = 'processing' AND ai_worker = :name"), {"name": name})
     delay = 10
     while not ai.models_ready():
         try:
-            status_message = "Downloading AI models (about 190 MB, once)"
+            say("Downloading AI models (about 190 MB, once)")
             ai.download_models()
         except Exception as exc:
-            status_message = f"Could not download AI models, retrying: {exc}"
+            say(f"Could not download AI models, retrying: {exc}")
             log.warning(status_message)
             time.sleep(delay)
             delay = min(delay * 2, 600)
-    status_message = "Ready"
+    say("Ready")
     while True:
         try:
-            process_pending()
+            heartbeat(name, kind)
+            _release_stale_claims()
+            process_pending(name, kind, on_done)
         except Exception:
             log.exception("AI worker error")
-        _wake.wait(timeout=30)
+        _wake.wait(timeout=min(poll_seconds, HEARTBEAT_SECONDS) if kind == "laptop" else poll_seconds)
         _wake.clear()
 
 
 def start_worker() -> None:
+    """Start the AI worker inside the website (as a background thread)."""
     global _worker_started
     if ai.enabled() and not _worker_started:
         _worker_started = True
-        threading.Thread(target=_worker, name="imagevault-ai", daemon=True).start()
+        threading.Thread(target=run_worker, args=("cloud",), name="imagevault-ai", daemon=True).start()
 
 
 def status() -> dict:
     with connect() as conn:
         counts = dict(conn.execute(text(
             "SELECT COALESCE(ai_status, 'waiting'), COUNT(*) FROM photos GROUP BY ai_status")).all())
+    online = online_workers()
+    laptops = [w for w in online if w["kind"] == "laptop"]
     return {
         "enabled": ai.enabled(),
-        "ready": ai.enabled() and ai.models_ready(),
+        "ready": ai.enabled() and (ai.models_ready() or bool(laptops)),
         "message": status_message if ai.enabled() else "Turned off",
         "analysed": counts.get("done", 0),
         "waiting": counts.get("waiting", 0) + counts.get("processing", 0),
         "failed": counts.get("failed", 0),
+        "runs_on": "laptop" if laptops else "cloud",
+        "workers": online,
     }
 
 

@@ -33,6 +33,7 @@ The guidelines ask for at least four cloud managed services or tools. ImageVault
 | 6 | GitHub Actions | CI/CD pipeline |
 | 7 | Azure Cost Management budgets | Cost governance (guideline 7) |
 | 8 | Microsoft Entra managed identities + workload identity federation (OIDC) | Identity and security |
+| 9 | Laptop AI worker connected to the Azure database and storage | Edge computing (guideline 5 domain) |
 
 ## 2. Problem Statement
 
@@ -64,7 +65,7 @@ flowchart TB
     end
     subgraph Azure["Microsoft Azure · resource group imagevault-rg"]
       ASP["App Service plan (Linux, F1)"]
-      WEB["Linux Web App<br/>Python FastAPI + React<br/>free AI models (CLIP, YuNet, SFace)<br/>system-assigned managed identity"]
+      WEB["Linux Web App<br/>Python FastAPI + React<br/>backup AI worker<br/>system-assigned managed identity"]
       PG[("Azure Database for PostgreSQL<br/>Flexible Server B1ms")]
       ST["Storage account (Standard LRS)<br/>container: photos"]
       AI["Application Insights"]
@@ -80,6 +81,11 @@ flowchart TB
     R --> GA
     GA -- "OIDC sign-in as UAI<br/>(Website Contributor)" --> WEB
     TF["Terraform"] -. provisions .-> Azure
+    subgraph Edge["Edge: your laptop"]
+      LW["AI worker<br/>python -m app.worker<br/>CLIP · YuNet · SFace"]
+    end
+    LW -- "firewall rule for its IP,<br/>SQL over TLS" --> PG
+    LW -- "az login account<br/>(Storage Blob Data Contributor)" --> ST
 ```
 
 ### 3.2 Azure resources
@@ -103,8 +109,8 @@ All resources are defined in `infra/main.tf` and created in a single resource gr
 | App Service F1 | US$0 |
 | PostgreSQL B1ms + 32 GB | US$0 under the 12-month free services allowance, otherwise about US$13–15 |
 | Blob Storage (5 GB, LRS, hot) | about US$0.10 |
-| Application Insights / Log Analytics (< 5 GB) | US$0 |
-| AI recognition (open-source models running on the App Service) | US$0: no API calls, no per-photo charges |
+| Application Insights / Log Analytics (hard cap 0.1 GB/day, so at most 3 GB/month) | US$0 |
+| AI recognition (open-source models on the laptop, or the App Service as backup) | US$0: no API calls, no per-photo charges |
 | **Total** | **about US$0–15/month**, well within the US$100 student credit |
 
 ### 3.4 Deployment flow
@@ -276,7 +282,7 @@ The app is stateless: all data lives in PostgreSQL and Blob Storage. So moving f
 
 ### 5.8 Testing
 
-- **14 automated backend tests:**
+- **19 automated backend tests** (including `tests/test_worker.py`, 5 tests: the website leaves new photos to an online laptop, takes over when photos wait too long or no laptop is online, releases claims of silent workers, and reads the worker settings file):
   - `tests/test_app.py` (11 tests): upload/download, exact copies and storage deduplication including file deletion, resized/compressed/brightened copies, non-matches, grouping and best copy, bulk removal, invalid files, search/filter, health/cloud status, and password protection.
   - `tests/test_ai.py` (3 tests, real public-domain photos): the same person recognised across photos but not confused with another person; a mirrored, cropped, recoloured shot grouped as "same subject" rather than as a copy; smart search finding the right photos, and nothing for an absent subject.
 - The same tests run in two modes in CI: SQLite + local folder, and PostgreSQL 16 + Azurite, so the cloud code paths are exercised on every push. The AI models are cached between runs.
@@ -316,6 +322,22 @@ The app is stateless: all data lives in PostgreSQL and Blob Storage. So moving f
 
 **Limitation found:** CLIP judges "the same *kind* of thing", for example two different cats. A geometric check (SIFT keypoints + RANSAC) intended to confirm the *exact same object* was tested and rejected, because it was unreliable on real photos.
 
+### 5.10 Edge computing: AI on the laptop, cloud as backup
+
+**Goal:** keep the free App Service plan (1 GB memory, 60 CPU-minutes a day) light, spend no credit on AI, and never make the website depend on a laptop being switched on.
+
+**Design** (`app/worker.py`, `app/intelligence.py`):
+
+- **The same worker code** runs either as a thread inside the website (`kind = cloud`) or on a laptop (`python -m app.worker`, `kind = laptop`). The laptop connects directly to the Azure PostgreSQL database and Blob Storage.
+- **Heartbeats:** every worker updates its row in a `workers` table every 5 seconds (the website's worker every 30). A laptop counts as online if it was seen in the last 20 seconds.
+- **Laptop first:** while a laptop is online, the website's worker only claims photos older than 5 minutes (a safety net if the laptop is stuck). Otherwise it claims photos immediately.
+- **No double work:** a photo is claimed with an atomic `UPDATE photos SET ai_status = 'processing', ai_worker = :me WHERE id = :id AND ai_status IS NULL`. Claims by a worker silent for 10 minutes are released and retried.
+- **Access without new secrets:** Terraform (`laptop_worker = true`) adds a PostgreSQL firewall rule for the deploying computer's public IP (found with the `http` provider), and gives the deploying user's Entra account the *Storage Blob Data Contributor* role. The laptop uses `az login` credentials for Blob Storage; only the database URL is written to a git-ignored `worker.env`.
+
+**Validation:** with the website and the laptop worker running together, all 32 demo photos were analysed by the laptop (`ai_worker = laptop:…`) in about 5 seconds, with the website idle. After the laptop worker was stopped, the next upload was analysed by the website on its own. The Cloud page shows which machine is doing the AI work.
+
+**Trade-offs:** the database firewall is opened to one extra IP address (narrow, TLS-only, password-protected); if the laptop's IP changes, `terraform apply` must be rerun. Photos uploaded while the laptop is offline are analysed by the cloud, so results never stop appearing.
+
 ## 6. Lessons Learned
 
 1. **Simpler architectures are easier to run, explain and pay for.** Version 1 used nine containers on a VM (PostgreSQL, Redis, Celery, MinIO, PyTorch CLIP, face recognition, OCR, Prometheus, Grafana) plus Kubernetes and Terraform manifests. It was hard to run, expensive on student credit and hard to demo. Moving to managed PaaS services removed most of the operational work.
@@ -327,6 +349,7 @@ The app is stateless: all data lives in PostgreSQL and Blob Storage. So moving f
 7. **Cost awareness is part of design.** Choosing F1/B1ms tiers, LRS storage, thumbnails and a budget alert from day one kept the project inside the free allowances.
 8. **"Managed" isn't always available, so check access early.** Azure's face identification is restricted (Limited Access). Small open-source models, quantised to 8-bit and run with ONNX Runtime, gave the same capability at no cost and within the free plan's memory.
 9. **Measure AI before trusting it, and keep what fails out.** Testing on real photos showed CLIP's raw scores can't tell "same object" from "same kind of object". Two things came from that: a face rule for portraits, and comparing searches against generic captions so absent subjects return nothing. A plausible-sounding technique (SIFT + RANSAC verification) was dropped because the measurements showed it was unreliable.
+10. **Edge plus cloud gives the best of both.** Moving the heavy AI work to the laptop made it about 10× faster and kept the free cloud plan light, while the cloud fallback means the website keeps working when the laptop is off. Simple database-based coordination (heartbeats and atomic claims) was enough; no message queue was needed.
 
 ## 7. Individual Contributions
 

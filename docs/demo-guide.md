@@ -5,6 +5,7 @@ A script for the Lab 12 presentation. Practise it once the day before.
 ## Before the presentation
 
 - [ ] The site is deployed, and the **Cloud** page shows five green *Healthy* badges (including *Free AI recognition*).
+- [ ] Start the laptop AI worker on the presenting laptop: `python -m app.worker` (see the deployment guide, step 8). The Cloud page should show *Your laptop: Edge AI · online*.
 - [ ] Open the site once 5 minutes before you present. The free F1 plan sleeps when nobody uses it, and the first request takes about a minute.
 - [ ] Clear old demo data: Duplicates → *Remove exact copies*, then delete the rest from Photos (or start with an empty site).
 - [ ] Download and unzip [`demo-photos.zip`](../frontend/public/demo-photos.zip) on the presenting laptop (it's also on the website's empty Home page).
@@ -29,6 +30,8 @@ A script for the Lab 12 presentation. Practise it once the day before.
 **5. People (1.5 min).** Open **People**: each person appears once, with how many photos they're in. Open one, click the name and type it in. Then open the cabinet group photo: the outlines lock on to all 23 faces, and the named people are labelled. If you added selfies, show your own team being recognised.
 
 **6. Smart search (1 min).** In **Photos**, switch the search to **Smart** and try "cat", "a palace at sunset" and "a man in a suit". Then try "a car": nothing comes back, because there's no car, so it doesn't guess.
+
+**6b. Edge computing (1 min).** Show the laptop worker's terminal printing `[done] analysed photo …` lines as you upload, and the Cloud page's *Your laptop: Edge AI · online*. Then press **Ctrl+C** and upload one more photo: about 20 seconds later the Cloud page says the AI is running *in App Service* again. The cloud takes over automatically.
 
 **7. Cloud storage (30 s).** In the portal, go to the storage account, then **Containers → photos**. The `originals/` files are named by their SHA-256 fingerprint (that's why identical photos are stored once), and `faces/` holds the face crops.
 

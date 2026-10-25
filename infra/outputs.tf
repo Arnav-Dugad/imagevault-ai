@@ -6,6 +6,16 @@ output "web_app_name" {
   value = azurerm_linux_web_app.main.name
 }
 
+output "laptop_worker_env" {
+  description = "Settings for the laptop AI worker. Save with: terraform output -raw laptop_worker_env | Out-File -Encoding utf8 ..\\worker.env"
+  sensitive   = true
+  value       = <<-EOT
+    DATABASE_URL=${azurerm_linux_web_app.main.app_settings["DATABASE_URL"]}
+    AZURE_STORAGE_ACCOUNT_URL=${azurerm_storage_account.photos.primary_blob_endpoint}
+    AZURE_STORAGE_CONTAINER=${azurerm_storage_container.photos.name}
+  EOT
+}
+
 output "github_setup_commands" {
   description = "Run these once so GitHub Actions can deploy to Azure"
   value       = <<-EOT

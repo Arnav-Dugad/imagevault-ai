@@ -17,12 +17,15 @@ Terraform (`infra/main.tf`) creates everything in one resource group called **im
 | App Service plan + Linux Web App | F1 (free) | Free |
 | Azure Database for PostgreSQL Flexible Server | Burstable B1ms, 32 GB | Free for 12 months under Azure's free services (750 h/month); otherwise about US$13–15/month from your credit |
 | Storage account (Blob) | Standard LRS | A few cents per GB per month |
-| Log Analytics + Application Insights | Pay-as-you-go | Free up to 5 GB of logs a month |
-| Free AI recognition (CLIP, YuNet, SFace) | Runs inside the Web App | Free: no AI service is created or billed |
+| Log Analytics + Application Insights | Pay-as-you-go, **capped at 0.1 GB a day** | Free: the cap keeps it under the 5 GB/month free allowance |
+| Free AI recognition (CLIP, YuNet, SFace) | Runs on your laptop, or in the Web App as backup | Free: no AI service is created or billed |
+| Database firewall rule + storage access for your laptop | | Free |
 | Managed identity for GitHub Actions | | Free |
-| Budget with email alerts | | Free |
+| Budget with email alerts | US$5 a month | Free |
 
-> **Budget caution (course guideline 7):** check your remaining credit in the [Azure for Students portal](https://portal.azure.com/#view/Microsoft_Azure_Education/EducationMenuBlade/~/overview). Terraform creates a monthly budget (default US$10) that emails you at 50%, at 80%, and when spending is forecast to reach 100%. When the project is finished, run `terraform destroy` (step 7).
+**Expected total: US$0 a month during your first year** (only a few cents for storage). Azure for Students has no credit card, so real money can never be charged: if your US$100 credit ran out, Azure would switch the resources off rather than bill you.
+
+> **Budget caution (course guideline 7):** check your remaining credit in the [Azure for Students portal](https://portal.azure.com/#view/Microsoft_Azure_Education/EducationMenuBlade/~/overview). Terraform creates a monthly budget (default US$5) that emails you at 50%, at 80%, and when spending is forecast to reach 100%. See [keeping your credit safe](#keeping-your-credit-safe) below, and when the project is finished, run `terraform destroy` (step 7).
 
 ---
 
@@ -142,6 +145,47 @@ The first start after a deployment can take 1–2 minutes on the free plan. On t
 cd infra
 terraform destroy
 ```
+
+## Step 8 (recommended): Run the AI on your laptop
+
+Your laptop can do the AI work (People, smart search, same subject) instead of Azure. It's much faster, and it keeps the small free App Service plan light. This is **edge computing**: processing happens near the user, and the cloud stores the results. While your laptop worker runs, the website leaves new photos to it. When you stop it, the website goes back to doing the work itself within about 20 seconds, so the site never breaks.
+
+Terraform already allowed this (`laptop_worker = true`): it opened the database to your current IP address and gave your Azure account access to the photos.
+
+**Once:** save the worker's settings (this file contains the database password, and git ignores it):
+
+```powershell
+cd infra
+terraform output -raw laptop_worker_env | Out-File -Encoding utf8 ..\worker.env
+cd ..
+```
+
+**Each time** (for example, before your demo), with your virtual environment activated:
+
+```powershell
+az login              # only if you haven't signed in recently
+python -m app.worker
+```
+
+It prints a line for every photo it analyses, and the website's **Cloud** page shows *Your laptop: Edge AI · online*. Press **Ctrl+C** to stop.
+
+**If it can't connect:** your IP address has probably changed (a different Wi-Fi network, or your provider changed it). Run `terraform apply` again in `infra/` to update the firewall rule.
+
+## Keeping your credit safe
+
+Everything is chosen to stay inside the free allowances. These habits make sure of it:
+
+- **Check spending weekly:** in the portal, search **Cost Management**, then open **Cost analysis**. It should show about US$0.
+- **Don't change the sizes** in `terraform.tfvars` (`app_service_sku = "F1"`). The B1ms database and 32 GB storage match the free allowance exactly.
+- **Pause the database when you won't use the site for a while** (stopped servers don't use compute hours; Azure starts them again automatically after 7 days):
+
+  ```powershell
+  az postgres flexible-server stop  --resource-group imagevault-rg --name <your-server-name>
+  az postgres flexible-server start --resource-group imagevault-rg --name <your-server-name>
+  ```
+
+  Find the server name in the portal under **imagevault-rg**, or with `az postgres flexible-server list -o table`. While it's stopped, the website shows a database error.
+- **Delete everything after the course** with `terraform destroy`. After 12 months the free database allowance ends, and it would start using credit (about US$13–15 a month).
 
 ---
 

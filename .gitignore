@@ -28,3 +28,6 @@ infra/*.tfplan
 Thumbs.db
 desktop.ini
 .playwright-mcp/
+
+# Laptop AI worker settings (contain the database password)
+worker.env
