@@ -83,6 +83,28 @@ def flatness(image: Image.Image) -> float:
     return round(float(across + down) / 2, 3)
 
 
+# The standard JPEG brightness table (quality 50). Comparing a file's own table with it estimates its quality.
+_JPEG_STANDARD = [16, 11, 10, 16, 24, 40, 51, 61, 12, 12, 14, 19, 26, 58, 60, 55, 14, 13, 16, 24, 40, 57, 69, 56,
+                  14, 17, 22, 29, 51, 87, 80, 62, 18, 22, 37, 56, 68, 109, 103, 77, 24, 35, 55, 64, 81, 104, 113, 92,
+                  49, 64, 78, 87, 103, 121, 120, 101, 72, 92, 95, 98, 112, 100, 103, 99]
+
+
+def jpeg_quality(image: Image.Image) -> int | None:
+    """Roughly how much a JPEG was compressed (1-100). Messaging apps save photos at about 50-75."""
+    tables = getattr(image, "quantization", None)
+    if not tables or 0 not in tables:
+        return None
+    scale = sum(tables[0]) / sum(_JPEG_STANDARD) * 100
+    return max(1, min(100, round(200 - scale) // 2 if scale <= 100 else round(5000 / scale)))
+
+
+def has_camera_info(image: Image.Image) -> bool:
+    """Whether the file still has its camera details (maker, model or the time it was taken).
+    Messaging apps and screenshots remove them."""
+    exif = image.getexif()
+    return bool(exif.get(271) or exif.get(272) or exif.get_ifd(0x8769).get(36867))
+
+
 def _to_hex(bits: list[bool]) -> str:
     return f"{sum(1 << i for i, bit in enumerate(bits) if bit):016x}"
 

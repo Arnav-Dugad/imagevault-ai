@@ -4,7 +4,7 @@
 **Project:** ImageVault, a cloud photo vault with duplicate detection  
 **Cloud provider:** Microsoft Azure (Azure for Students)  
 **Repository:** https://github.com/Arnav-Dugad/imagevault-ai  
-**Version:** 3.7.0
+**Version:** 3.8.0
 
 ---
 
@@ -12,7 +12,7 @@
 
 ImageVault is a web application for storing photos in the cloud. It automatically finds **exact duplicates** (the same file uploaded more than once) and **similar photos** (resized, compressed or edited copies). Users upload photos in the browser, review matching photos side by side, and delete the copies they don't need.
 
-It also includes **free AI recognition** that runs inside the application, with no paid AI service: it recognises the **same person** across photos (People), finds photos by **description** (smart search), sorts photos into **automatic albums** (Beach, Food & drink, Pets and others), picks the **sharpest photo in a burst**, makes **text in photos searchable** in English, Hindi and Tamil (OCR), suggests the **biggest space-wasters** to delete, and suggests photos of the **same subject taken differently**. Users can correct the AI by merging or splitting people by hand, and can edit many photos at once (favourite, add to an album, download as a ZIP, delete).
+It also includes **free AI recognition** that runs inside the application, with no paid AI service: it recognises the **same person** across photos (People), finds photos by **description** (smart search), sorts photos into **automatic albums** (Beach, Food & drink, Pets and others), picks the **sharpest photo in a burst**, makes **text in photos searchable** in English, Hindi, Tamil and Telugu (OCR) and picks out phone numbers, dates and prices, suggests the **biggest space-wasters** to delete, and suggests photos of the **same subject taken differently**. Users can correct the AI by merging or splitting people by hand, and can edit many photos at once (favourite, add to an album, download as a ZIP, delete).
 
 The project's main focus is **cloud architecture and DevOps**, as the guidelines require:
 
@@ -157,6 +157,7 @@ The frontend is a single-page app that the backend serves as static files, so on
 | `PATCH /api/photos/{id}` | Rename, favourite / unfavourite |
 | `POST /api/photos/batch` | One action on many photos: delete, favourite, unfavourite, add to album (or a new album), remove from album |
 | `GET /api/zip?ids=` | Download up to 100 photos as one ZIP file |
+| `POST /api/albums/suggest` | Name suggestions for an album of the given photos |
 | `GET /api/albums`, `POST /api/albums`, `PATCH /api/albums/{id}`, `DELETE /api/albums/{id}` | The user's albums and the automatic ones; create, rename, delete (photos are kept) |
 | `GET /api/photos/{id}/thumb`, `/file` | Thumbnail / original (streamed from Blob Storage, cached by the browser) |
 | `DELETE /api/photos/{id}?duplicate=` | Delete a photo; the stored file is removed when its last copy is deleted. `duplicate=true` counts it as space saved |
@@ -204,6 +205,10 @@ erDiagram
         text ocr_text "words read from the photo"
         text ocr_words "the words with their positions (JSON)"
         float flatness "share of flat colour, for screenshots"
+        text ocr_search "the text, lowercase without spaces"
+        int jpeg_quality "estimated; low for forwarded images"
+        boolean camera "still has its camera details"
+        int ai_version "which analysis produced the results"
         bytea clip "512 float32 CLIP numbers"
         varchar ai_status "NULL | processing | done | failed"
     }
@@ -327,12 +332,12 @@ The app is stateless: all data lives in PostgreSQL and Blob Storage. So moving f
 
 ### 5.8 Testing
 
-- **37 automated backend tests** (including `tests/test_worker.py`, 8 tests: the website leaves new photos to an online laptop, takes over when photos wait too long or no laptop is online, releases claims of silent workers, the switch keeps the AI on one side, "waiting for your laptop" is shown, the worker settings file is read, and the worker loop rests and stops when asked, as the tray icon does):
+- **40 automated backend tests** (including `tests/test_worker.py`, 8 tests: the website leaves new photos to an online laptop, takes over when photos wait too long or no laptop is online, releases claims of silent workers, the switch keeps the AI on one side, "waiting for your laptop" is shown, the worker settings file is read, and the worker loop rests and stops when asked, as the tray icon does):
   - `tests/test_app.py` (18 tests): upload/download, exact copies and storage deduplication including file deletion, resized/compressed/brightened copies, non-matches, grouping and best copy, bulk removal, invalid files, search/filter, health/cloud status, password protection and lockout, the cost card, camera-date filters and sorting, batch actions (favourite, album, ZIP download, delete), the sharpest photo in a group, storage usage, space saved and "delete everything", and the space-waster list and the "already stored" check.
-  - `tests/test_ai.py` (11 tests, real public-domain photos and made-up text): the same person recognised across photos but not confused with another person; a mirrored, cropped, recoloured shot grouped as "same subject" rather than as a copy; smart search finding the right photos, and nothing for an absent subject; automatic albums; a burst keeping its sharpest frame (exact copies are not a burst); merging and splitting people by hand; text in a photo found by search; Hindi and Tamil words read, located and found by search; smart search using the text in photos; the Documents and Screenshots albums; the laptop worker's results sent over HTTPS and stored.
+  - `tests/test_ai.py` (14 tests, real public-domain photos and made-up text): the same person recognised across photos but not confused with another person; a mirrored, cropped, recoloured shot grouped as "same subject" rather than as a copy; smart search finding the right photos, and nothing for an absent subject; automatic albums; a burst keeping its sharpest frame (exact copies are not a burst); merging and splitting people by hand; text in a photo found by search; Hindi and Tamil words read, located and found by search; smart search using the text in photos; the Documents and Screenshots albums; outlines in search results; phone numbers, dates and prices; album name suggestions; memes and forwarded images; the laptop worker's results sent over HTTPS and stored.
 - The same tests run in two modes in CI: SQLite + local folder, and PostgreSQL 16 + Azurite, so the cloud code paths are exercised on every push. The AI models are cached between runs.
 - Website: TypeScript type-checking, ESLint, production build.
-- Manual end-to-end check with the 92 demo photos (Sections 5.1, 5.9, 5.10, 5.11 and 5.12).
+- Manual end-to-end check with the 97 demo photos (Sections 5.1, 5.9, 5.10, 5.11 and 5.12).
 - **Live deployment check (2026-10-25)** on `https://imagevault-4g8kx.azurewebsites.net`:
   - `terraform apply` created all 19 resources;
   - the CD pipeline deployed and passed its smoke test;
@@ -351,7 +356,7 @@ The app is stateless: all data lives in PostgreSQL and Blob Storage. So moving f
 | Azure AI Face (verify/identify same person) | Rejected. Limited Access: only for customers managed by Microsoft; not available to students |
 | Azure AI Vision multimodal embeddings | Possible, but the free tier exists but is region-limited and capped per month; adds an external dependency |
 | PyTorch CLIP + face libraries (as in v1) | Rejected. About 2 GB of libraries; too heavy for the free App Service plan |
-| **Quantised ONNX models in the app** | **Chosen.** 245 MB of models, about 320 MB of memory, CPU only, free, works offline and locally |
+| **Quantised ONNX models in the app** | **Chosen.** 235 MB of models, about 320 MB of memory, CPU only, free, works offline and locally |
 
 **Design** (`app/ai.py`, `app/intelligence.py`):
 
@@ -401,13 +406,15 @@ The app is stateless: all data lives in PostgreSQL and Blob Storage. So moving f
 
 ### 5.12 Text in photos, documents and screenshots
 
-**Reading text (OCR)** (`ai.read_text`): the PP-OCRv3 detector (OpenCV Zoo) finds text regions; each is straightened with a perspective transform, cut into words at the gaps between them (the English reader reads single words), and read by three readers: CRNN for English (OpenCV Zoo) and PaddleOCR's PP-OCRv3 readers for Hindi (Devanagari) and Tamil (community ONNX conversions, Apache 2.0, pinned by commit and SHA-256). The most confident reading wins; Hindi or Tamil readings only count if at least 60% of their letters are in that script, and anything below 85% confidence is dropped. To keep the free plan fast, Hindi and Tamil are only tried on the 20 clearest regions and not where English already found two words or is 97% sure, at most 200 words are read per photo, and the English reader runs in ONNX Runtime (about 6 ms per word, against about 44 ms in OpenCV's DNN module). Profiling showed the reader, not the detector, was the slow part: a typed page went from 20 s to under 4 s. Each word is stored with its box (`ocr_words`), which the photo viewer uses to outline matching words.
+**Reading text (OCR)** (`ai.read_text`): the PP-OCRv3 detector (OpenCV Zoo) finds text regions; each is straightened with a perspective transform and read as a whole line by PaddleOCR readers (community ONNX conversions, Apache 2.0, pinned by commit and SHA-256): PP-OCRv5 English, which keeps capitals, spaces and punctuation, and PP-OCRv3 Hindi (Devanagari), Tamil and Telugu. The most confident reading wins; Indian-language readings only count if at least 80% of their letters are in that script with at least 3 different letters, and anything below 85% confidence is dropped. To keep the free plan fast, the Indian readers only try the 20 clearest regions, and not lines where English is 97% sure or found two real words. The reader reports where along the line each letter is, so each word is stored with its own box (`ocr_words`) for outlining. An earlier version used OpenCV's CRNN for English: it knew only a–z and 0–9, read one word at a time and was 34 MB; PaddleOCR's reader is better on every test photo, twice as fast, and 7.8 MB. Phone numbers, dates, prices, emails and links are then found with strict rules (`app/textinfo.py`).
 
 **Search:** the normal search compares the text with spaces and punctuation removed (Unicode-safe, so Devanagari vowel signs are kept). Smart search adds up to 0.05 to a photo's CLIP score in proportion to how many words of the search are written in it, and always includes such photos.
 
 **Documents & receipts:** CLIP's best document description must beat its best "real photo" description by 0.035, or the photo has 20+ words or receipt words. **Screenshots:** named like one, or a lossless picture without a camera date with at least 45% exactly-flat neighbouring pixels (`photos.flatness`). Both thresholds were measured on the demo set (Section 5.12 validation below).
 
-**Validation:** CLIP alone could not separate screenshots (a phone screenshot +0.023, a hiker photo +0.018), so the flatness rule was chosen; it selects exactly the 2 screenshots out of 92 photos. The document rule selects the receipt, the letter and the menu board, and none of the 9 official portraits (best 0.029).
+**Memes and forwarded images:** a meme has big caption text (≥ 5% of the height) both in the top and the bottom 30% of the photo and at most 30 words; a forwarded image is named like a WhatsApp/Telegram/Signal file, or is a JPEG ≤ 1600 px without camera details and with an estimated JPEG quality ≤ 70 (from its quantisation tables). **Album names** (`/api/albums/suggest`) come from a word written in several of the photos, the automatic album most of them are in, and their camera month or year.
+
+**Validation:** CLIP alone could not separate screenshots (a phone screenshot +0.023, a hiker photo +0.018), so the flatness rule was chosen; it selects exactly the 2 screenshots out of 97 photos, and the meme and forwarded rules each select exactly their 2. The document rule selects the receipt, the letter and the menu board, and none of the 9 official portraits (best 0.029).
 
 ## 6. Lessons Learned
 

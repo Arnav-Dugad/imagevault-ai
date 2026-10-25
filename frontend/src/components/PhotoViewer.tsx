@@ -1,15 +1,41 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { ChevronLeft, ChevronRight, Cloud, Download, FolderOpen, HardDrive, Heart, LoaderCircle, Maximize2, ScanText, Sparkles, Trash2, X } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Cloud, Copy, Download, FolderOpen, HardDrive, Heart, IndianRupee, Link2, LoaderCircle, Mail, Maximize2, Phone, ScanText, Sparkles, Trash2, X, type LucideIcon } from "lucide-react";
 import { FullscreenPhoto } from "./FullscreenPhoto";
 import { FaceAvatar, personName } from "../pages/PeoplePage";
 import { api } from "../lib/api";
 import { useSystem } from "../lib/system";
 import { useToast } from "../lib/toast";
 import { cn, formatBytes, formatDate, wordMatches } from "../lib/utils";
-import type { PhotoDetails } from "../types";
+import type { PhotoDetails, TextFinds } from "../types";
 import { PhotoThumb } from "./PhotoCard";
 import { Button, ConfirmDialog, ErrorNote, MatchBadge, Modal } from "./ui";
+
+const WORDS_SHOWN = 40; // a full page of text has hundreds of words; show the first ones until asked
+
+/** Phone numbers, dates, prices, emails and links found in a photo's text, ready to use. */
+function Finds({ found, copy }: { found: TextFinds; copy: (value: string, message: string) => Promise<void> }) {
+  const chip = "focus-ring inline-flex max-w-full items-center gap-1.5 truncate rounded-lg border border-sky-300/30 bg-sky-300/[.07] px-2 py-1 text-xs text-sky-200 hover:border-sky-300/60";
+  const items: { icon: LucideIcon; label: string; href?: string; copyText?: string; title: string }[] = [
+    ...found.phones.map((p) => ({ icon: Phone, label: p.text, href: `tel:${p.dial}`, title: "Call" })),
+    ...found.emails.map((e) => ({ icon: Mail, label: e.text, href: `mailto:${e.text}`, title: "Write an email" })),
+    ...found.links.map((l) => ({ icon: Link2, label: l.text, href: l.url, title: "Open the link" })),
+    ...found.dates.map((d) => ({ icon: CalendarDays, label: formatDay(d.iso), copyText: d.text, title: `Written as "${d.text}". Click to copy.` })),
+    ...found.prices.map((p) => ({ icon: IndianRupee, label: p.text, copyText: p.text, title: "Click to copy" })),
+  ];
+  if (!items.length) return null;
+  return (
+    <div className="mb-3 flex flex-wrap gap-1.5">
+      {items.map(({ icon: Icon, label, href, copyText, title }, i) => href
+        ? <a key={i} href={href} target={href.startsWith("http") ? "_blank" : undefined} rel="noreferrer" className={chip} title={title}><Icon className="h-3.5 w-3.5 shrink-0" />{label}</a>
+        : <button key={i} onClick={() => void copy(copyText ?? label, `Copied ${label}`)} className={chip} title={title}><Icon className="h-3.5 w-3.5 shrink-0" />{label}</button>)}
+    </div>
+  );
+}
+
+function formatDay(iso: string) {
+  return new Date(`${iso}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+}
 
 /** A pop-up showing one photo, its details and the photos it matches.
  *  `ids` is the list the photo was opened from, so ← → can move through it. */
@@ -29,6 +55,15 @@ export function PhotoViewer({ id, ids, onClose, onDeleted, onChanged, highlight 
   const [imageLoaded, setImageLoaded] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [pointed, setPointed] = useState<number | null>(null); // the word under the mouse in the list
+  const [allWords, setAllWords] = useState(false);
+  const copy = useCallback(async (value: string, message: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast(message);
+    } catch {
+      toast("Couldn't copy. Select the text and copy it instead.", true);
+    }
+  }, [toast]);
 
   useEffect(() => {
     setPhoto(null); setError(""); setImageLoaded(false);
@@ -155,13 +190,22 @@ export function PhotoViewer({ id, ids, onClose, onDeleted, onChanged, highlight 
               {rows.map(([label, value]) => <div key={label} className="flex justify-between gap-4"><dt className="text-muted">{label}</dt><dd className="text-right">{value}</dd></div>)}
             </dl>
             {photo.text && <div className="mt-5">
-              <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted"><ScanText className="h-3.5 w-3.5" />Text in the photo</p>
-              <p className="flex flex-wrap gap-1.5">{photo.words.map((word, i) => (
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted"><ScanText className="h-3.5 w-3.5" />Text in the photo</p>
+                <button onClick={() => void copy(photo.text, "Text copied")} className="focus-ring inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted hover:bg-white/5 hover:text-ink">
+                  <Copy className="h-3.5 w-3.5" />Copy
+                </button>
+              </div>
+              <Finds found={photo.found} copy={copy} />
+              <p className="flex flex-wrap gap-1.5">{photo.words.slice(0, allWords ? undefined : WORDS_SHOWN).map((word, i) => (
                 <button key={`${word.text}-${i}`} onMouseEnter={() => setPointed(i)} onMouseLeave={() => setPointed(null)}
                   onFocus={() => setPointed(i)} onBlur={() => setPointed(null)} title="Show where it is"
                   className={cn("focus-ring rounded-md border px-2 py-0.5 text-xs transition",
                     highlight && wordMatches(word.text, highlight) ? "border-acid/60 bg-acid/15 text-acid" : "border-line bg-canvas/60 hover:border-acid/40")}>{word.text}</button>
-              ))}</p>
+              ))}
+              {photo.words.length > WORDS_SHOWN && <button onClick={() => setAllWords(!allWords)} className="focus-ring rounded-md px-2 py-0.5 text-xs text-acid hover:underline">
+                {allWords ? "Show fewer" : `Show all ${photo.words.length}`}
+              </button>}</p>
             </div>}
             {(photo.ai_status === null || photo.ai_status === "processing") && (
               <p className="mt-4 flex items-center gap-2 rounded-xl border border-sky-300/20 bg-sky-300/[.06] px-3 py-2 text-xs text-sky-200">

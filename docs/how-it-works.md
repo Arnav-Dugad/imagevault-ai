@@ -70,7 +70,7 @@ Matching photos are joined into groups with a **union-find** algorithm. In each 
 
 ## Free AI recognition
 
-ImageVault runs small open-source AI models **on your own machines**, using ONNX Runtime and OpenCV: on your laptop when it's online, otherwise inside the App Service. There's no paid AI API, no per-photo charge and no usage limit, and photos are never sent to another company. The models (about 245 MB) are downloaded once from fixed versions and checked against SHA-256 fingerprints (`app/ai.py`). With all of them loaded, the app uses about 320 MB of memory, which fits the free F1 plan's 1 GB.
+ImageVault runs small open-source AI models **on your own machines**, using ONNX Runtime and OpenCV: on your laptop when it's online, otherwise inside the App Service. There's no paid AI API, no per-photo charge and no usage limit, and photos are never sent to another company. The models (about 235 MB) are downloaded once from fixed versions and checked against SHA-256 fingerprints (`app/ai.py`). With all of them loaded, the app uses about 320 MB of memory, which fits the free F1 plan's 1 GB.
 
 | Model | License | What it does | Used for |
 |---|---|---|---|
@@ -78,8 +78,7 @@ ImageVault runs small open-source AI models **on your own machines**, using ONNX
 | **YuNet** (OpenCV Zoo) | MIT | Finds faces in a photo | People |
 | **SFace** (OpenCV Zoo) | Apache 2.0 | Turns a face into 128 numbers; the same person gives similar numbers | People |
 | **PP-OCRv3 detector** (OpenCV Zoo) | Apache 2.0 | Finds where text is written in a photo | Text search |
-| **CRNN** (OpenCV Zoo) | Apache 2.0 | Reads each English word (letters and digits) | Text search |
-| **PP-OCRv3 Hindi and Tamil readers** (PaddleOCR, ONNX) | Apache 2.0 | Read Devanagari and Tamil words | Text search |
+| **PaddleOCR readers** (PP-OCRv5 English; PP-OCRv3 Hindi, Tamil, Telugu; ONNX) | Apache 2.0 | Read a whole line of text, with punctuation and capitals | Text search, phone numbers, dates, prices |
 
 Analysis runs in a **background worker** (`app/intelligence.py`): uploads return immediately, and the Home page shows progress. On Azure, the models are kept in `/home/models` so they survive restarts.
 
@@ -105,11 +104,21 @@ Photos are *claimed* with an atomic `UPDATE … WHERE ai_status IS NULL`, so no 
 
 ### Text in photos (OCR)
 
-The PP-OCR detector finds text regions and each one is straightened. A region is often a whole line, but the English reader (CRNN) reads one word at a time, so each line is cut into words at the gaps between them first. Three readers then have a go: CRNN for English, and PaddleOCR readers for Hindi (Devanagari) and Tamil. The most confident reading wins, but a Hindi or Tamil reading only counts if most of its letters are in that script, and words any reader is less than 85% sure about are dropped (on busy street scenes they're mostly noise). To stay quick, Hindi and Tamil are only tried on the 20 clearest text areas, and not where the English reader is already 97% sure.
+The PP-OCR detector finds text regions and each one is straightened. PaddleOCR's English reader reads the whole line, keeping capitals, spaces and punctuation ("Tel:010-265.33.99", "Datum: 26/01/2021", "Rs 1,250.00"). Unless English is already very sure of the line, readers for Hindi (Devanagari), Tamil and Telugu read it too; the most confident reading wins, but an Indian-language reading only counts if at least 80% of its letters are in that script and it uses at least 3 different letters (the Telugu reader once read a row of light bulbs as "ంంంం"). Lines any reader is less than 85% sure about are dropped. To stay quick, the Indian languages are only tried on the 20 clearest text areas, and not on lines where English found two real words.
 
-The words are stored with the photo, together with where each one is. The normal search box searches them, ignoring spaces, so "las vegas" finds a sign read as "lasvegas", and "சென்னை" or "स्टेशन" find Tamil and Hindi words. Smart search uses them too: a photo gets a bonus when the words of the search are written in it, so "menu with nachos" finds a menu board that says "nachos". When you open a photo from a search, the matching words are outlined on the photo, and all the words light up one after another as it opens.
+Each word is stored with where it is (the reader reports where along the line each letter is). The normal search box searches the text ignoring spaces, capitals and punctuation, so "las vegas", "சென்னை", "स्टेशन" and "అంగల" all work, and the matching words are outlined on the thumbnails and on the photo, where all the words light up one after another as it opens. Smart search gives a photo a bonus when the words of the search are written in it, so "menu with nachos" finds a menu board. The photo viewer has a **Copy** button for the whole text.
 
-On the demo set, "vegas", "honey", "stop" and "parangipettai" each find the right photo, and the Parangipettai station board is read in all three scripts. Reading takes about 0.3–0.5 s for a sign on a laptop, 1–2 s for a busy street or a menu, and about 4 s for a full page of typed text (at most 200 words are read per photo). Running the English reader in ONNX Runtime instead of OpenCV made it about 7 times faster.
+**Phone numbers, dates, prices, emails and links** are picked out of the text with simple, strict rules (`app/textinfo.py`): a phone number needs a "+", a word like "Tel" or "Call" in front, or 10–12 digits (so "5841 5855" on a sign is not one); dates are read day-first, as in India; prices need a currency sign or "/-", or two decimals. They appear as chips you can tap to call, email, open or copy.
+
+On the demo set, the receipt gives its phone number, date and four prices, and the station boards are read in Tamil, Hindi and Telugu as well as English. Reading takes about 0.3 s for a sign on a laptop, under 1 s for a receipt or a busy street, and about 4 s for a full typed page. Bengali and Kannada are not read: PaddleOCR has no Bengali reader, and the Kannada reader is not published in the format the app uses.
+
+### Memes and forwarded images
+
+A **meme** is big caption text at the top and at the bottom of a photo (letters at least 5% of the photo's height, at most 30 words). Shop signs usually have big text at the top only, so they aren't caught. A **forwarded** image is named the way WhatsApp, Telegram or Signal save photos ("IMG-20251024-WA0007.jpg", "WhatsApp Image ..."), or is a JPEG of at most 1600 px with no camera details and a JPEG quality of 70 or less (estimated from its compression tables): that is what messaging apps send. Camera photos keep their details and are saved at quality 85–95. Both are automatic albums, and are offered (unticked) in the "Free up" list. On the demo set each finds exactly its 2 photos.
+
+### Album name suggestions
+
+When you make a new album from selected photos, or rename one, ImageVault suggests names: a word written in several of the photos (like a place name), the automatic album most of them are in ("Beach"), and the month or year they were taken, from their camera dates ("May 2025").
 
 ### Documents and screenshots
 

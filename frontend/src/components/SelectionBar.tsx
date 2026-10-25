@@ -3,11 +3,12 @@ import { Download, FolderMinus, FolderPlus, Heart, HeartOff, Plus, Trash2, X } f
 import { api } from "../lib/api";
 import { useToast } from "../lib/toast";
 import type { Album } from "../types";
+import { NameSuggestions } from "./NameSuggestions";
 import { Button, ConfirmDialog } from "./ui";
 
 const plural = (n: number) => `${n} ${n === 1 ? "photo" : "photos"}`;
 
-function AlbumMenu({ onPick, onClose }: { onPick: (album: { id?: string; name?: string }) => void; onClose: () => void }) {
+function AlbumMenu({ ids, onPick, onClose }: { ids: string[]; onPick: (album: { id?: string; name?: string }) => void; onClose: () => void }) {
   const [albums, setAlbums] = useState<Album[] | null>(null);
   const [name, setName] = useState("");
   const box = useRef<HTMLDivElement>(null);
@@ -37,6 +38,7 @@ function AlbumMenu({ onPick, onClose }: { onPick: (album: { id?: string; name?: 
           className="focus-ring h-9 min-w-0 flex-1 rounded-lg border border-line bg-canvas px-2 text-sm" />
         <Button type="submit" className="h-9 px-2.5" aria-label="Create album"><Plus className="h-4 w-4" /></Button>
       </form>
+      <div className="mt-2 px-1"><NameSuggestions ids={ids} onPick={setName} /></div>
     </div>
   );
 }
@@ -79,7 +81,7 @@ export function SelectionBar({ selected, total, albumId, onSelectAll, onClear, o
       <button disabled={busy} onClick={() => run("unfavorite", {}, `${plural(selected.size)} removed from favourites`)} className={icon} title="Remove from favourites"><HeartOff className="h-4 w-4" /></button>
       <div className="relative">
         <button disabled={busy} onClick={() => setAlbumMenu(!albumMenu)} className={icon}><FolderPlus className="h-4 w-4" /><span className="hidden sm:inline">Album</span></button>
-        {albumMenu && <AlbumMenu onClose={() => setAlbumMenu(false)} onPick={(album) => run("add_to_album",
+        {albumMenu && <AlbumMenu ids={ids} onClose={() => setAlbumMenu(false)} onPick={(album) => run("add_to_album",
           album.id ? { album_id: album.id } : { new_album: album.name! }, `${plural(selected.size)} added to ${album.name ? `“${album.name}”` : "the album"}`)} />}
       </div>
       {albumId && !albumId.startsWith("auto:") && (

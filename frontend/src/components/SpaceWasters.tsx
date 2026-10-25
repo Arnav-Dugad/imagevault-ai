@@ -13,6 +13,8 @@ const TONE: Record<CleanupItem["reason"], string> = {
   "Blurrier shot of a burst": "border-sky-300/40 text-sky-300",
   "Very blurry": "border-amber-300/40 text-amber-300",
   Screenshot: "border-line text-muted",
+  Meme: "border-line text-muted",
+  "Forwarded image": "border-line text-muted",
 };
 
 /** The photos that waste the most space, biggest first, ready to delete in one go. */
@@ -60,7 +62,7 @@ export function SpaceWasters({ version, onOpen, onDeleted }: { version: number; 
           <h2 className="flex items-center gap-2 font-semibold"><Eraser className="h-4 w-4 text-acid" />Free up {formatBytes(total)}</h2>
           <p className="mt-0.5 text-sm text-muted">
             {suggested.length} {suggested.length === 1 ? "photo" : "photos"} you probably don't need, biggest first.
-            {screenshots > 0 && ` ${screenshots} ${screenshots === 1 ? "screenshot is" : "screenshots are"} listed too, not ticked.`}
+            {screenshots > 0 && ` ${screenshots} more (screenshots, memes, forwarded images) listed too, not ticked.`}
           </p>
         </div>
         <Button variant="danger" disabled={!chosen.length} onClick={() => setConfirming(true)}>

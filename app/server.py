@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 from sqlalchemy import bindparam, make_url, text  # noqa: E402
 
-from app import __version__, ai, costs, intelligence  # noqa: E402
+from app import __version__, ai, costs, intelligence, textinfo  # noqa: E402
 from app.database import connect, init_db  # noqa: E402
 from app.photos import NotAPhoto, analyze, compare  # noqa: E402
 from app.storage import get_storage, original_key, thumbnail_key  # noqa: E402
@@ -133,7 +133,7 @@ def logout():
 
 def _photo_json(row) -> dict:
     photo = dict(row)
-    for hidden in ("phash", "dhash", "clip", "ocr_text", "ocr_words"):
+    for hidden in ("phash", "dhash", "clip", "ocr_text", "ocr_words", "ocr_search"):
         photo.pop(hidden, None)
     photo["thumb_url"] = f"/api/photos/{photo['id']}/thumb"
     photo["file_url"] = f"/api/photos/{photo['id']}/file"
@@ -159,10 +159,18 @@ PHOTO_COLUMNS = f"""
 """
 
 
-def _with_match(row) -> dict:
+def _with_match(row, search: list[str] | None = None) -> dict:
     photo = _photo_json(row)
     photo["match"] = photo.pop("match_kind", None)
+    if search:  # where the searched words are written in the photo, to outline them on the thumbnail
+        words = json.loads(row["ocr_words"]) if row.get("ocr_words") else []
+        photo["highlights"] = [w["box"] for w in words if _word_matches(w["text"], search)]
     return photo
+
+
+def _word_matches(word: str, search: list[str]) -> bool:
+    word = intelligence.squeeze(word)
+    return any(s in word or (len(word) >= 3 and word in s) for s in search)
 
 
 def _photos_by_id(conn, ids: list[str]) -> list[dict]:
@@ -204,6 +212,7 @@ def list_photos(search: str = "", smart: bool = False, filter: str = "all", albu
     id or "auto:<key>"; dates are YYYY-MM-DD and use the camera date when the photo has one."""
     limit, offset = max(1, min(limit, 200)), max(0, offset)
     ranked = None  # IDs in a fixed order (smart search results, or an auto album)
+    words = intelligence.search_words(search) if search.strip() else []  # to outline on thumbnails
     if smart and search.strip():  # AI search: "dog on a beach"
         if not (ai.enabled() and ai.models_ready()):
             raise HTTPException(503, "Smart search is still getting ready. Try again in a minute.")
@@ -213,8 +222,7 @@ def list_photos(search: str = "", smart: bool = False, filter: str = "all", albu
 
     where, params = ["1 = 1"], {}
     if search and not smart:
-        where.append("(LOWER(photos.filename) LIKE :search OR REPLACE(COALESCE(photos.ocr_text, ''), ' ', '') "
-                     "LIKE :squeezed)")
+        where.append("(LOWER(photos.filename) LIKE :search OR photos.ocr_search LIKE :squeezed)")
         params["search"] = f"%{search.lower()}%"
         params["squeezed"] = f"%{intelligence.squeeze(search) or search.lower()}%"
     if filter == "duplicates":
@@ -242,12 +250,12 @@ def list_photos(search: str = "", smart: bool = False, filter: str = "all", albu
                                 {**params, "ids": ranked}).mappings().all()
             position = {photo_id: i for i, photo_id in enumerate(ranked)}
             rows = sorted(rows, key=lambda r: position[r["id"]])
-            return {"total": len(rows), "items": [_with_match(r) for r in rows[offset:offset + limit]]}
+            return {"total": len(rows), "items": [_with_match(r, words) for r in rows[offset:offset + limit]]}
         total = conn.execute(text(f"SELECT COUNT(*) FROM ({sql}) AS matching"), params).scalar_one()
         rows = conn.execute(text(f"{sql} ORDER BY {SORTS.get(sort, SORTS['newest'])}, photos.id "
                                  "LIMIT :limit OFFSET :offset"),
                             {**params, "limit": limit, "offset": offset}).mappings().all()
-    return {"total": total, "items": [_with_match(row) for row in rows]}
+    return {"total": total, "items": [_with_match(row, words) for row in rows]}
 
 
 class Fingerprints(BaseModel):
@@ -364,6 +372,7 @@ def photo_details(photo_id: str):
     result["people"] = [{**dict(face), "image_url": f"/api/faces/{face['id']}/image"} for face in in_photo]
     result["albums"] = [dict(a) for a in in_albums]
     result["text"] = photo["ocr_text"] or ""
+    result["found"] = textinfo.find(result["text"])  # phone numbers, dates, prices, emails and links
     result["words"] = json.loads(photo["ocr_words"]) if photo["ocr_words"] else []
     return result
 
@@ -554,6 +563,55 @@ def list_albums():
                          "bytes": sum(sizes.get(i, 0) for i in ids), "cover_id": ids[0]})
     cover = lambda a: {**dict(a), "cover_url": f"/api/photos/{a['cover_id']}/thumb" if a["cover_id"] else None}  # noqa: E731
     return {"mine": [cover(a) for a in mine], "auto": [cover(a) for a in auto]}
+
+
+class PhotoIds(BaseModel):
+    ids: list[str]
+
+
+@app.post("/api/albums/suggest")
+def suggest_album_names(body: PhotoIds):
+    """Names for an album of these photos, from the words written in them, what they show and when they
+    were taken. For example "Malibu", "Beach" or "May 2025"."""
+    ids = list(dict.fromkeys(body.ids))[:500]
+    if not ids:
+        return {"names": []}
+    with connect() as conn:
+        rows = conn.execute(text("SELECT id, ocr_text, taken_at, uploaded_at FROM photos WHERE id IN :ids")
+                            .bindparams(bindparam("ids", expanding=True)), {"ids": ids}).mappings().all()
+    names: list[str] = []
+    # 1. A word written in several of the photos (or the clearest word, for one photo), like a place name.
+    counts: dict[str, tuple[int, str]] = {}
+    for row in rows:
+        seen = set()
+        for word in re.findall(r"[^\W\d_]{3,}", row["ocr_text"] or ""):
+            key = word.lower()
+            if key not in seen and key not in intelligence.COMMON_WORDS | NOT_NAMES:
+                seen.add(key)
+                count, shown = counts.get(key, (0, word))
+                counts[key] = (count + 1, shown if shown[:1].isupper() else word)
+    needed = 2 if len(rows) > 1 else 1
+    for key, (count, shown) in sorted(counts.items(), key=lambda c: -c[1][0])[:2]:
+        if count >= needed:
+            names.append(shown if not shown.isupper() else shown.title())
+    # 2. The automatic album most of them are in.
+    if ai.enabled() and ai.models_ready():
+        albums = intelligence.auto_albums()
+        best = max(albums.items(), key=lambda a: len(set(a[1]) & set(ids)), default=None)
+        if best and len(set(best[1]) & set(ids)) * 2 >= len(rows) and best[0] != "people":
+            names.append(intelligence.ALBUM_NAMES[best[0]])
+    # 3. When they were taken (camera dates only; the upload date says nothing): one month, or one year.
+    months = {row["taken_at"][:7] for row in rows if row["taken_at"]}
+    if len(months) == 1:
+        names.append(datetime.strptime(months.pop(), "%Y-%m").strftime("%B %Y"))
+    elif months and len({m[:4] for m in months}) == 1:
+        names.append(next(iter(months))[:4])
+    return {"names": list(dict.fromkeys(names))[:4]}
+
+
+NOT_NAMES = {"total", "cash", "price", "time", "date", "open", "closed", "sale", "offer", "welcome", "exit",
+             "entry", "street", "road", "this", "that", "your", "with", "from", "have", "will", "the", "and",
+             "for", "you", "are", "not", "all", "our", "new", "get", "one", "two", "off", "per", "net", "qty"}
 
 
 @app.post("/api/albums", status_code=201)
@@ -757,7 +815,7 @@ BLURRY = 45  # sharpness below this (see photos.sharpness) is very blurry; norma
 def space_wasters():
     """Photos that are probably safe to delete, biggest first: lower-quality copies, the blurrier shots
     of a burst, and very blurry photos. Exact copies are left out: they are stored only once already.
-    Screenshots are listed too, but not ticked: they are often worth keeping."""
+    Screenshots, memes and forwarded images are listed too, but not ticked: they are often worth keeping."""
     suggestions: dict[str, dict] = {}
     counted: set[str] = set()  # identical files are stored once, so their space is counted once
 
@@ -781,12 +839,14 @@ def space_wasters():
     with connect() as conn:
         blurry = conn.execute(text(f"SELECT {PHOTO_COLUMNS} FROM photos WHERE sharpness < :limit"),
                               {"limit": BLURRY}).mappings().all()
-        screenshots = intelligence.auto_albums().get("screenshots", []) if ai.enabled() and ai.models_ready() else []
-        screenshots = _photos_by_id(conn, screenshots) if screenshots else []
+        albums = intelligence.auto_albums() if ai.enabled() and ai.models_ready() else {}
+        offered = {reason: _photos_by_id(conn, albums.get(key, [])) for key, reason in
+                   (("screenshots", "Screenshot"), ("memes", "Meme"), ("forwarded", "Forwarded image"))}
     for row in blurry:
         suggest(_photo_json(row), "Very blurry")
-    for photo in screenshots:
-        suggest(photo, "Screenshot", ticked=False)
+    for reason, photos in offered.items():  # often worth keeping, so offered but not ticked
+        for photo in photos:
+            suggest(photo, reason, ticked=False)
     items = sorted(suggestions.values(), key=lambda s: (s["bytes"] or s["photo"]["size"], s["bytes"]), reverse=True)
     return {"items": items, "total_bytes": sum(s["bytes"] for s in items)}
 

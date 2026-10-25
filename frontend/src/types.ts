@@ -18,6 +18,7 @@ export interface Photo {
   thumb_url: string;
   file_url: string;
   match?: CopyKind | null;
+  highlights?: [number, number, number, number][]; // in search results: where the searched words are written
 }
 
 export interface FaceInPhoto {
@@ -37,7 +38,16 @@ export interface PhotoDetails extends Photo {
   people: FaceInPhoto[];
   albums: { id: string; name: string }[];
   text: string;            // words read from the photo
-  words: { text: string; box: [number, number, number, number] }[]; // the same words with where they are
+  words: { text: string; box: [number, number, number, number]; line: number }[]; // the same words with where they are
+  found: TextFinds;        // phone numbers, dates, prices, emails and links in the text
+}
+
+export interface TextFinds {
+  phones: { text: string; dial: string }[];
+  dates: { text: string; iso: string }[];
+  prices: { text: string }[];
+  emails: { text: string }[];
+  links: { text: string; url: string }[];
 }
 
 export interface PhotoList { total: number; items: Photo[] }
@@ -63,7 +73,7 @@ export type AiRunsOn = "laptop" | "cloud" | "none";
 
 export interface CleanupItem {
   photo: Photo;
-  reason: "Lower-quality copy" | "Blurrier shot of a burst" | "Very blurry" | "Screenshot";
+  reason: "Lower-quality copy" | "Blurrier shot of a burst" | "Very blurry" | "Screenshot" | "Meme" | "Forwarded image";
   bytes: number;
   suggested: boolean;      // ticked at first (screenshots are offered, not ticked)
   keep: { id: string; filename: string } | null;
