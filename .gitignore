@@ -31,3 +31,4 @@ desktop.ini
 
 # Laptop AI worker settings (contain the database password)
 worker.env
+infra/tfplan

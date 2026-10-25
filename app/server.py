@@ -5,6 +5,7 @@ import hmac
 import json
 import logging
 import re
+import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -79,12 +80,37 @@ def session(request: Request):
     return {"password_required": bool(env("APP_PASSWORD")), "logged_in": _logged_in(request)}
 
 
+MAX_FAILED_LOGINS = 5          # wrong passwords allowed per address...
+LOCKOUT_SECONDS = 15 * 60      # ...within this time, before that address is blocked
+_failed_logins: dict[str, list[float]] = {}
+_failed_lock = threading.Lock()
+
+
+def _recent_failures(address: str) -> list[float]:
+    cutoff = time.monotonic() - LOCKOUT_SECONDS
+    with _failed_lock:
+        attempts = [t for t in _failed_logins.get(address, []) if t > cutoff]
+        _failed_logins[address] = attempts
+        return attempts
+
+
 @app.post("/api/login")
 def login(body: Login, request: Request):
     password = env("APP_PASSWORD")
+    address = request.client.host if request.client else "unknown"
+    failures = _recent_failures(address)
+    if len(failures) >= MAX_FAILED_LOGINS:  # stops scripts from guessing the password
+        minutes = max(1, round((failures[0] + LOCKOUT_SECONDS - time.monotonic()) / 60))
+        raise HTTPException(429, f"Too many wrong passwords. Try again in {minutes} minutes.")
     if password and not hmac.compare_digest(body.password, password):
+        with _failed_lock:
+            _failed_logins.setdefault(address, []).append(time.monotonic())
         log.warning("Failed login attempt")
-        raise HTTPException(401, "Wrong password.")
+        left = MAX_FAILED_LOGINS - len(failures) - 1
+        raise HTTPException(401, f"Wrong password. {left} {'try' if left == 1 else 'tries'} left." if left
+                            else "Wrong password. Too many tries: wait 15 minutes.")
+    with _failed_lock:
+        _failed_logins.pop(address, None)
     response = JSONResponse({"ok": True})
     if password:
         response.set_cookie(

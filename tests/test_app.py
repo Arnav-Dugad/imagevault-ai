@@ -138,3 +138,17 @@ def test_password_protection(client, monkeypatch):
     assert client.post("/api/login", json={"password": "secret"}).status_code == 200
     assert client.get("/api/photos").status_code == 200
     assert client.get("/api/health").status_code == 200  # the deploy pipeline needs this without a password
+
+
+def test_guessing_the_password_is_blocked(client, monkeypatch):
+    from app import server
+
+    monkeypatch.setenv("APP_PASSWORD", "8574")
+    server._failed_logins.clear()
+    for guess in ("0000", "0001", "0002", "0003", "0004"):
+        assert client.post("/api/login", json={"password": guess}).status_code == 401
+    # Even the right password is refused for 15 minutes after 5 wrong guesses from the same address.
+    blocked = client.post("/api/login", json={"password": "8574"})
+    assert blocked.status_code == 429 and "Try again in 15 minutes" in blocked.json()["detail"]
+    server._failed_logins.clear()
+    assert client.post("/api/login", json={"password": "8574"}).status_code == 200
