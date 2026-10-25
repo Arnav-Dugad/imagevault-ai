@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Activity, ArrowDown, ArrowRight, Cloud, Database, ExternalLink, GitBranch, Globe, HardDrive, Laptop, Layers, RefreshCw, Server, Sparkles, Wallet, type LucideIcon } from "lucide-react";
+import { CostCard } from "../components/CostCard";
 import { Button, PageHeading, Spinner } from "../components/ui";
 import { useSystem } from "../lib/system";
 import { cn, formatDate } from "../lib/utils";
@@ -122,6 +123,8 @@ export function CloudPage() {
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {system.services.map((service, i) => <ServiceCard key={service.id} service={service} index={i} />)}
     </div>
+
+    <div className="mt-6"><CostCard /></div>
 
     <div className="mt-6"><Architecture laptopOnline={system.ai_runs_on === "laptop"} /></div>
 

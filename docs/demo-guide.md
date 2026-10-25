@@ -17,12 +17,14 @@ A script for the Lab 12 presentation. Practise it once the day before.
 
 **1. The problem (30 s).** "Phones and backups fill up with copies: the same photo saved twice, a WhatsApp version, an edited version. ImageVault stores photos in the cloud, finds these duplicates, and uses free AI to organise photos by people and content."
 
-**2. Architecture (1 min).** Open the **Cloud** page. Walk through the diagram: the browser talks to App Service, which uses PostgreSQL, Blob Storage and Application Insights. The AI models run inside App Service, so they're free. Point out the live health checks and response times.
+**2. Architecture (1 min).** Open the **Cloud** page. Walk through the diagram: the browser talks to App Service, which uses PostgreSQL, Blob Storage and Application Insights. The AI models run on your laptop, with App Service as backup, so they're free. Point out the live health checks and response times, and the **cost card**: this month's real Azure spending, read live from Cost Management (it should be about US$0.00 of US$5).
 
 **3. Upload (1.5 min).** Go to **Upload** and drag in all 32 demo photos (plus your selfies). As each one finishes, it shows *Saved*, *Exact copy of …* or *99% similar to …*. On the **Home** page, the AI strip counts down while the photos are analysed. Optionally switch to **Live metrics** in the portal to show the requests arriving.
 
 **4. Duplicates (1.5 min).** Open **Duplicates**:
 - the fjord group: an exact copy, a WhatsApp-style copy and an edited copy, with the best copy marked;
+- click **Compare** on the edited copy and drag the divider: the brightness edit is obvious side by side;
+- open any photo and press **F** for full screen, then ← → to flip through the group;
 - point out what was *not* matched as a copy: the two different pugs and the two waterfalls;
 - scroll to **Same subject, different shot**: the four Taj Mahal photos, taken from different angles and in different light;
 - click **Remove 1 exact copy**, then show the Home page "saved by storing them once" figure.

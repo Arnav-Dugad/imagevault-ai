@@ -99,8 +99,8 @@ All resources are defined in `infra/main.tf` and created in a single resource gr
 | Storage account + `photos` container | Standard LRS, TLS 1.2, public blob access disabled | Cheapest durable storage for large binary files |
 | Log Analytics + Application Insights | Workspace-based, 30-day retention | Request, error and performance monitoring with a free monthly allowance |
 | User-assigned identity + federated credential | Trusted subject: `repo:Arnav-Dugad/imagevault-ai:ref:refs/heads/main` | Lets GitHub Actions deploy without stored secrets |
-| Role assignments | Web App → *Storage Blob Data Contributor*; GitHub identity → *Website Contributor* (resource group) | Least privilege: each identity can do only its own job |
-| Consumption budget | Monthly (default US$10), alerts at 50% and 80% actual and 100% forecast | Guideline 7: avoids unexpected charges |
+| Role assignments | Web App → *Storage Blob Data Contributor* and *Cost Management Reader* (resource group); GitHub identity → *Website Contributor* (resource group) | Least privilege: each identity can do only its own job |
+| Consumption budget | Monthly (default US$5), alerts at 50% and 80% actual and 100% forecast | Guideline 7: avoids unexpected charges |
 
 ### 3.3 Estimated monthly cost (Azure for Students)
 
@@ -161,6 +161,7 @@ The frontend is a single-page app that the backend serves as static files, so on
 | `GET /api/people`, `GET /api/people/{id}`, `PUT /api/people/{id}` | Recognised people, their photos, renaming |
 | `GET /api/faces/{id}/image` | Face crop used as a person's picture |
 | `GET /api/ai` | AI progress: analysed, waiting and failed photos |
+| `GET /api/costs` | This month's Azure cost by service (Cost Management Query API), cached for an hour |
 | `GET /api/stats` | Dashboard numbers |
 | `GET /api/system` | Live health and response time of each cloud service, plus deployment information |
 | `GET /api/health` | Health check used by the pipeline's smoke test |
@@ -243,6 +244,7 @@ erDiagram
 | Eavesdropping | HTTPS only on App Service; TLS 1.2 minimum on storage; `sslmode=require` to PostgreSQL |
 | Public access to photos | Container is private; photos are served only through the API after the password check |
 | Unauthorised use | `APP_PASSWORD` gate with an HttpOnly, SameSite=Lax, Secure cookie (HMAC-SHA256) |
+| Password guessing | After 5 wrong passwords, the address is blocked for 15 minutes (HTTP 429) |
 | Malicious uploads | 25 MB limit; files must decode as JPEG/PNG/WEBP/GIF/BMP with Pillow; filenames are sanitised |
 | Secrets in git | `terraform.tfvars` and state files are git-ignored; secrets live only in App Settings and GitHub secrets |
 
@@ -275,6 +277,7 @@ The deploy job writes `app/build.json` (commit, time, run link), which the Cloud
 - Custom log events: `Photo uploaded` (size, match type, processing time), `Photo analysed` (faces found), `Photo deleted`, `Exact copies removed`, AI model downloads and failures, failed logins and storage errors.
 - The **Cloud** page runs live checks: a `SELECT 1` against PostgreSQL and a container existence check against Blob Storage, each with its response time.
 - The **budget alerts** email the team at 50%, at 80%, and when spending is forecast to reach 100%.
+- **Live cost visibility (FinOps):** the Cloud page shows the month-to-date cost per Azure service. The website's managed identity calls the Cost Management Query API (`ActualCost`, `MonthToDate`, grouped by `ServiceName`) with the read-only *Cost Management Reader* role on the resource group. Results are cached for an hour, because cost data refreshes only a few times a day and the API is rate-limited.
 
 ### 5.7 Scalability considerations
 

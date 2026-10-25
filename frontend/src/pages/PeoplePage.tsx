@@ -89,6 +89,6 @@ export function PersonPage() {
       </div>
     </div>
     <PhotoGrid photos={person.photos} onOpen={setOpenId} />
-    {openId && <PhotoViewer id={openId} onClose={() => setOpenId(null)} onDeleted={load} />}
+    {openId && <PhotoViewer id={openId} ids={person.photos.map((p) => p.id)} onClose={() => setOpenId(null)} onDeleted={load} />}
   </>;
 }

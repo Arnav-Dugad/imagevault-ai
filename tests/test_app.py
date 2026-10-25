@@ -152,3 +152,25 @@ def test_guessing_the_password_is_blocked(client, monkeypatch):
     assert blocked.status_code == 429 and "Try again in 15 minutes" in blocked.json()["detail"]
     server._failed_logins.clear()
     assert client.post("/api/login", json={"password": "8574"}).status_code == 200
+
+
+def test_cost_card(client, monkeypatch):
+    from app import costs
+
+    monkeypatch.delenv("AZURE_COST_SCOPE", raising=False)
+    assert client.get("/api/costs").json()["configured"] is False  # running locally: nothing to report
+
+    calls = []
+
+    def fake_query(scope):
+        calls.append(scope)
+        return {"amount": 0.12, "currency": "USD", "services": [{"name": "Storage", "amount": 0.12}]}
+
+    costs._cache.clear()
+    monkeypatch.setattr(costs, "_query", fake_query)
+    monkeypatch.setenv("AZURE_COST_SCOPE", "/subscriptions/x/resourceGroups/imagevault-rg")
+    monkeypatch.setenv("MONTHLY_BUDGET", "5")
+    report = client.get("/api/costs").json()
+    assert report["amount"] == 0.12 and report["budget"] == 5 and report["error"] is None
+    client.get("/api/costs")
+    assert len(calls) == 1  # cached for an hour, so Azure's API is not called on every page view
