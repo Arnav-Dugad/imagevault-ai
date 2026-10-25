@@ -16,16 +16,16 @@
 - **Duplicates:** finds exact copies (stored only once) and resized, compressed or edited versions. Compare them with a slider, see the biggest space-wasters, and delete the extras. Uploading a photo that's already stored gives a warning first.
 - **Bursts:** photos taken seconds apart are grouped, and the sharpest one is picked for you.
 - **People:** recognises the same person across photos, even in group photos. Name people, and merge or split them by hand when the AI gets it wrong.
-- **Albums:** make your own, or use the ones made automatically (Beach, Food & drink, Pets, Mountains, City, Sunsets and more).
+- **Albums:** make your own, or use the ones made automatically (Beach, Food & drink, Pets, Mountains, City, Sunsets, Documents & receipts, Screenshots and more).
 - **Smart search:** describe a photo ("a dog on a beach", "a bridge at night") instead of remembering its name.
-- **Text in photos:** words on signs, receipts and boards are read (OCR), so the normal search finds them.
+- **Text in photos:** words on signs, receipts and boards are read in English, Hindi and Tamil (OCR). The normal search finds them, smart search uses them, and the matching words are highlighted on the photo.
 - **Batch editing:** select many photos (Shift-click for a range, or Select all) to favourite, add to an album, download as a ZIP or delete.
 - **Browse** with sort (date taken, size, name), a date range filter, favourites, three thumbnail sizes and a full-screen viewer.
 - **Cloud page:** live health of every Azure service, this month's Azure cost with a forecast for the month, storage used (with an estimated monthly cost and the space saved by removing duplicates), a one-click reset for demos, and the architecture.
 
 The AI is free: the models run inside the app (on your laptop or in App Service), with no paid API and no photos sent to another company.
 
-Try it with the [demo photos](frontend/public/demo-photos.zip): 87 real photos from Unsplash and Wikimedia Commons, with copies, a burst, look-alikes, portraits and signs with text. The zip's `README.txt` says what each one shows.
+Try it with the [demo photos](frontend/public/demo-photos.zip): 92 photos from Unsplash and Wikimedia Commons, with copies, a burst, look-alikes, portraits, signs with English, Hindi and Tamil text, a receipt and two screenshots. The zip's `README.txt` says what each one shows.
 
 ## Cloud architecture
 
@@ -46,7 +46,7 @@ flowchart LR
 | **Azure Database for PostgreSQL** (Flexible Server) | Stores photo details and duplicate matches |
 | **Azure Blob Storage** | Stores the photos and thumbnails |
 | **Application Insights** (+ Log Analytics) | Monitors requests, errors, response times and logs |
-| **Free AI models** (CLIP, YuNet, SFace, PP-OCR + CRNN via ONNX Runtime + OpenCV) on **your laptop** (edge) or in App Service, chosen with a switch | People, smart search, text search and same-subject suggestions, at no extra cost |
+| **Free AI models** (CLIP, YuNet, SFace, PP-OCR + CRNN, Hindi and Tamil readers via ONNX Runtime + OpenCV) on **your laptop** (edge) or in App Service, chosen with a switch | People, smart search, text search and same-subject suggestions, at no extra cost |
 | **Terraform** | Creates all of the above with one command (Infrastructure as Code) |
 | **GitHub Actions** | Tests every push and deploys `main` to Azure (CI/CD) |
 | **Cost Management** (budget + Query API) | Emails alerts at 50%, 80% and forecast 100% of the US$5 monthly budget; the Cloud page shows the live month-to-date cost |
@@ -69,9 +69,9 @@ cd frontend && npm install && npm run build && cd ..
 python -m app                     # then open http://127.0.0.1:8000
 ```
 
-The first time it starts, ImageVault downloads its free AI models (about 225 MB, once) into `data/models`. To run without AI, set `IMAGEVAULT_AI=off`.
+The first time it starts, ImageVault downloads its free AI models (about 245 MB, once) into `data/models`. To run without AI, set `IMAGEVAULT_AI=off`.
 
-**AI on your laptop for the Azure website (edge computing):** after deploying, run `python -m app.worker` on your laptop. It connects to the website over HTTPS, so it works on any Wi-Fi, and analyses new photos for the live site. A switch on the Cloud page chooses where the AI runs: automatic, your laptop, or Azure. See [step 8 of the deployment guide](docs/azure-deployment.md#step-8-recommended-run-the-ai-on-your-laptop).
+**AI on your laptop for the Azure website (edge computing):** after deploying, run `python -m app.worker` on your laptop. It connects to the website over HTTPS, so it works on any Wi-Fi, and analyses new photos for the live site. A switch on the Cloud page chooses where the AI runs: automatic, your laptop, or Azure. On Windows, double-click `start-ai-worker.cmd` to run it as an icon next to the clock, with Start and Stop. See [step 8 of the deployment guide](docs/azure-deployment.md#step-8-recommended-run-the-ai-on-your-laptop).
 
 While working on the website, run `python -m uvicorn app.server:app --reload` in one terminal and `npm run dev` in `frontend/` in another, then open http://localhost:5173.
 

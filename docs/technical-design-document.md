@@ -4,7 +4,7 @@
 **Project:** ImageVault, a cloud photo vault with duplicate detection  
 **Cloud provider:** Microsoft Azure (Azure for Students)  
 **Repository:** https://github.com/Arnav-Dugad/imagevault-ai  
-**Version:** 3.6.0
+**Version:** 3.7.0
 
 ---
 
@@ -12,7 +12,7 @@
 
 ImageVault is a web application for storing photos in the cloud. It automatically finds **exact duplicates** (the same file uploaded more than once) and **similar photos** (resized, compressed or edited copies). Users upload photos in the browser, review matching photos side by side, and delete the copies they don't need.
 
-It also includes **free AI recognition** that runs inside the application, with no paid AI service: it recognises the **same person** across photos (People), finds photos by **description** (smart search), sorts photos into **automatic albums** (Beach, Food & drink, Pets and others), picks the **sharpest photo in a burst**, makes **text in photos searchable** (OCR), suggests the **biggest space-wasters** to delete, and suggests photos of the **same subject taken differently**. Users can correct the AI by merging or splitting people by hand, and can edit many photos at once (favourite, add to an album, download as a ZIP, delete).
+It also includes **free AI recognition** that runs inside the application, with no paid AI service: it recognises the **same person** across photos (People), finds photos by **description** (smart search), sorts photos into **automatic albums** (Beach, Food & drink, Pets and others), picks the **sharpest photo in a burst**, makes **text in photos searchable** in English, Hindi and Tamil (OCR), suggests the **biggest space-wasters** to delete, and suggests photos of the **same subject taken differently**. Users can correct the AI by merging or splitting people by hand, and can edit many photos at once (favourite, add to an album, download as a ZIP, delete).
 
 The project's main focus is **cloud architecture and DevOps**, as the guidelines require:
 
@@ -153,7 +153,7 @@ The frontend is a single-page app that the backend serves as static files, so on
 | `POST /api/photos` | Upload one photo (multipart). Returns the photo and its best match |
 | `POST /api/photos/check` | Which SHA-256 fingerprints (worked out in the browser) are already stored, so the upload page can warn before uploading a copy |
 | `GET /api/photos?search=&smart=&filter=&album=&sort=&date_from=&date_to=&offset=&limit=` | Paginated photo list. Search by file name, or by description when `smart=true`; filter all / duplicates / favorites; one album; sort by upload date, date taken, size or name; date range on the camera date |
-| `GET /api/photos/{id}` | Photo details, all of its matches, its albums, and the faces/people in it |
+| `GET /api/photos/{id}` | Photo details, all of its matches, its albums, the faces/people in it, and the words read from it with their positions |
 | `PATCH /api/photos/{id}` | Rename, favourite / unfavourite |
 | `POST /api/photos/batch` | One action on many photos: delete, favourite, unfavourite, add to album (or a new album), remove from album |
 | `GET /api/zip?ids=` | Download up to 100 photos as one ZIP file |
@@ -202,6 +202,8 @@ erDiagram
         float sharpness "Laplacian variance"
         boolean favorite
         text ocr_text "words read from the photo"
+        text ocr_words "the words with their positions (JSON)"
+        float flatness "share of flat colour, for screenshots"
         bytea clip "512 float32 CLIP numbers"
         varchar ai_status "NULL | processing | done | failed"
     }
@@ -325,12 +327,12 @@ The app is stateless: all data lives in PostgreSQL and Blob Storage. So moving f
 
 ### 5.8 Testing
 
-- **33 automated backend tests** (including `tests/test_worker.py`, 7 tests: the website leaves new photos to an online laptop, takes over when photos wait too long or no laptop is online, releases claims of silent workers, the switch keeps the AI on one side, "waiting for your laptop" is shown, and the worker settings file is read):
+- **37 automated backend tests** (including `tests/test_worker.py`, 8 tests: the website leaves new photos to an online laptop, takes over when photos wait too long or no laptop is online, releases claims of silent workers, the switch keeps the AI on one side, "waiting for your laptop" is shown, the worker settings file is read, and the worker loop rests and stops when asked, as the tray icon does):
   - `tests/test_app.py` (18 tests): upload/download, exact copies and storage deduplication including file deletion, resized/compressed/brightened copies, non-matches, grouping and best copy, bulk removal, invalid files, search/filter, health/cloud status, password protection and lockout, the cost card, camera-date filters and sorting, batch actions (favourite, album, ZIP download, delete), the sharpest photo in a group, storage usage, space saved and "delete everything", and the space-waster list and the "already stored" check.
-  - `tests/test_ai.py` (8 tests, real public-domain photos): the same person recognised across photos but not confused with another person; a mirrored, cropped, recoloured shot grouped as "same subject" rather than as a copy; smart search finding the right photos, and nothing for an absent subject; automatic albums; a burst keeping its sharpest frame (exact copies are not a burst); merging and splitting people by hand; text in a photo found by search; the laptop worker's results sent over HTTPS and stored.
+  - `tests/test_ai.py` (11 tests, real public-domain photos and made-up text): the same person recognised across photos but not confused with another person; a mirrored, cropped, recoloured shot grouped as "same subject" rather than as a copy; smart search finding the right photos, and nothing for an absent subject; automatic albums; a burst keeping its sharpest frame (exact copies are not a burst); merging and splitting people by hand; text in a photo found by search; Hindi and Tamil words read, located and found by search; smart search using the text in photos; the Documents and Screenshots albums; the laptop worker's results sent over HTTPS and stored.
 - The same tests run in two modes in CI: SQLite + local folder, and PostgreSQL 16 + Azurite, so the cloud code paths are exercised on every push. The AI models are cached between runs.
 - Website: TypeScript type-checking, ESLint, production build.
-- Manual end-to-end check with the 87 demo photos (Sections 5.1, 5.9, 5.10 and 5.11).
+- Manual end-to-end check with the 92 demo photos (Sections 5.1, 5.9, 5.10, 5.11 and 5.12).
 - **Live deployment check (2026-10-25)** on `https://imagevault-4g8kx.azurewebsites.net`:
   - `terraform apply` created all 19 resources;
   - the CD pipeline deployed and passed its smoke test;
@@ -349,7 +351,7 @@ The app is stateless: all data lives in PostgreSQL and Blob Storage. So moving f
 | Azure AI Face (verify/identify same person) | Rejected. Limited Access: only for customers managed by Microsoft; not available to students |
 | Azure AI Vision multimodal embeddings | Possible, but the free tier exists but is region-limited and capped per month; adds an external dependency |
 | PyTorch CLIP + face libraries (as in v1) | Rejected. About 2 GB of libraries; too heavy for the free App Service plan |
-| **Quantised ONNX models in the app** | **Chosen.** 225 MB of models, about 320 MB of memory, CPU only, free, works offline and locally |
+| **Quantised ONNX models in the app** | **Chosen.** 245 MB of models, about 320 MB of memory, CPU only, free, works offline and locally |
 
 **Design** (`app/ai.py`, `app/intelligence.py`):
 
@@ -397,6 +399,16 @@ The app is stateless: all data lives in PostgreSQL and Blob Storage. So moving f
 
 **Validation on the 83-photo demo set:** all 11 automatic albums are filled; 14 beach, 13 mountain and 10 food photos are found; the leopard goes to Wildlife and the dogs and cats to Pets; the 5-frame burst is found with the sharp frame first; Kalpana Chawla and Sunita Williams are each recognised in 3 photos, including crew photos with 6 to 7 people.
 
+### 5.12 Text in photos, documents and screenshots
+
+**Reading text (OCR)** (`ai.read_text`): the PP-OCRv3 detector (OpenCV Zoo) finds text regions; each is straightened with a perspective transform, cut into words at the gaps between them (the English reader reads single words), and read by three readers: CRNN for English (OpenCV Zoo) and PaddleOCR's PP-OCRv3 readers for Hindi (Devanagari) and Tamil (community ONNX conversions, Apache 2.0, pinned by commit and SHA-256). The most confident reading wins; Hindi or Tamil readings only count if at least 60% of their letters are in that script, and anything below 85% confidence is dropped. To keep the free plan fast, Hindi and Tamil are only tried on the 20 clearest regions and not where English already found two words or is 97% sure, at most 200 words are read per photo, and the English reader runs in ONNX Runtime (about 6 ms per word, against about 44 ms in OpenCV's DNN module). Profiling showed the reader, not the detector, was the slow part: a typed page went from 20 s to under 4 s. Each word is stored with its box (`ocr_words`), which the photo viewer uses to outline matching words.
+
+**Search:** the normal search compares the text with spaces and punctuation removed (Unicode-safe, so Devanagari vowel signs are kept). Smart search adds up to 0.05 to a photo's CLIP score in proportion to how many words of the search are written in it, and always includes such photos.
+
+**Documents & receipts:** CLIP's best document description must beat its best "real photo" description by 0.035, or the photo has 20+ words or receipt words. **Screenshots:** named like one, or a lossless picture without a camera date with at least 45% exactly-flat neighbouring pixels (`photos.flatness`). Both thresholds were measured on the demo set (Section 5.12 validation below).
+
+**Validation:** CLIP alone could not separate screenshots (a phone screenshot +0.023, a hiker photo +0.018), so the flatness rule was chosen; it selects exactly the 2 screenshots out of 92 photos. The document rule selects the receipt, the letter and the menu board, and none of the 9 official portraits (best 0.029).
+
 ## 6. Lessons Learned
 
 1. **Simpler architectures are easier to run, explain and pay for.** Version 1 used nine containers on a VM (PostgreSQL, Redis, Celery, MinIO, PyTorch CLIP, face recognition, OCR, Prometheus, Grafana) plus Kubernetes and Terraform manifests. It was hard to run, expensive on student credit and hard to demo. Moving to managed PaaS services removed most of the operational work.
@@ -412,6 +424,7 @@ The app is stateless: all data lives in PostgreSQL and Blob Storage. So moving f
 11. **Real deployments find what local tests can't.** The first CD run failed: GitHub now sends an ID-based OIDC subject (`owner@id/repo@id`), and Azure only trusted the name-based one. Terraform now trusts both, looking the IDs up from the GitHub API. Azure's Cost Management API also rate-limits (HTTP 429), so the cost card caches results and keeps showing the last good numbers.
 12. **Let users correct the AI.** No threshold is right for every photo. Merge and split for people, and never deleting AI suggestions automatically, made the AI safe to rely on. Testing with a larger, varied demo set also found small mistakes (a leopard in Pets, exact copies counted as a burst, a small copy looking "sharper") that the smaller set had hidden.
 13. **Design for the network you'll actually be on.** The first laptop worker connected straight to the database through a firewall rule for one home IP address, so it failed on the college Wi-Fi. Moving it behind the website's HTTPS API fixed that, removed the database password from the laptop, and let the database close to the internet again. Splitting "compute" from "save" made both versions share the same code.
+14. **When the model can't tell, use a simpler signal.** CLIP couldn't tell a screenshot from a landscape, but "a PNG with no camera date and lots of perfectly flat colour" could, and it is easy to explain. Measuring first (Section 5.12) showed which approach actually worked.
 
 ## 7. Individual Contributions
 

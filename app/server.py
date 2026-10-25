@@ -133,7 +133,7 @@ def logout():
 
 def _photo_json(row) -> dict:
     photo = dict(row)
-    for hidden in ("phash", "dhash", "clip", "ocr_text"):
+    for hidden in ("phash", "dhash", "clip", "ocr_text", "ocr_words"):
         photo.pop(hidden, None)
     photo["thumb_url"] = f"/api/photos/{photo['id']}/thumb"
     photo["file_url"] = f"/api/photos/{photo['id']}/file"
@@ -216,7 +216,7 @@ def list_photos(search: str = "", smart: bool = False, filter: str = "all", albu
         where.append("(LOWER(photos.filename) LIKE :search OR REPLACE(COALESCE(photos.ocr_text, ''), ' ', '') "
                      "LIKE :squeezed)")
         params["search"] = f"%{search.lower()}%"
-        params["squeezed"] = f"%{re.sub(r'[^a-z0-9]', '', search.lower()) or search.lower()}%"
+        params["squeezed"] = f"%{intelligence.squeeze(search) or search.lower()}%"
     if filter == "duplicates":
         where.append(f"photos.id IN (SELECT photo_a FROM matches WHERE {COPIES} "
                      f"UNION SELECT photo_b FROM matches WHERE {COPIES})")
@@ -364,6 +364,7 @@ def photo_details(photo_id: str):
     result["people"] = [{**dict(face), "image_url": f"/api/faces/{face['id']}/image"} for face in in_photo]
     result["albums"] = [dict(a) for a in in_albums]
     result["text"] = photo["ocr_text"] or ""
+    result["words"] = json.loads(photo["ocr_words"]) if photo["ocr_words"] else []
     return result
 
 
@@ -755,16 +756,17 @@ BLURRY = 45  # sharpness below this (see photos.sharpness) is very blurry; norma
 @app.get("/api/cleanup")
 def space_wasters():
     """Photos that are probably safe to delete, biggest first: lower-quality copies, the blurrier shots
-    of a burst, and very blurry photos. Exact copies are left out: they are stored only once already."""
+    of a burst, and very blurry photos. Exact copies are left out: they are stored only once already.
+    Screenshots are listed too, but not ticked: they are often worth keeping."""
     suggestions: dict[str, dict] = {}
     counted: set[str] = set()  # identical files are stored once, so their space is counted once
 
-    def suggest(photo: dict, reason: str, keep: dict | None = None) -> None:
+    def suggest(photo: dict, reason: str, keep: dict | None = None, ticked: bool = True) -> None:
         if photo["id"] in suggestions:
             return
         freed = 0 if photo["sha256"] in counted else photo["size"]
         counted.add(photo["sha256"])
-        suggestions[photo["id"]] = {"photo": photo, "reason": reason, "bytes": freed,
+        suggestions[photo["id"]] = {"photo": photo, "reason": reason, "bytes": freed, "suggested": ticked,
                                     "keep": {"id": keep["id"], "filename": keep["filename"]} if keep else None}
 
     for group in duplicate_groups():
@@ -779,8 +781,12 @@ def space_wasters():
     with connect() as conn:
         blurry = conn.execute(text(f"SELECT {PHOTO_COLUMNS} FROM photos WHERE sharpness < :limit"),
                               {"limit": BLURRY}).mappings().all()
+        screenshots = intelligence.auto_albums().get("screenshots", []) if ai.enabled() and ai.models_ready() else []
+        screenshots = _photos_by_id(conn, screenshots) if screenshots else []
     for row in blurry:
         suggest(_photo_json(row), "Very blurry")
+    for photo in screenshots:
+        suggest(photo, "Screenshot", ticked=False)
     items = sorted(suggestions.values(), key=lambda s: (s["bytes"] or s["photo"]["size"], s["bytes"]), reverse=True)
     return {"items": items, "total_bytes": sum(s["bytes"] for s in items)}
 

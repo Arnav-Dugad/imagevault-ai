@@ -12,6 +12,7 @@ const TONE: Record<CleanupItem["reason"], string> = {
   "Lower-quality copy": "border-lilac/40 text-lilac",
   "Blurrier shot of a burst": "border-sky-300/40 text-sky-300",
   "Very blurry": "border-amber-300/40 text-amber-300",
+  Screenshot: "border-line text-muted",
 };
 
 /** The photos that waste the most space, biggest first, ready to delete in one go. */
@@ -26,14 +27,16 @@ export function SpaceWasters({ version, onOpen, onDeleted }: { version: number; 
   useEffect(() => {
     api<{ items: CleanupItem[] }>("/cleanup").then(({ items }) => {
       setItems(items);
-      setPicked(new Set(items.map((i) => i.photo.id)));
+      setPicked(new Set(items.filter((i) => i.suggested).map((i) => i.photo.id)));
     }).catch(() => setItems([]));
   }, [version]);
 
   if (!items?.length) return null;
   const chosen = items.filter((i) => picked.has(i.photo.id));
   const freed = chosen.reduce((sum, i) => sum + i.bytes, 0);
-  const total = items.reduce((sum, i) => sum + i.bytes, 0);
+  const suggested = items.filter((i) => i.suggested);
+  const total = suggested.reduce((sum, i) => sum + i.bytes, 0);
+  const screenshots = items.length - suggested.length;
   const toggle = (id: string) => setPicked((p) => { const next = new Set(p); if (next.has(id)) next.delete(id); else next.add(id); return next; });
 
   async function remove() {
@@ -55,7 +58,10 @@ export function SpaceWasters({ version, onOpen, onDeleted }: { version: number; 
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line p-4 sm:p-5">
         <div>
           <h2 className="flex items-center gap-2 font-semibold"><Eraser className="h-4 w-4 text-acid" />Free up {formatBytes(total)}</h2>
-          <p className="mt-0.5 text-sm text-muted">{items.length} {items.length === 1 ? "photo" : "photos"} you probably don't need, biggest first.</p>
+          <p className="mt-0.5 text-sm text-muted">
+            {suggested.length} {suggested.length === 1 ? "photo" : "photos"} you probably don't need, biggest first.
+            {screenshots > 0 && ` ${screenshots} ${screenshots === 1 ? "screenshot is" : "screenshots are"} listed too, not ticked.`}
+          </p>
         </div>
         <Button variant="danger" disabled={!chosen.length} onClick={() => setConfirming(true)}>
           Delete {chosen.length} · {formatBytes(freed)}

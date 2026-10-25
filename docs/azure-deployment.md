@@ -18,7 +18,7 @@ Terraform (`infra/main.tf`) creates everything in one resource group called **im
 | Azure Database for PostgreSQL Flexible Server | Burstable B1ms, 32 GB | Free for 12 months under Azure's free services (750 h/month); otherwise about US$13–15/month from your credit |
 | Storage account (Blob) | Standard LRS | A few cents per GB per month |
 | Log Analytics + Application Insights | Pay-as-you-go, **capped at 0.1 GB a day** | Free: the cap keeps it under the 5 GB/month free allowance |
-| Free AI recognition (CLIP, YuNet, SFace, PP-OCR + CRNN) | Runs on your laptop, or in the Web App | Free: no AI service is created or billed |
+| Free AI recognition (CLIP, YuNet, SFace, PP-OCR + CRNN, Hindi and Tamil readers) | Runs on your laptop, or in the Web App | Free: no AI service is created or billed |
 | Managed identity for GitHub Actions | | Free |
 | Budget with email alerts | US$5 a month | Free |
 
@@ -158,6 +158,8 @@ python -m app.worker
 ```
 
 The first time, it asks for your `website_url` and `app_password` and offers to save them in `worker.env` (git ignores this file). It prints a line for every photo it analyses, and the website's **Cloud** page shows *Laptop worker online*. Press **Ctrl+C** to stop.
+
+**As an icon next to the clock (Windows):** double-click `start-ai-worker.cmd` in the project folder (or run `pythonw -m app.tray`). The worker starts, and right-clicking the icon gives **Start**, **Stop**, **Open ImageVault**, **Change website or password**, **Start when Windows starts** and **Quit**. The icon is green while it works, grey when stopped and orange if something needs attention.
 
 You can also write `worker.env` from Terraform:
 

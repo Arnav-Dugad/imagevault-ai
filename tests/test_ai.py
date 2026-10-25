@@ -172,3 +172,36 @@ def test_laptop_worker_sends_its_results_over_https(client):
     assert client.get(details["people"][0]["image_url"]).headers["content-type"] == "image/jpeg"
     assert client.get("/api/ai").json()["analysed"] == 1
     assert client.post(f"/api/worker/result/{photo}", json={"clip": "?"}).status_code == 422
+
+
+def test_hindi_and_tamil_text_is_read_and_searchable(client):
+    board = upload(client, "indian-text.png")
+    intelligence.process_pending()
+
+    words = client.get(f"/api/photos/{board}").json()["words"]
+    assert {w["text"] for w in words} == {"रेलवेस्टेशन", "சென்னைமத்திய"}
+    assert all(0 <= v <= 1 for w in words for v in w["box"])  # where each word is, for highlighting
+    for query in ("स्टेशन", "சென்னை"):
+        assert [p["id"] for p in client.get("/api/photos", params={"search": query}).json()["items"]] == [board]
+
+
+def test_smart_search_uses_the_text_in_photos(client):
+    menu = upload(client, "menu.jpg", text_photo("PIZZA MENU"))
+    upload(client, "landmark.jpg")
+    upload(client, "person-a-1.jpg")
+    intelligence.process_pending()
+
+    found = client.get("/api/photos", params={"search": "menu with pizza", "smart": "true"}).json()["items"]
+    assert found[0]["id"] == menu
+
+
+def test_documents_and_screenshots_albums(client):
+    receipt = upload(client, "receipt.jpg", text_photo("TOTAL 14.21  CASH 20.00"))
+    shot = upload(client, "Screenshot_2026-10-25.png", (ASSETS / "landmark.jpg").read_bytes())
+    intelligence.process_pending()
+
+    albums = intelligence.auto_albums()
+    assert receipt in albums["documents"]
+    assert shot in albums["screenshots"]
+    cleanup = {i["photo"]["id"]: i for i in client.get("/api/cleanup").json()["items"]}
+    assert cleanup[shot]["reason"] == "Screenshot" and cleanup[shot]["suggested"] is False  # offered, not ticked

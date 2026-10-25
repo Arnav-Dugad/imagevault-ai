@@ -70,7 +70,7 @@ Matching photos are joined into groups with a **union-find** algorithm. In each 
 
 ## Free AI recognition
 
-ImageVault runs small open-source AI models **on your own machines**, using ONNX Runtime and OpenCV: on your laptop when it's online, otherwise inside the App Service. There's no paid AI API, no per-photo charge and no usage limit, and photos are never sent to another company. The models (about 225 MB) are downloaded once from fixed versions and checked against SHA-256 fingerprints (`app/ai.py`). With all of them loaded, the app uses about 320 MB of memory, which fits the free F1 plan's 1 GB.
+ImageVault runs small open-source AI models **on your own machines**, using ONNX Runtime and OpenCV: on your laptop when it's online, otherwise inside the App Service. There's no paid AI API, no per-photo charge and no usage limit, and photos are never sent to another company. The models (about 245 MB) are downloaded once from fixed versions and checked against SHA-256 fingerprints (`app/ai.py`). With all of them loaded, the app uses about 320 MB of memory, which fits the free F1 plan's 1 GB.
 
 | Model | License | What it does | Used for |
 |---|---|---|---|
@@ -78,7 +78,8 @@ ImageVault runs small open-source AI models **on your own machines**, using ONNX
 | **YuNet** (OpenCV Zoo) | MIT | Finds faces in a photo | People |
 | **SFace** (OpenCV Zoo) | Apache 2.0 | Turns a face into 128 numbers; the same person gives similar numbers | People |
 | **PP-OCRv3 detector** (OpenCV Zoo) | Apache 2.0 | Finds where text is written in a photo | Text search |
-| **CRNN** (OpenCV Zoo) | Apache 2.0 | Reads each word (letters and digits) | Text search |
+| **CRNN** (OpenCV Zoo) | Apache 2.0 | Reads each English word (letters and digits) | Text search |
+| **PP-OCRv3 Hindi and Tamil readers** (PaddleOCR, ONNX) | Apache 2.0 | Read Devanagari and Tamil words | Text search |
 
 Analysis runs in a **background worker** (`app/intelligence.py`): uploads return immediately, and the Home page shows progress. On Azure, the models are kept in `/home/models` so they survive restarts.
 
@@ -100,11 +101,21 @@ The laptop logs in to the website like a browser and asks `POST /api/worker/next
 
 Each request is also a *heartbeat* in a `workers` table. While a laptop is online, the website leaves new photos to it, and only steps in if the laptop has been silent for 20 seconds or a photo has waited more than 5 minutes. A switch on the Cloud page can also keep the work on the laptop only, or on Azure only.
 
-Photos are *claimed* with an atomic `UPDATE … WHERE ai_status IS NULL`, so no photo is analysed twice. If a worker disappears mid-photo, its claim is released and another worker retries it. Tested locally with the switch set to *My laptop*: the laptop worker analysed all 87 demo photos over HTTP while the website only stored the results.
+Photos are *claimed* with an atomic `UPDATE … WHERE ai_status IS NULL`, so no photo is analysed twice. If a worker disappears mid-photo, its claim is released and another worker retries it. Tested locally with the switch set to *My laptop*: the laptop worker analysed all the demo photos over HTTP while the website only stored the results.
 
 ### Text in photos (OCR)
 
-The PP-OCR detector finds text regions, each region is straightened and read by CRNN, and words the reader is less than 85% sure about are dropped (on busy street scenes they're mostly noise). The words are stored with the photo, and the normal search box searches them too, ignoring spaces, so "las vegas" finds a sign read as "lasvegas". On the demo set, searching "vegas", "honey", "stop" or "parangipettai" each finds the right photo. Reading takes about 0.2–0.5 s per photo on a laptop.
+The PP-OCR detector finds text regions and each one is straightened. A region is often a whole line, but the English reader (CRNN) reads one word at a time, so each line is cut into words at the gaps between them first. Three readers then have a go: CRNN for English, and PaddleOCR readers for Hindi (Devanagari) and Tamil. The most confident reading wins, but a Hindi or Tamil reading only counts if most of its letters are in that script, and words any reader is less than 85% sure about are dropped (on busy street scenes they're mostly noise). To stay quick, Hindi and Tamil are only tried on the 20 clearest text areas, and not where the English reader is already 97% sure.
+
+The words are stored with the photo, together with where each one is. The normal search box searches them, ignoring spaces, so "las vegas" finds a sign read as "lasvegas", and "சென்னை" or "स्टेशन" find Tamil and Hindi words. Smart search uses them too: a photo gets a bonus when the words of the search are written in it, so "menu with nachos" finds a menu board that says "nachos". When you open a photo from a search, the matching words are outlined on the photo, and all the words light up one after another as it opens.
+
+On the demo set, "vegas", "honey", "stop" and "parangipettai" each find the right photo, and the Parangipettai station board is read in all three scripts. Reading takes about 0.3–0.5 s for a sign on a laptop, 1–2 s for a busy street or a menu, and about 4 s for a full page of typed text (at most 200 words are read per photo). Running the English reader in ONNX Runtime instead of OpenCV made it about 7 times faster.
+
+### Documents and screenshots
+
+**Documents & receipts** is an automatic album for photos that CLIP finds more like "a receipt", "a printed document" or "a page of text" than like any real-life photo (by at least 0.035), or that have 20+ words, or words found on receipts ("total", "cash", "gst"...). On the demo set it holds the receipt, the typed letter and the menu board, and no portraits (which scored up to 0.029).
+
+**Screenshots** can't be told apart reliably by CLIP (a phone screenshot scored lower than a mountain photo), so a simple rule is used instead: the file is named like a screenshot, or it is a lossless picture (PNG) without a camera date in which at least 45% of neighbouring pixels are exactly the same colour (app and web page backgrounds). Camera photos are JPEG and never that flat. Screenshots are also offered, unticked, in the "Free up" list.
 
 Why bother, if both are free? The free App Service plan has 1 GB of memory and 60 CPU-minutes a day. Doing the AI on the laptop keeps the website fast and well inside those limits, and it's a real example of edge computing, one of the course's suggested domains.
 

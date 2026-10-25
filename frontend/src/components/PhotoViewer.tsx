@@ -6,15 +6,16 @@ import { FaceAvatar, personName } from "../pages/PeoplePage";
 import { api } from "../lib/api";
 import { useSystem } from "../lib/system";
 import { useToast } from "../lib/toast";
-import { cn, formatBytes, formatDate } from "../lib/utils";
+import { cn, formatBytes, formatDate, wordMatches } from "../lib/utils";
 import type { PhotoDetails } from "../types";
 import { PhotoThumb } from "./PhotoCard";
 import { Button, ConfirmDialog, ErrorNote, MatchBadge, Modal } from "./ui";
 
 /** A pop-up showing one photo, its details and the photos it matches.
  *  `ids` is the list the photo was opened from, so ← → can move through it. */
-export function PhotoViewer({ id, ids, onClose, onDeleted, onChanged }: {
+export function PhotoViewer({ id, ids, onClose, onDeleted, onChanged, highlight = "" }: {
   id: string; ids?: string[]; onClose: () => void; onDeleted: () => void; onChanged?: () => void;
+  highlight?: string; // a search: words in the photo that match it stay highlighted
 }) {
   const { onAzureStorage } = useSystem();
   const toast = useToast();
@@ -27,6 +28,7 @@ export function PhotoViewer({ id, ids, onClose, onDeleted, onChanged }: {
   const [deleting, setDeleting] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  const [pointed, setPointed] = useState<number | null>(null); // the word under the mouse in the list
 
   useEffect(() => {
     setPhoto(null); setError(""); setImageLoaded(false);
@@ -112,6 +114,13 @@ export function PhotoViewer({ id, ids, onClose, onDeleted, onChanged }: {
                 {face.name && <span className={`absolute left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-canvas/90 px-1.5 py-0.5 text-[11px] font-medium text-sky-200 ${namedIndex(face.id) % 2 ? "-top-6" : "-bottom-6"}`}>{face.name}</span>}
               </span>
             ))}
+            {imageLoaded && photo.words.map((word, i) => {
+              const match = !!highlight && wordMatches(word.text, highlight);
+              return <span key={`${photo.id}-${i}`} title={word.text}
+                className={cn("word-box pointer-events-none absolute rounded-md border-2 border-acid bg-acid/10",
+                  match && "match border-[3px] bg-acid/20 shadow-[0_0_0_2px_rgb(0_0_0_/_.45),0_0_18px_rgb(185_243_106_/_.75)]", pointed === i && "pointed")}
+                style={{ left: `${word.box[0] * 100}%`, top: `${word.box[1] * 100}%`, width: `${word.box[2] * 100}%`, height: `${word.box[3] * 100}%`, animationDelay: `${200 + i * 90}ms` }} />;
+            })}
           </div>}
           {(!photo || !imageLoaded) && !error && <LoaderCircle className="absolute h-6 w-6 animate-spin text-acid" />}
           {photo && <button onClick={() => setFullscreen(true)} aria-label="Full screen" title="Full screen"
@@ -147,8 +156,11 @@ export function PhotoViewer({ id, ids, onClose, onDeleted, onChanged }: {
             </dl>
             {photo.text && <div className="mt-5">
               <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted"><ScanText className="h-3.5 w-3.5" />Text in the photo</p>
-              <p className="flex flex-wrap gap-1.5">{photo.text.split(" ").map((word, i) => (
-                <span key={`${word}-${i}`} className="rounded-md border border-line bg-canvas/60 px-2 py-0.5 font-mono text-xs">{word}</span>
+              <p className="flex flex-wrap gap-1.5">{photo.words.map((word, i) => (
+                <button key={`${word.text}-${i}`} onMouseEnter={() => setPointed(i)} onMouseLeave={() => setPointed(null)}
+                  onFocus={() => setPointed(i)} onBlur={() => setPointed(null)} title="Show where it is"
+                  className={cn("focus-ring rounded-md border px-2 py-0.5 text-xs transition",
+                    highlight && wordMatches(word.text, highlight) ? "border-acid/60 bg-acid/15 text-acid" : "border-line bg-canvas/60 hover:border-acid/40")}>{word.text}</button>
               ))}</p>
             </div>}
             {(photo.ai_status === null || photo.ai_status === "processing") && (

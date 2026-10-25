@@ -5,7 +5,8 @@ import { api } from "../lib/api";
 import { useSystem } from "../lib/system";
 import { useToast } from "../lib/toast";
 import { useUploads } from "../lib/uploads";
-import { cn } from "../lib/utils";
+import { cn, formatBytes, rupees } from "../lib/utils";
+import type { StorageUsage } from "../types";
 
 const nav = [
   { to: "/", label: "Home", icon: House },
@@ -108,6 +109,34 @@ export function Logo() {
   );
 }
 
+const FREE_STORAGE = 5 * 1024 ** 3; // Azure's free allowance: 5 GB of Blob Storage for the first 12 months
+
+/** How much space the photos use, with a bar against the free allowance. Refreshes after uploads. */
+function StorageMeter() {
+  const { busy } = useUploads();
+  const { pathname } = useLocation();
+  const [usage, setUsage] = useState<StorageUsage | null>(null);
+  useEffect(() => {
+    if (busy) return;
+    api<StorageUsage>("/storage").then(setUsage).catch(() => {});
+  }, [busy, pathname]);
+  if (!usage) return null;
+  const azure = usage.kind === "azure";
+  const share = Math.min(1, usage.total_bytes / FREE_STORAGE);
+  return (
+    <NavLink to="/cloud" className="focus-ring block rounded-xl border border-line bg-white/[.02] p-3 hover:bg-white/[.04]"
+      title={azure ? "Azure gives 5 GB of Blob Storage free for the first 12 months" : undefined}>
+      <p className="flex items-baseline justify-between text-[11px] font-medium uppercase tracking-wider text-muted">
+        Storage<span className="normal-case tracking-normal">{azure ? `${rupees(usage.monthly_cost * usage.inr_rate, true)}/month` : "free"}</span>
+      </p>
+      <p className="mt-1.5 text-sm font-medium tabular-nums">{formatBytes(usage.total_bytes)}{azure && <span className="font-normal text-muted"> of 5 GB free</span>}</p>
+      {azure && <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-raised">
+        <div className={cn("h-full rounded-full transition-[width] duration-700", share > 0.8 ? "bg-coral" : "bg-acid")} style={{ width: `${Math.max(share * 100, usage.total_bytes ? 1.5 : 0)}%` }} />
+      </div>}
+    </NavLink>
+  );
+}
+
 function CloudStatus() {
   const { system } = useSystem();
   if (!system) return null;
@@ -144,6 +173,7 @@ function Navigation({ onNavigate, showLogout }: { onNavigate?: () => void; showL
       </nav>
       <div className="mt-auto space-y-2 pt-6">
         <UploadProgress />
+        <StorageMeter />
         <CloudStatus />
         {showLogout && <button onClick={logout} className="focus-ring flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-muted hover:bg-white/[.04] hover:text-ink"><LogOut className="h-4 w-4" />Log out</button>}
       </div>

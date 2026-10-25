@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.7.0 (2026-10-25)
+
+- **Hindi and Tamil text:** two more free readers (PaddleOCR PP-OCRv3, Apache 2.0) read Devanagari and Tamil on signs and boards, next to English. Search works in all three scripts.
+- **Matching words are highlighted** on the photo when you open it from a search, and all the words light up one after another as the photo opens. Hover a word in the list to see where it is.
+- **Smart search uses the text in photos:** "menu with nachos" finds a menu board that says nachos.
+- **New automatic albums:** Documents & receipts, and Screenshots. Screenshots are also offered, unticked, in the "Free up" list.
+- **Tray app for the laptop worker:** double-click `start-ai-worker.cmd` for an icon next to the clock with Start, Stop, Open ImageVault and "Start when Windows starts".
+- **Storage bar in the sidebar:** space used, the monthly cost in rupees, and a bar against Azure's 5 GB free allowance.
+- Better and faster English reading: lines are cut into separate words before reading ("TOTAL 14.21 CASH" instead of nonsense), and the reader runs about 7 times faster.
+- Polish: the "Free up" heading counts only ticked photos; stronger outlines for matched words.
+- Demo photos: 92, with a receipt, a typed letter, a menu board and two screenshots. 37 automated tests.
+
 ## 3.6.1 (2026-10-25)
 
 - Fixed: on Azure, the website's AI worker could get stuck on one photo while a laptop worker was also sending results. OpenCV now runs single-threaded, face crops are uploaded before the database transaction, database lock waits give up after 30 seconds, and a photo held by a silent worker is handed to the laptop. If a photo ever takes over 5 minutes, the stack of every thread is written to the log.

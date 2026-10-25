@@ -12,3 +12,6 @@ numpy==2.5.4
 onnxruntime==1.31.0
 opencv-python-headless==5.0.0.93
 tokenizers==0.23.3
+
+# Tray icon for the laptop AI worker (not needed on Azure)
+pystray==0.19.5; sys_platform == "win32" or sys_platform == "darwin"

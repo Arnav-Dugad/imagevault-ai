@@ -48,6 +48,16 @@ body {
 /* Face outlines "lock on" after the photo appears */
 @keyframes face-lock { from { opacity: 0; transform: scale(1.35); } }
 .face-box { animation: face-lock .45s cubic-bezier(.22, 1, .36, 1) backwards; }
+/* Words written in the photo light up one after another when it opens, then fade.
+   Words that match the search stay highlighted. */
+@keyframes word-glow {
+  0% { opacity: 0; }
+  20% { opacity: 1; box-shadow: 0 0 0 2px rgb(185 243 106 / .9), 0 0 18px rgb(185 243 106 / .55); }
+  100% { opacity: 0; }
+}
+@keyframes word-match { from { opacity: 0; transform: scale(1.25); } }
+.word-box { animation: word-glow 1.8s ease-out both; }
+.word-box.match, .word-box.pointed { animation: word-match .4s cubic-bezier(.22, 1, .36, 1) backwards; opacity: 1; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }

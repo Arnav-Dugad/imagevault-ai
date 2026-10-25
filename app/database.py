@@ -56,6 +56,8 @@ photos = Table(
     Column("sharpness", Float, nullable=True),                    # higher is sharper
     Column("favorite", Boolean, nullable=True),
     Column("ocr_text", Text, nullable=True),                      # words read from the photo ("" = none)
+    Column("ocr_words", Text, nullable=True),                     # the same words with where they are (JSON)
+    Column("flatness", Float, nullable=True),                     # share of flat colour; high for screenshots
 )
 
 albums = Table(

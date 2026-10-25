@@ -72,6 +72,17 @@ def sharpness(image: Image.Image) -> float:
     return round(float(edges.var()), 1)
 
 
+def flatness(image: Image.Image) -> float:
+    """How much of the picture is perfectly flat colour (0..1). Screenshots (app and web page backgrounds)
+    score high; camera photos almost never have exactly equal neighbouring pixels."""
+    small = image.convert("RGB")
+    small.thumbnail((640, 640), Image.Resampling.NEAREST)
+    pixels = np.asarray(small, dtype=np.int16)
+    across = (pixels[:, 1:] == pixels[:, :-1]).all(axis=2).mean()
+    down = (pixels[1:] == pixels[:-1]).all(axis=2).mean()
+    return round(float(across + down) / 2, 3)
+
+
 def _to_hex(bits: list[bool]) -> str:
     return f"{sum(1 << i for i, bit in enumerate(bits) if bit):016x}"
 

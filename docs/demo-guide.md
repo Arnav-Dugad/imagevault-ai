@@ -19,7 +19,7 @@ A script for the Lab 12 presentation. Practise it once the day before.
 
 **2. Architecture (1 min).** Open the **Cloud** page. Walk through the diagram: the browser talks to App Service, which uses PostgreSQL, Blob Storage and Application Insights. The AI models run on your laptop, with App Service as backup, so they're free. Point out the live health checks and response times, the **cost card** (this month's real Azure spending, read live from Cost Management, with a forecast for the whole month; it should be about US$0.00 of US$5), and the **storage card**: how much space the photos take, what that costs per month, and how much removing duplicates saved.
 
-**3. Upload (1.5 min).** Go to **Upload** and drag in all 87 demo photos (plus your selfies). As each one finishes, it shows *Saved*, *Exact copy of …* or *99% similar to …*. On the **Home** page, the AI strip counts down while the photos are analysed. Optionally switch to **Live metrics** in the portal to show the requests arriving.
+**3. Upload (1.5 min).** Go to **Upload** and drag in all 92 demo photos (plus your selfies). As each one finishes, it shows *Saved*, *Exact copy of …* or *99% similar to …*. On the **Home** page, the AI strip counts down while the photos are analysed. Optionally switch to **Live metrics** in the portal to show the requests arriving.
 
 **4. Duplicates (1.5 min).** Open **Duplicates**:
 - the fjord group: an exact copy, a WhatsApp-style copy and an edited copy, with the best copy marked;
@@ -36,9 +36,9 @@ A script for the Lab 12 presentation. Practise it once the day before.
 
 **6a. Albums and batch editing (1 min).** Open **Albums**: Beach, Food & drink, Pets, Mountains and the others were made by the AI. Back in **Photos**, sort by *Date taken*, set a date range (for example May 2025: the beach trip), select the photos (click the circle on one, then **Select all**), then **Album → New album** "Beach trip". Select a few more and click **Download** to get them as one ZIP file.
 
-**6a+. Text and clean-up (1 min).** In **Photos**, type "vegas" in the normal search box: the Las Vegas sign is found by the words on it. On **Duplicates**, the **Free up** list shows the biggest space-wasters with what would be kept. Finally, drag a photo you already uploaded onto the page: ImageVault warns that it's already stored instead of uploading it again.
+**6a+. Text and clean-up (1 min).** In **Photos**, type "vegas" in the normal search box: the Las Vegas sign is found by the words on it, and when you open it, the words light up and "LAS VEGAS" stays outlined. Search "परिग" or "பரங்க" to find the Parangipettai station board by its Hindi or Tamil text, and try Smart search "menu with nachos". In **Albums**, show *Documents & receipts* and *Screenshots*. On **Duplicates**, the **Free up** list shows the biggest space-wasters with what would be kept. Finally, drag a photo you already uploaded onto the page: ImageVault warns that it's already stored instead of uploading it again.
 
-**6b. Edge computing (1 min).** Show the laptop worker's terminal printing `[done] photo …` lines as you upload, and the Cloud page's *Laptop worker online*. Flip the **Where the AI runs** switch to *Azure*: the worker prints that it is resting, and App Service does the next upload. Set it back to *Automatic*, press **Ctrl+C** on the worker, and upload one more photo: about 20 seconds later the cloud takes over on its own.
+**6b. Edge computing (1 min).** Start the worker with `start-ai-worker.cmd` (icon next to the clock) or show the terminal version printing `[done] photo …` lines as you upload, and the Cloud page's *Laptop worker online*. Flip the **Where the AI runs** switch to *Azure*: the worker prints that it is resting, and App Service does the next upload. Set it back to *Automatic*, press **Ctrl+C** on the worker, and upload one more photo: about 20 seconds later the cloud takes over on its own.
 
 **7. Cloud storage (30 s).** In the portal, go to the storage account, then **Containers → photos**. The `originals/` files are named by their SHA-256 fingerprint (that's why identical photos are stored once), and `faces/` holds the face crops.
 
@@ -51,7 +51,7 @@ A script for the Lab 12 presentation. Practise it once the day before.
 ## If something goes wrong
 
 - **Site is slow or shows an error:** it's waking up. Wait 60 seconds and refresh.
-- **AI card says "Getting ready":** after the very first deployment, the models (225 MB) are being downloaded. This takes 1–2 minutes, once.
+- **AI card says "Getting ready":** after the very first deployment, the models (245 MB) are being downloaded. This takes 1–2 minutes, once.
 - **A service shows "Problem":** the error text on the card says why. Check the Web App → Log stream.
 - **The deploy job is skipped:** the GitHub secrets aren't set (deployment guide, step 5).
 - **No internet:** run it locally with `python -m app` and present in local mode (the AI works offline once the models are downloaded).
