@@ -154,6 +154,6 @@ export function PhotoBrowser({ albumId, rememberAs, header, emptyText }: {
     <div ref={end} className="h-px" />
     {loadingMore && <Spinner />}
     <SelectionBar selected={selected} total={total} albumId={albumId} onSelectAll={selectAll} onClear={clear} onChanged={reload} />
-    {openId && <PhotoViewer id={openId} ids={order} onClose={() => setOpenId(null)} onDeleted={reload} onChanged={reload} />}
+    {openId && <PhotoViewer id={openId} ids={order} onClose={() => setOpenId(null)} onDeleted={reload} onChanged={reload} highlight={search} />}
   </>;
 }

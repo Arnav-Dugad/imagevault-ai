@@ -79,3 +79,28 @@ def test_worker_env_file_from_powershell_or_bash(tmp_path, monkeypatch):
         path.write_text('IMAGEVAULT_URL="https://example.azurewebsites.net"\n# comment\n', encoding=encoding)
         load_env_file(path)
         assert os.environ["IMAGEVAULT_URL"] == "https://example.azurewebsites.net"
+
+
+def test_worker_loop_rests_and_stops_on_request(client):
+    import threading
+
+    from app import worker
+
+    class FakeWebsite:  # answers like the website does when the switch is set to Azure
+        def login(self):
+            pass
+
+        def post(self, path, body):
+            assert path == "/api/worker/next"
+            return {"mode": "azure", "photo": None}
+
+    statuses = []
+    runner = worker.Runner(FakeWebsite(), on_status=statuses.append)
+    thread = threading.Thread(target=runner.run)
+    thread.start()
+    while not statuses or statuses[-1].startswith("Downloading"):
+        thread.join(0.05)
+    runner.stop()  # what the tray icon's Stop button does
+    thread.join(5)
+    assert not thread.is_alive()
+    assert statuses[-2:] == ["Resting: the Cloud page is set to run the AI on Azure", "Stopped"]

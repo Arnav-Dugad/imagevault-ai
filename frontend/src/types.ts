@@ -37,6 +37,7 @@ export interface PhotoDetails extends Photo {
   people: FaceInPhoto[];
   albums: { id: string; name: string }[];
   text: string;            // words read from the photo
+  words: { text: string; box: [number, number, number, number] }[]; // the same words with where they are
 }
 
 export interface PhotoList { total: number; items: Photo[] }
@@ -62,8 +63,9 @@ export type AiRunsOn = "laptop" | "cloud" | "none";
 
 export interface CleanupItem {
   photo: Photo;
-  reason: "Lower-quality copy" | "Blurrier shot of a burst" | "Very blurry";
+  reason: "Lower-quality copy" | "Blurrier shot of a burst" | "Very blurry" | "Screenshot";
   bytes: number;
+  suggested: boolean;      // ticked at first (screenshots are offered, not ticked)
   keep: { id: string; filename: string } | null;
 }
 

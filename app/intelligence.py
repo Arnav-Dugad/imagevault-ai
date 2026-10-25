@@ -16,8 +16,10 @@ The thresholds below were measured on real photos (see docs/how-it-works.md).
 import base64
 import faulthandler
 import io
+import json
 import logging
 import os
+import re
 import socket
 import threading
 import time
@@ -41,6 +43,7 @@ SAME_SUBJECT = 0.82   # CLIP cosine similarity for "different photos of the same
 SEARCH_MIN = 0.015     # how much better the search must describe a photo than a generic caption does
 SEARCH_WINDOW = 0.045  # results must also be close to the best result
 GENERIC_CAPTIONS = ["a photo.", "a photo of something.", "a picture.", "an image."]
+TEXT_BONUS = 0.05      # smart search: extra score when the words of the search are written in the photo
 
 HEARTBEAT_SECONDS = 5          # workers report "I'm alive" this often
 ONLINE_SECONDS = 20            # a worker not heard from for this long is considered offline
@@ -217,13 +220,22 @@ class Analysis:
     faces: list[FoundFace]
     taken_at: str | None
     sharpness: float
-    text: str
+    words: list[ai.Word]
+    flatness: float = 0.0
+
+    @property
+    def text(self) -> str:
+        return " ".join(word.text for word in self.words)
+
+    def words_json(self) -> list[dict]:
+        return [{"text": w.text, "box": [round(v, 4) for v in w.box]} for w in self.words]
 
     def to_json(self) -> dict:
         b64 = lambda data: base64.b64encode(data).decode()  # noqa: E731
         return {"clip": b64(ai.to_bytes(self.clip)), "taken_at": self.taken_at, "sharpness": self.sharpness,
-                "text": self.text, "faces": [{"box": list(f.box), "embedding": b64(ai.to_bytes(f.embedding)),
-                                              "crop": b64(f.crop)} for f in self.faces]}
+                "flatness": self.flatness, "words": self.words_json(),
+                "faces": [{"box": list(f.box), "embedding": b64(ai.to_bytes(f.embedding)), "crop": b64(f.crop)}
+                          for f in self.faces]}
 
     @classmethod
     def from_json(cls, data: dict) -> "Analysis":
@@ -233,14 +245,17 @@ class Analysis:
                 raise ValueError(f"expected {size} numbers")
             return numbers
 
-        faces = []
-        for f in data.get("faces", []):
-            box = tuple(float(v) for v in f["box"])
-            if len(box) != 4 or not all(0 <= v <= 1 for v in box):
-                raise ValueError("a face box must be 4 fractions of the photo")
-            faces.append(FoundFace(box, vector(f["embedding"], 128), base64.b64decode(f["crop"], validate=True)))
-        return cls(vector(data["clip"], 512), faces, data.get("taken_at"), float(data.get("sharpness") or 0),
-                   str(data.get("text") or "")[:4000])
+        def box(values) -> tuple[float, float, float, float]:
+            numbers = tuple(float(v) for v in values)
+            if len(numbers) != 4 or not all(0 <= v <= 1 for v in numbers):
+                raise ValueError("a box must be 4 fractions of the photo")
+            return numbers
+
+        faces = [FoundFace(box(f["box"]), vector(f["embedding"], 128), base64.b64decode(f["crop"], validate=True))
+                 for f in data.get("faces", [])]
+        words = [ai.Word(str(w["text"])[:100], box(w["box"])) for w in data.get("words", [])[:200] if w.get("text")]
+        return cls(vector(data["clip"], 512), faces, data.get("taken_at"), float(data.get("sharpness") or 0), words,
+                   min(1.0, max(0.0, float(data.get("flatness") or 0))))
 
 
 def compute(data: bytes) -> Analysis:
@@ -249,7 +264,8 @@ def compute(data: bytes) -> Analysis:
     date = photos.taken_at(raw)
     image = ImageOps.exif_transpose(raw).convert("RGB")
     faces = [FoundFace(f.box, f.embedding, _face_crop(image, f.box)) for f in ai.find_faces(image)]
-    return Analysis(ai.image_embedding(image), faces, date, photos.sharpness(image), ai.read_text(image))
+    return Analysis(ai.image_embedding(image), faces, date, photos.sharpness(image), ai.read_text(image),
+                    photos.flatness(image))
 
 
 def save_analysis(photo_id: str, found: Analysis) -> bool:
@@ -305,10 +321,11 @@ def save_analysis(photo_id: str, found: Analysis) -> bool:
                     {"a": photo_id, "b": other.id, "s": round(min(similarity, 0.99), 3)},
                 )
         conn.execute(text(
-            "UPDATE photos SET clip = :clip, ai_status = 'done', ai_worker = NULL, ocr_text = :words, "
-            "taken_at = COALESCE(taken_at, :taken), sharpness = COALESCE(sharpness, :sharp) WHERE id = :id"),
+            "UPDATE photos SET clip = :clip, ai_status = 'done', ai_worker = NULL, ocr_text = :text, "
+            "ocr_words = :words, flatness = :flat, taken_at = COALESCE(taken_at, :taken), "
+            "sharpness = COALESCE(sharpness, :sharp) WHERE id = :id"),
             {"clip": ai.to_bytes(clip), "id": photo_id, "taken": found.taken_at, "sharp": found.sharpness,
-             "words": found.text})
+             "text": found.text, "words": json.dumps(found.words_json(), ensure_ascii=False), "flat": found.flatness})
         remove_empty_people(conn)
     for old_face in previous:  # the old face crops are no longer used
         storage.delete(face_key(old_face.id))
@@ -374,9 +391,9 @@ def run_worker(kind: str, on_status=None, on_done=None, poll_seconds: float = 30
     with connect() as conn:  # photos this worker was analysing when it stopped are tried again
         conn.execute(text("UPDATE photos SET ai_status = NULL, ai_worker = NULL "
                           "WHERE ai_status = 'processing' AND ai_worker = :name"), {"name": name})
-        # Photos from older versions have no sharpness score or text yet: analyse them once more.
+        # Photos from older versions have no sharpness score or word positions yet: analyse them once more.
         conn.execute(text("UPDATE photos SET ai_status = NULL "
-                          "WHERE ai_status = 'done' AND (sharpness IS NULL OR ocr_text IS NULL)"))
+                          "WHERE ai_status = 'done' AND (sharpness IS NULL OR ocr_words IS NULL OR flatness IS NULL)"))
     delay = 10
     while not ai.models_ready():
         try:
@@ -447,14 +464,37 @@ def search(query: str) -> list[str]:
     """
     query_vector = ai.text_embedding(f"a photo of {query.strip().rstrip('.')}.")
     with connect() as conn:
-        rows = conn.execute(text("SELECT id, clip FROM photos WHERE clip IS NOT NULL")).all()
+        rows = conn.execute(text("SELECT id, clip, ocr_text FROM photos WHERE clip IS NOT NULL")).all()
     if not rows:
         return []
     vectors = np.stack([ai.from_bytes(r.clip) for r in rows])
     scores = vectors @ query_vector - (vectors @ _generic_captions().T).max(axis=1)
     cutoff = max(SEARCH_MIN, float(scores.max()) - SEARCH_WINDOW)
-    ranked = sorted(((float(s), r.id) for s, r in zip(scores, rows) if s >= cutoff), reverse=True)
+    # Words of the search that are written in a photo ("menu with pizza" -> a menu that says pizza)
+    # make it rank higher, and always count as a result.
+    words = search_words(query)
+    written = set()
+    for i, row in enumerate(rows):
+        found = sum(word in squeeze(row.ocr_text or "") for word in words)
+        if found:
+            scores[i] += TEXT_BONUS * found / len(words)
+            written.add(i)
+    ranked = sorted(((float(s), r.id) for i, (s, r) in enumerate(zip(scores, rows)) if s >= cutoff or i in written),
+                    reverse=True)
     return [photo_id for _, photo_id in ranked]
+
+
+COMMON_WORDS = {"the", "and", "with", "that", "says", "said", "photo", "picture", "image", "showing", "from", "for"}
+
+
+def squeeze(value: str) -> str:
+    """Lowercase, without spaces or punctuation. The text reader often joins words ("lasvegas")."""
+    return re.sub(r"[\s\-_.,:;!?'\"()/]+", "", value.lower())
+
+
+def search_words(query: str) -> list[str]:
+    """The words of a search worth looking for in a photo's text."""
+    return [w for w in (squeeze(part) for part in query.split() if part.lower() not in COMMON_WORDS) if len(w) >= 3]
 
 
 # --- Auto albums ------------------------------------------------------------------------------
@@ -473,8 +513,24 @@ AUTO_ALBUMS = {
     "snow": ("Snow", ["snow", "a snowy winter scene"]),
     "sunsets": ("Sunsets", ["a sunset", "the sky at sunset"]),
 }
+# Documents and screenshots need more than one description, measured on the demo set (docs/how-it-works.md):
+# a document must look more like a document than like any real-life photo, by a clear margin.
+DOCUMENT_PROMPTS = ["a receipt", "a printed document", "a page of text", "a bill or invoice"]
+REAL_PHOTO_PROMPTS = ["a photo taken with a camera", "a photograph of a real scene", "a photo of a person",
+                      "a landscape photo"]
+DOCUMENT_MIN = 0.035
+SCREENSHOT_FLAT = 0.45  # a lossless picture without a camera date and this much flat colour is a screenshot
+RECEIPT_WORDS = ("total", "subtotal", "amount", "invoice", "receipt", "qty", "cash", "change", "gst", "tax", "bill")
+SCREENSHOT_NAME = re.compile(r"screen ?shot|screen[_-]?capture|scrnli", re.IGNORECASE)
 ALBUM_MIN = 0.02  # how much better an album description must fit than a generic caption
-ALBUM_NAMES = {key: name for key, (name, _) in AUTO_ALBUMS.items()} | {"people": "People"}
+ALBUM_NAMES = {key: name for key, (name, _) in AUTO_ALBUMS.items()} | {
+    "documents": "Documents & receipts", "screenshots": "Screenshots", "people": "People"}
+
+
+@lru_cache(maxsize=1)
+def _document_vectors() -> tuple[np.ndarray, np.ndarray]:
+    return (np.stack([ai.text_embedding(f"a photo of {p}.") for p in DOCUMENT_PROMPTS]),
+            np.stack([ai.text_embedding(f"{p}.") for p in REAL_PHOTO_PROMPTS]))
 
 
 @lru_cache(maxsize=1)
@@ -486,7 +542,8 @@ def _album_vectors() -> dict[str, np.ndarray]:
 def auto_albums() -> dict[str, list[str]]:
     """{album key: [photo ids, best match first]} for every auto album that has photos."""
     with connect() as conn:
-        rows = conn.execute(text("SELECT id, clip FROM photos WHERE clip IS NOT NULL ORDER BY uploaded_at")).all()
+        rows = conn.execute(text("SELECT id, clip, filename, content_type, taken_at, flatness, ocr_text "
+                                 "FROM photos WHERE clip IS NOT NULL ORDER BY uploaded_at")).all()
         with_faces = conn.execute(text(
             "SELECT photo_id FROM faces GROUP BY photo_id ORDER BY COUNT(*) DESC")).scalars().all()
     scored = {}  # album key -> {photo id: how well it fits}
@@ -496,6 +553,20 @@ def auto_albums() -> dict[str, list[str]]:
         for key, prompts in _album_vectors().items():
             scores = (vectors @ prompts.T).max(axis=1) - baseline
             scored[key] = {r.id: float(s) for s, r in zip(scores, rows) if s >= ALBUM_MIN}
+        documents, real_photos = _document_vectors()
+        document_scores = (vectors @ documents.T).max(axis=1) - (vectors @ real_photos.T).max(axis=1)
+    # Documents: looks like a document, or has a lot of text, or words you only find on receipts.
+    # Screenshots: named like one ("Screenshot_2026-10-25.png"), or a lossless picture without a camera date
+    # that is mostly flat colour, like an app or a web page.
+    for i, row in enumerate(rows):
+        words = (row.ocr_text or "").split()
+        if (document_scores[i] >= DOCUMENT_MIN or len(words) >= 20
+                or sum(any(k in w for k in RECEIPT_WORDS) for w in words) >= 2):
+            scored.setdefault("documents", {})[row.id] = float(document_scores[i])
+        lossless = row.content_type in ("image/png", "image/webp", "image/bmp", "image/gif")
+        if SCREENSHOT_NAME.search(row.filename) or (
+                lossless and row.taken_at is None and (row.flatness or 0) >= SCREENSHOT_FLAT):
+            scored.setdefault("screenshots", {})[row.id] = row.flatness or 0
     # An animal is either a pet or wildlife: a house cat goes to Pets, a leopard to Wildlife.
     pets, wild = scored.get("pets", {}), scored.get("animals", {})
     for photo_id in set(pets) & set(wild):

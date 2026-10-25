@@ -17,6 +17,15 @@ export function rupees(amount: number, tiny = false): string {
   return tiny && amount > 0 && amount < 0.01 ? `under ${format(0.01)}` : format(amount);
 }
 
+/** Lowercase without spaces or punctuation, like the server compares text in photos. */
+export const squeeze = (value: string) => value.toLowerCase().replace(/[\s\-_.,:;!?'"()/]+/g, "");
+
+/** Does a word read from a photo match one of the words searched for? */
+export function wordMatches(word: string, search: string): boolean {
+  const target = squeeze(word);
+  return search.split(/\s+/).map(squeeze).filter((w) => w.length >= 3).some((w) => target.includes(w) || (target.length >= 3 && w.includes(target)));
+}
+
 export function formatDate(value: string): string {
   return new Intl.DateTimeFormat("en", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value));
 }
