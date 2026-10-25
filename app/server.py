@@ -970,6 +970,7 @@ def worker_next_photo(body: WorkerHello):
     """The laptop says it's alive and asks for the next photo to analyse (none if there's nothing to do)."""
     name = f"laptop:{body.name.strip()[:80] or 'laptop'}"
     intelligence.heartbeat(name, "laptop")
+    intelligence.release_stale_claims()  # photos held by a worker that went silent go back in the queue
     while (photo_id := intelligence.claim_next(name, "laptop")) == "":
         pass  # another worker took that photo a moment ago: try the next one
     photo = None

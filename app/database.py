@@ -130,7 +130,10 @@ def _engine(url: str):
             connection.execute("PRAGMA foreign_keys = ON")
 
         return engine
-    return create_engine(url, pool_pre_ping=True, pool_size=5)
+    # A query waiting on a lock gives up after 30 s instead of hanging, and a transaction left open
+    # by a stuck thread is closed after 5 minutes, so one problem can't freeze the AI worker.
+    limits = "-c lock_timeout=30000 -c idle_in_transaction_session_timeout=300000"
+    return create_engine(url, pool_pre_ping=True, pool_size=5, connect_args={"options": limits})
 
 
 def engine():

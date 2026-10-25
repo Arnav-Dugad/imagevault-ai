@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.6.1 (2026-10-25)
+
+- Fixed: on Azure, the website's AI worker could get stuck on one photo while a laptop worker was also sending results. OpenCV now runs single-threaded, face crops are uploaded before the database transaction, database lock waits give up after 30 seconds, and a photo held by a silent worker is handed to the laptop. If a photo ever takes over 5 minutes, the stack of every thread is written to the log.
+
 ## 3.6.0 (2026-10-25)
 
 - **Laptop AI works on any Wi-Fi:** `python -m app.worker` now talks to the website over HTTPS, like a browser, instead of connecting to the database. It only needs the website address and password, and Terraform no longer opens the database to your home IP address.

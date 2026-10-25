@@ -43,7 +43,7 @@ def test_website_works_alone_when_no_laptop_is_online(client):
 def test_photos_claimed_by_a_silent_worker_are_retried(client):
     photo = upload(client, "white")
     assert intelligence.claim_next("laptop:gone", "laptop") == photo
-    intelligence._release_stale_claims()  # the laptop never sent a heartbeat
+    intelligence.release_stale_claims()  # the laptop never sent a heartbeat
     with connect() as conn:
         assert conn.execute(text("SELECT ai_status FROM photos")).scalar_one() is None
 
