@@ -98,7 +98,7 @@ All resources are defined in `infra/main.tf` and created in a single resource gr
 | PostgreSQL Flexible Server | Burstable B1ms, 32 GB, PostgreSQL 16, 7-day backups, TLS required | Managed relational database with automatic backups; covered by Azure free services for 12 months |
 | Storage account + `photos` container | Standard LRS, TLS 1.2, public blob access disabled | Cheapest durable storage for large binary files |
 | Log Analytics + Application Insights | Workspace-based, 30-day retention | Request, error and performance monitoring with a free monthly allowance |
-| User-assigned identity + federated credential | Trusted subject: `repo:Arnav-Dugad/imagevault-ai:ref:refs/heads/main` | Lets GitHub Actions deploy without stored secrets |
+| User-assigned identity + 2 federated credentials | Trusted subjects: `repo:Arnav-Dugad/imagevault-ai:ref:refs/heads/main`, and the ID-based form `repo:Arnav-Dugad@171219870/imagevault-ai@1351190872:ref:refs/heads/main` (IDs looked up from the GitHub API by Terraform) | Lets GitHub Actions deploy without stored secrets |
 | Role assignments | Web App → *Storage Blob Data Contributor* and *Cost Management Reader* (resource group); GitHub identity → *Website Contributor* (resource group) | Least privilege: each identity can do only its own job |
 | Consumption budget | Monthly (default US$5), alerts at 50% and 80% actual and 100% forecast | Guideline 7: avoids unexpected charges |
 
@@ -291,6 +291,12 @@ The app is stateless: all data lives in PostgreSQL and Blob Storage. So moving f
 - The same tests run in two modes in CI: SQLite + local folder, and PostgreSQL 16 + Azurite, so the cloud code paths are exercised on every push. The AI models are cached between runs.
 - Website: TypeScript type-checking, ESLint, production build.
 - Manual end-to-end check with the 32 demo photos (Sections 5.1 and 5.9).
+- **Live deployment check (2026-10-25)** on `https://imagevault-4g8kx.azurewebsites.net`:
+  - `terraform apply` created all 19 resources;
+  - the CD pipeline deployed and passed its smoke test;
+  - all 5 services on the Cloud page reported healthy (PostgreSQL 7 ms, Blob Storage 11 ms);
+  - 32 demo photos uploaded in 18 s, with the same duplicate, People and same-subject results as locally;
+  - the laptop worker, connected to the Azure database and storage, analysed a new upload within 7 s while the website stayed idle.
 
 ### 5.9 Free AI recognition
 
@@ -353,6 +359,7 @@ The app is stateless: all data lives in PostgreSQL and Blob Storage. So moving f
 8. **"Managed" isn't always available, so check access early.** Azure's face identification is restricted (Limited Access). Small open-source models, quantised to 8-bit and run with ONNX Runtime, gave the same capability at no cost and within the free plan's memory.
 9. **Measure AI before trusting it, and keep what fails out.** Testing on real photos showed CLIP's raw scores can't tell "same object" from "same kind of object". Two things came from that: a face rule for portraits, and comparing searches against generic captions so absent subjects return nothing. A plausible-sounding technique (SIFT + RANSAC verification) was dropped because the measurements showed it was unreliable.
 10. **Edge plus cloud gives the best of both.** Moving the heavy AI work to the laptop made it about 10× faster and kept the free cloud plan light, while the cloud fallback means the website keeps working when the laptop is off. Simple database-based coordination (heartbeats and atomic claims) was enough; no message queue was needed.
+11. **Real deployments find what local tests can't.** The first CD run failed: GitHub now sends an ID-based OIDC subject (`owner@id/repo@id`), and Azure only trusted the name-based one. Terraform now trusts both, looking the IDs up from the GitHub API. Azure's Cost Management API also rate-limits (HTTP 429), so the cost card caches results and keeps showing the last good numbers.
 
 ## 7. Individual Contributions
 
