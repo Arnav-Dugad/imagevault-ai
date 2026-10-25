@@ -50,6 +50,9 @@ ONLINE_SECONDS = 20            # a worker not heard from for this long is consid
 LAPTOP_GRACE_SECONDS = 300     # if a photo waits this long, the website analyses it even when a laptop is online
 STALE_CLAIM_SECONDS = 600      # photos claimed by a worker that went silent are retried
 SLOW_PHOTO_SECONDS = 300       # analysing one photo should never take this long
+# Raise this whenever the analysis finds something new (for example word positions). Photos analysed by an
+# older version are analysed again, and laptop workers running older code get no photos until updated.
+ANALYSIS_VERSION = 3
 
 _wake = threading.Event()
 _worker_started = False
@@ -233,12 +236,15 @@ class Analysis:
     def to_json(self) -> dict:
         b64 = lambda data: base64.b64encode(data).decode()  # noqa: E731
         return {"clip": b64(ai.to_bytes(self.clip)), "taken_at": self.taken_at, "sharpness": self.sharpness,
-                "flatness": self.flatness, "words": self.words_json(),
+                "flatness": self.flatness, "words": self.words_json(), "version": ANALYSIS_VERSION,
                 "faces": [{"box": list(f.box), "embedding": b64(ai.to_bytes(f.embedding)), "crop": b64(f.crop)}
                           for f in self.faces]}
 
     @classmethod
     def from_json(cls, data: dict) -> "Analysis":
+        if data.get("version") != ANALYSIS_VERSION:
+            raise ValueError("this worker runs an older version of ImageVault; update it (git pull) and restart it")
+
         def vector(value: str, size: int) -> np.ndarray:
             numbers = ai.from_bytes(base64.b64decode(value, validate=True))
             if numbers.shape != (size,) or not np.isfinite(numbers).all():
@@ -322,10 +328,11 @@ def save_analysis(photo_id: str, found: Analysis) -> bool:
                 )
         conn.execute(text(
             "UPDATE photos SET clip = :clip, ai_status = 'done', ai_worker = NULL, ocr_text = :text, "
-            "ocr_words = :words, flatness = :flat, taken_at = COALESCE(taken_at, :taken), "
+            "ocr_words = :words, flatness = :flat, ai_version = :version, taken_at = COALESCE(taken_at, :taken), "
             "sharpness = COALESCE(sharpness, :sharp) WHERE id = :id"),
             {"clip": ai.to_bytes(clip), "id": photo_id, "taken": found.taken_at, "sharp": found.sharpness,
-             "text": found.text, "words": json.dumps(found.words_json(), ensure_ascii=False), "flat": found.flatness})
+             "text": found.text, "words": json.dumps(found.words_json(), ensure_ascii=False), "flat": found.flatness,
+             "version": ANALYSIS_VERSION})
         remove_empty_people(conn)
     for old_face in previous:  # the old face crops are no longer used
         storage.delete(face_key(old_face.id))
@@ -391,9 +398,9 @@ def run_worker(kind: str, on_status=None, on_done=None, poll_seconds: float = 30
     with connect() as conn:  # photos this worker was analysing when it stopped are tried again
         conn.execute(text("UPDATE photos SET ai_status = NULL, ai_worker = NULL "
                           "WHERE ai_status = 'processing' AND ai_worker = :name"), {"name": name})
-        # Photos from older versions have no sharpness score or word positions yet: analyse them once more.
-        conn.execute(text("UPDATE photos SET ai_status = NULL "
-                          "WHERE ai_status = 'done' AND (sharpness IS NULL OR ocr_words IS NULL OR flatness IS NULL)"))
+        # Photos analysed by an older version (or that failed with one) are analysed again.
+        conn.execute(text("UPDATE photos SET ai_status = NULL WHERE ai_status IN ('done', 'failed') "
+                          "AND (ai_version IS NULL OR ai_version < :version)"), {"version": ANALYSIS_VERSION})
     delay = 10
     while not ai.models_ready():
         try:

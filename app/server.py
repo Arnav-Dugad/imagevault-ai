@@ -969,11 +969,15 @@ def change_ai_mode(body: AiMode):
 
 class WorkerHello(BaseModel):
     name: str
+    version: int = 0  # the analysis version the laptop's code produces (older workers don't send one)
 
 
 @app.post("/api/worker/next")
 def worker_next_photo(body: WorkerHello):
     """The laptop says it's alive and asks for the next photo to analyse (none if there's nothing to do)."""
+    if body.version != intelligence.ANALYSIS_VERSION:  # older code would store incomplete results
+        return {"mode": intelligence.ai_mode(), "photo": None,
+                "update": "This laptop runs an older ImageVault. Update it (git pull) and restart the worker."}
     name = f"laptop:{body.name.strip()[:80] or 'laptop'}"
     intelligence.heartbeat(name, "laptop")
     intelligence.release_stale_claims()  # photos held by a worker that went silent go back in the queue

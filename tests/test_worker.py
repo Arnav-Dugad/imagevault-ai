@@ -54,12 +54,14 @@ def test_switch_keeps_the_ai_on_one_side(client):
 
     assert client.put("/api/ai/mode", json={"mode": "azure"}).json()["runs_on"] == "cloud"
     assert intelligence.claim_next("laptop:test", "laptop") is None   # the laptop rests...
-    assert client.post("/api/worker/next", json={"name": "test"}).json() == {"mode": "azure", "photo": None}
+    hello = {"name": "test", "version": intelligence.ANALYSIS_VERSION}
+    assert client.post("/api/worker/next", json=hello).json() == {"mode": "azure", "photo": None}
 
     client.put("/api/ai/mode", json={"mode": "laptop"})
     assert intelligence.claim_next("cloud:site", "cloud") is None     # ...or the website does
     assert client.get("/api/ai").json()["runs_on"] == "laptop"
-    reply = client.post("/api/worker/next", json={"name": "test"}).json()
+    assert client.post("/api/worker/next", json={"name": "old"}).json()["update"]  # older code gets no photos
+    reply = client.post("/api/worker/next", json=hello).json()
     assert reply["photo"]["id"] == photo
     assert client.get(reply["photo"]["file_url"]).status_code == 200  # the laptop downloads it over HTTPS
 

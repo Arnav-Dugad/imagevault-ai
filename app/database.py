@@ -58,6 +58,7 @@ photos = Table(
     Column("ocr_text", Text, nullable=True),                      # words read from the photo ("" = none)
     Column("ocr_words", Text, nullable=True),                     # the same words with where they are (JSON)
     Column("flatness", Float, nullable=True),                     # share of flat colour; high for screenshots
+    Column("ai_version", Integer, nullable=True),                 # which version of the analysis produced the results
 )
 
 albums = Table(

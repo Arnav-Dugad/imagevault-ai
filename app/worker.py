@@ -127,12 +127,16 @@ class Runner:
         name = socket.gethostname()
         while not self.stopping.is_set():
             try:
-                reply = self.site.post("/api/worker/next", {"name": name})
+                reply = self.site.post("/api/worker/next", {"name": name, "version": intelligence.ANALYSIS_VERSION})
             except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
                 self._note(f"Can't reach the website ({getattr(exc, 'reason', exc)}). Trying again...")
                 self.stopping.wait(OFFLINE_SECONDS)
                 continue
             photo = reply["photo"]
+            if reply.get("update"):  # the website is newer than this laptop's copy of ImageVault
+                self._note(reply["update"])
+                self.stopping.wait(OFFLINE_SECONDS * 3)
+                continue
             if photo is None:
                 self._note("Resting: the Cloud page is set to run the AI on Azure"
                            if reply["mode"] == "azure" else "Waiting for new photos")
