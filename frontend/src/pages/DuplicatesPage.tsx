@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import { CheckCircle2, ChevronsLeftRight, Focus, Sparkles, Timer, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronsLeftRight, Focus, Recycle, Sparkles, Timer, Trash2 } from "lucide-react";
 import { CompareSlider } from "../components/CompareSlider";
 import { PhotoThumb } from "../components/PhotoCard";
 import { PhotoViewer } from "../components/PhotoViewer";
 import { Button, ConfirmDialog, EmptyState, ErrorNote, MatchBadge, PageHeading, Spinner } from "../components/ui";
 import { api } from "../lib/api";
 import { useToast } from "../lib/toast";
-import { cn, formatBytes } from "../lib/utils";
-import type { DuplicateGroup, Photo } from "../types";
+import { cn, formatBytes, rupees } from "../lib/utils";
+import type { DuplicateGroup, Photo, StorageUsage } from "../types";
 
 type Confirm =
   | { kind: "one"; photo: Photo }
@@ -71,12 +71,14 @@ export function DuplicatesPage() {
   const [busy, setBusy] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const [comparing, setComparing] = useState<[GroupItem, GroupItem] | null>(null);
+  const [saved, setSaved] = useState<StorageUsage | null>(null);
   const compare = (first: GroupItem, other: GroupItem) => setComparing([first, other]);
 
   const load = useCallback(() => {
     api<DuplicateGroup[]>("/duplicates").then(setGroups).catch((e: Error) => setError(e.message));
     api<DuplicateGroup[]>("/related").then(setRelated).catch(() => {});
     api<DuplicateGroup[]>("/bursts").then(setBursts).catch(() => {});
+    api<StorageUsage>("/storage").then(setSaved).catch(() => {});
   }, []);
   useEffect(load, [load]);
 
@@ -85,13 +87,13 @@ export function DuplicatesPage() {
     setBusy(true);
     try {
       if (confirm.kind === "one") {
-        await api(`/photos/${confirm.photo.id}`, { method: "DELETE" });
+        await api(`/photos/${confirm.photo.id}?duplicate=true`, { method: "DELETE" });
         toast("Photo deleted");
       } else if (confirm.kind === "exact") {
         const { removed } = await api<{ removed: number }>("/duplicates/remove-exact", { method: "POST" });
         toast(`${removed} exact ${removed === 1 ? "copy" : "copies"} removed`);
       } else {
-        await api("/photos/batch", { method: "POST", body: JSON.stringify({ ids: confirm.remove.map((p) => p.id), action: "delete" }) });
+        await api("/photos/batch", { method: "POST", body: JSON.stringify({ ids: confirm.remove.map((p) => p.id), action: "delete", duplicate: true }) });
         toast(`Kept the sharpest, deleted ${confirm.remove.length}`);
       }
       load();
@@ -113,7 +115,11 @@ export function DuplicatesPage() {
 
   return <>
     <PageHeading title="Duplicates"
-      description={groups?.length ? `${groups.length} ${groups.length === 1 ? "group" : "groups"} · up to ${formatBytes(extraBytes)} to free` : undefined}
+      description={(groups?.length || (saved && saved.saved_bytes > 0)) ? <>
+        {groups?.length ? `${groups.length} ${groups.length === 1 ? "group" : "groups"} · up to ${formatBytes(extraBytes)} to free` : null}
+        {saved && saved.saved_bytes > 0 && <span className="mt-2 flex items-center gap-1.5 text-acid"><Recycle className="h-4 w-4" />
+          Saved so far: {formatBytes(saved.saved_bytes)}{saved.kind === "azure" && ` · ${rupees(saved.saved_monthly * saved.inr_rate, true)} a month`}</span>}
+      </> : undefined}
       action={exactCount > 0 && <Button variant="danger" onClick={() => setConfirm({ kind: "exact", count: exactCount })}><Trash2 className="h-4 w-4" />Remove {exactCount} exact {exactCount === 1 ? "copy" : "copies"}</Button>} />
 
     {error && <div className="mb-6"><ErrorNote message={error} /></div>}

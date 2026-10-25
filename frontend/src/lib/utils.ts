@@ -11,6 +11,12 @@ export function formatBytes(bytes: number): string {
   return `${value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`;
 }
 
+/** Rupees, with tiny amounts shown as "under ₹0.01" instead of ₹0.00. */
+export function rupees(amount: number, tiny = false): string {
+  const format = (n: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+  return tiny && amount > 0 && amount < 0.01 ? `under ${format(0.01)}` : format(amount);
+}
+
 export function formatDate(value: string): string {
   return new Intl.DateTimeFormat("en", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value));
 }

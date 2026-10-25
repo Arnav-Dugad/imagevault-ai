@@ -12,15 +12,15 @@
 
 ## What it does
 
-- **Upload** by dragging photos anywhere on the page, choosing files, or pasting with Ctrl+V.
+- **Upload** by dragging photos anywhere on the page or choosing files.
 - **Duplicates:** finds exact copies (stored only once) and resized, compressed or edited versions. Compare them with a slider and delete the extras.
 - **Bursts:** photos taken seconds apart are grouped, and the sharpest one is picked for you.
 - **People:** recognises the same person across photos, even in group photos. Name people, and merge or split them by hand when the AI gets it wrong.
 - **Albums:** make your own, or use the ones made automatically (Beach, Food & drink, Pets, Mountains, City, Sunsets and more).
 - **Smart search:** describe a photo ("a dog on a beach", "a bridge at night") instead of remembering its name.
-- **Batch editing:** select many photos (Shift-click, Ctrl+A) to favourite, add to an album, download as a ZIP or delete.
+- **Batch editing:** select many photos (Shift-click for a range, or Select all) to favourite, add to an album, download as a ZIP or delete.
 - **Browse** with sort (date taken, size, name), a date range filter, favourites, three thumbnail sizes and a full-screen viewer.
-- **Cloud page:** live health of every Azure service, this month's Azure cost against the budget, and the architecture.
+- **Cloud page:** live health of every Azure service, this month's Azure cost with a forecast for the month, storage used (with an estimated monthly cost and the space saved by removing duplicates), a one-click reset for demos, and the architecture.
 
 The AI is free: the models run inside the app (on your laptop or in App Service), with no paid API and no photos sent to another company.
 
@@ -107,6 +107,7 @@ docs/           Deployment guide, technical design document, how it works, demo 
 - [Technical design document](docs/technical-design-document.md): the course deliverable
 - [How it works](docs/how-it-works.md): duplicate detection and the free AI explained, with measured accuracy
 - [Demo guide](docs/demo-guide.md): a script for the live presentation
+- [Setup guide (PDF)](docs/ImageVault-setup-guide.pdf): step by step, how to run it on your computer and on Azure
 
 ## License
 

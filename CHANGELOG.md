@@ -1,13 +1,24 @@
 # Changelog
 
+## 3.5.0 (2026-10-25)
+
+- **Storage card** on the Cloud page: a chart of the space used by photos, thumbnails and face crops, the estimated monthly cost, and how much removing duplicates has saved (in MB and money).
+- **Cost forecast:** the cost card shows what the month will cost at the current rate, marked on the budget bar.
+- **Costs in rupees:** Azure for Students bills in US dollars; the website converts every cost to ₹ at today's exchange rate (from a free rate service, with a fixed fallback).
+- **Delete everything:** one click (plus a confirmation) clears all photos, people and albums, for a fresh demo.
+- The Duplicates page shows the space saved so far; album tiles show their size.
+- Keyboard shortcuts removed; selecting all and deleting are done with buttons.
+- Polish: the selection bar and album menu fit on phones, tidier photo filters on small screens, 10 recent photos on Home.
+- New setup guide (PDF) for running ImageVault on your computer and on Azure.
+
 ## 3.4.0 (2026-10-25)
 
-- **Batch editing:** select photos (click the circle, Shift-click for a range, Ctrl+A for all) and favourite, add to an album, remove from an album, download as a ZIP, or delete them together.
+- **Batch editing:** select photos (click the circle, Shift-click for a range, or Select all) and favourite, add to an album, remove from an album, download as a ZIP, or delete them together.
 - **Albums:** create, rename and delete your own albums, plus automatic ones made by the AI: Beach, Mountains, Food & drink, Pets, Wildlife, City, Landmarks, Nature, Snow, Sunsets and People.
 - **Bursts:** photos taken seconds apart are grouped on the Duplicates page with the sharpest first, and one click keeps only the sharpest. Duplicate groups also show which copy is sharpest.
 - **Fix the AI's mistakes:** merge people who are the same person, or split faces that belong to someone else. Your corrections stay when new photos are analysed.
 - **Browsing:** sort by date taken, upload date, size or name; filter by a date range (uses the camera date when there is one); favourites; three thumbnail sizes; infinite scrolling. Sort, filter and size are remembered.
-- **Quality of life:** drop photos anywhere or paste with Ctrl+V to upload, with progress shown in the sidebar; rename a photo by clicking its name; keyboard shortcuts (press ?); back-to-top button; page names in the browser tab; short confirmation messages.
+- **Quality of life:** drop photos anywhere to upload, with progress shown in the sidebar; rename a photo by clicking its name; back-to-top button; page names in the browser tab; short confirmation messages.
 - **Demo photos:** 83 photos (was 32): beaches, food, pets, wildlife, mountains, cities, sunsets, a 5-shot burst, more copies, and NASA portraits of Kalpana Chawla and Sunita Williams.
 - Shorter text across the site. 27 automated tests.
 

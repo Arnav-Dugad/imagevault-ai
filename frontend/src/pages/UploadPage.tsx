@@ -34,7 +34,7 @@ export function UploadPage() {
   const duplicates = done.filter((i) => i.result?.match).length;
 
   return <>
-    <PageHeading title="Upload" description="JPG, PNG, WEBP, GIF or BMP, up to 25 MB each. You can also drop photos anywhere or paste with Ctrl+V." />
+    <PageHeading title="Upload" description="JPG, PNG, WEBP, GIF or BMP, up to 25 MB each. You can also drop photos anywhere on the page." />
 
     <button type="button" onClick={() => input.current?.click()}
       onDragOver={(e) => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={onDrop}

@@ -4,7 +4,7 @@
 **Project:** ImageVault, a cloud photo vault with duplicate detection  
 **Cloud provider:** Microsoft Azure (Azure for Students)  
 **Repository:** https://github.com/Arnav-Dugad/imagevault-ai  
-**Version:** 3.4.0
+**Version:** 3.5.0
 
 ---
 
@@ -159,7 +159,7 @@ The frontend is a single-page app that the backend serves as static files, so on
 | `GET /api/zip?ids=` | Download up to 100 photos as one ZIP file |
 | `GET /api/albums`, `POST /api/albums`, `PATCH /api/albums/{id}`, `DELETE /api/albums/{id}` | The user's albums and the automatic ones; create, rename, delete (photos are kept) |
 | `GET /api/photos/{id}/thumb`, `/file` | Thumbnail / original (streamed from Blob Storage, cached by the browser) |
-| `DELETE /api/photos/{id}` | Delete a photo; the stored file is removed when its last copy is deleted |
+| `DELETE /api/photos/{id}?duplicate=` | Delete a photo; the stored file is removed when its last copy is deleted. `duplicate=true` counts it as space saved |
 | `GET /api/duplicates` | Duplicate groups with the suggested best copy |
 | `POST /api/duplicates/remove-exact` | Remove all exact copies, keeping the first upload of each |
 | `GET /api/related` | AI "same subject, different shot" groups (never deleted automatically) |
@@ -170,6 +170,8 @@ The frontend is a single-page app that the backend serves as static files, so on
 | `GET /api/ai` | AI progress: analysed, waiting and failed photos |
 | `GET /api/costs` | This month's Azure cost by service (Cost Management Query API), cached for an hour |
 | `GET /api/stats` | Dashboard numbers |
+| `GET /api/storage` | Storage used by originals, thumbnails and face crops (listed from Blob Storage, cached for 5 minutes), the estimated monthly cost, and the space saved by duplicates |
+| `POST /api/reset` | Delete every photo, person and album and all stored files (needs a confirmation phrase); used before a demo |
 | `GET /api/system` | Live health and response time of each cloud service, plus deployment information |
 | `GET /api/health` | Health check used by the pipeline's smoke test |
 | `GET /api/session`, `POST /api/login`, `POST /api/logout` | Optional password protection |
@@ -221,6 +223,10 @@ erDiagram
         varchar name "set by the user"
         varchar created_at
         boolean manual "merged or split by hand"
+    }
+    counters {
+        varchar name PK "e.g. freed_bytes"
+        bigint value
     }
     albums {
         varchar id PK
@@ -301,6 +307,9 @@ The deploy job writes `app/build.json` (commit, time, run link), which the Cloud
 - Custom log events: `Photo uploaded` (size, match type, processing time), `Photo analysed` (faces found), `Photo deleted`, `Exact copies removed`, AI model downloads and failures, failed logins and storage errors.
 - The **Cloud** page runs live checks: a `SELECT 1` against PostgreSQL and a container existence check against Blob Storage, each with its response time.
 - The **budget alerts** email the team at 50%, at 80%, and when spending is forecast to reach 100%.
+- **Storage and savings (FinOps):** the Cloud page lists the Blob container once every 5 minutes (or after an upload or delete) and sums the sizes of `originals/`, `thumbnails/` and `faces/`. The estimated monthly cost is that size times about US$0.02 per GB (Hot, LRS). "Saved by duplicates" is the size of exact copies that are stored only once, plus everything deleted from the Duplicates page, kept as a running total in the `counters` table.
+- **Rupees:** Azure for Students bills in US dollars, but the website shows every amount in ₹. The server fetches today's USD→INR rate from a free service (open.er-api.com, no key needed), caches it for 12 hours, and falls back to a fixed rate if the service can't be reached. `INR_PER_USD` can pin the rate.
+- **Forecast:** the cost card projects the month-end bill from the spending so far (amount ÷ days elapsed × days in the month) and marks it on the budget bar, so a problem shows up before the budget email arrives.
 - **Live cost visibility (FinOps):** the Cloud page shows the month-to-date cost per Azure service. The website's managed identity calls the Cost Management Query API (`ActualCost`, `MonthToDate`, grouped by `ServiceName`) with the read-only *Cost Management Reader* role on the resource group. Results are cached for an hour, because cost data refreshes only a few times a day and the API is rate-limited.
 
 ### 5.7 Scalability considerations
@@ -309,8 +318,8 @@ The app is stateless: all data lives in PostgreSQL and Blob Storage. So moving f
 
 ### 5.8 Testing
 
-- **25 automated backend tests** (including `tests/test_worker.py`, 5 tests: the website leaves new photos to an online laptop, takes over when photos wait too long or no laptop is online, releases claims of silent workers, and reads the worker settings file):
-  - `tests/test_app.py` (14 tests): upload/download, exact copies and storage deduplication including file deletion, resized/compressed/brightened copies, non-matches, grouping and best copy, bulk removal, invalid files, search/filter, health/cloud status, password protection and lockout, the cost card, camera-date filters and sorting, batch actions (favourite, album, ZIP download, delete), and the sharpest photo in a group.
+- **26 automated backend tests** (including `tests/test_worker.py`, 5 tests: the website leaves new photos to an online laptop, takes over when photos wait too long or no laptop is online, releases claims of silent workers, and reads the worker settings file):
+  - `tests/test_app.py` (15 tests): upload/download, exact copies and storage deduplication including file deletion, resized/compressed/brightened copies, non-matches, grouping and best copy, bulk removal, invalid files, search/filter, health/cloud status, password protection and lockout, the cost card, camera-date filters and sorting, batch actions (favourite, album, ZIP download, delete), the sharpest photo in a group, and storage usage, space saved and "delete everything".
   - `tests/test_ai.py` (6 tests, real public-domain photos): the same person recognised across photos but not confused with another person; a mirrored, cropped, recoloured shot grouped as "same subject" rather than as a copy; smart search finding the right photos, and nothing for an absent subject; automatic albums; a burst keeping its sharpest frame (exact copies are not a burst); merging and splitting people by hand.
 - The same tests run in two modes in CI: SQLite + local folder, and PostgreSQL 16 + Azurite, so the cloud code paths are exercised on every push. The AI models are cached between runs.
 - Website: TypeScript type-checking, ESLint, production build.

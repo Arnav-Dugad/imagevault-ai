@@ -268,6 +268,7 @@ def upload_photo(file: UploadFile = File(...)):
             try:
                 storage.save(original_key(info.sha256), data, info.content_type)
                 storage.save(thumbnail_key(info.sha256), info.thumbnail, "image/jpeg")
+                _usage_cache.clear()
             except Exception as exc:
                 log.exception("Saving to storage failed")
                 raise HTTPException(502, f"Could not save the photo to storage: {exc}") from exc
@@ -374,6 +375,7 @@ def photo_file(photo_id: str, download: bool = False):
 
 def _delete(conn, photo) -> None:
     storage = get_storage()
+    _usage_cache.clear()
     face_ids = conn.execute(text("SELECT id FROM faces WHERE photo_id = :id"), {"id": photo["id"]}).scalars().all()
     for face_id in face_ids:
         storage.delete(intelligence.face_key(face_id))
@@ -389,10 +391,21 @@ def _delete(conn, photo) -> None:
         storage.delete(thumbnail_key(photo["sha256"]))
 
 
+def _add_freed(conn, size: int) -> None:
+    """Remember how much space deleting duplicates has freed."""
+    if not conn.execute(text("UPDATE counters SET value = value + :size WHERE name = 'freed_bytes'"),
+                        {"size": size}).rowcount:
+        conn.execute(text("INSERT INTO counters (name, value) VALUES ('freed_bytes', :size)"), {"size": size})
+
+
 @app.delete("/api/photos/{photo_id}")
-def delete_photo(photo_id: str):
+def delete_photo(photo_id: str, duplicate: bool = False):
+    """Delete a photo. `duplicate=true` when it is removed as a copy, to count the space saved."""
     with connect() as conn:
-        _delete(conn, _get_photo(conn, photo_id))
+        photo = _get_photo(conn, photo_id)
+        _delete(conn, photo)
+        if duplicate:
+            _add_freed(conn, photo["size"])
     log.info("Photo deleted")
     return {"ok": True}
 
@@ -423,6 +436,7 @@ class BatchAction(BaseModel):
     action: str                      # delete, favorite, unfavorite, add_to_album, remove_from_album
     album_id: str | None = None
     new_album: str | None = None     # with add_to_album: create this album first
+    duplicate: bool = False          # with delete: removed as copies (counted as space saved)
 
 
 @app.post("/api/photos/batch")
@@ -438,6 +452,8 @@ def batch_action(body: BatchAction):
         if body.action == "delete":
             for photo in photos:
                 _delete(conn, photo)
+            if body.duplicate:
+                _add_freed(conn, sum(p["size"] for p in photos))
         elif body.action in ("favorite", "unfavorite"):
             conn.execute(text("UPDATE photos SET favorite = :fav WHERE id IN :ids").bindparams(expanding),
                          {"fav": body.action == "favorite", "ids": ids})
@@ -502,15 +518,17 @@ def list_albums():
     """Albums made by the user, and albums made automatically by the AI."""
     with connect() as conn:
         mine = conn.execute(text(
-            "SELECT albums.id, albums.name, COUNT(album_photos.photo_id) AS count, "
+            "SELECT albums.id, albums.name, COUNT(photos.id) AS count, COALESCE(SUM(photos.size), 0) AS bytes, "
             "(SELECT ap.photo_id FROM album_photos ap WHERE ap.album_id = albums.id LIMIT 1) AS cover_id "
             "FROM albums LEFT JOIN album_photos ON album_photos.album_id = albums.id "
+            "LEFT JOIN photos ON photos.id = album_photos.photo_id "
             "GROUP BY albums.id, albums.name, albums.created_at ORDER BY albums.created_at DESC")).mappings().all()
+        sizes = dict(conn.execute(text("SELECT id, size FROM photos")).all())
     auto = []
     if ai.enabled() and ai.models_ready():
         for key, ids in intelligence.auto_albums().items():
             auto.append({"id": f"auto:{key}", "name": intelligence.ALBUM_NAMES[key], "count": len(ids),
-                         "cover_id": ids[0]})
+                         "bytes": sum(sizes.get(i, 0) for i in ids), "cover_id": ids[0]})
     cover = lambda a: {**dict(a), "cover_url": f"/api/photos/{a['cover_id']}/thumb" if a["cover_id"] else None}  # noqa: E731
     return {"mine": [cover(a) for a in mine], "auto": [cover(a) for a in auto]}
 
@@ -555,7 +573,7 @@ def stats():
         similar = conn.execute(text("SELECT COUNT(*) FROM matches WHERE kind = 'similar'")).scalar_one()
         people_count = conn.execute(text(f"SELECT COUNT(*) FROM ({PEOPLE_QUERY}) AS p")).scalar_one()
         recent = conn.execute(
-            text(f"SELECT {PHOTO_COLUMNS} FROM photos ORDER BY uploaded_at DESC LIMIT 8")
+            text(f"SELECT {PHOTO_COLUMNS} FROM photos ORDER BY uploaded_at DESC LIMIT 10")
         ).mappings().all()
     return {
         "photos": total,
@@ -569,6 +587,57 @@ def stats():
         "ai": intelligence.status(),
         "recent": [_with_match(row) for row in recent],
     }
+
+
+BLOB_PRICE_PER_GB = 0.02  # US$ per GB per month (shown in rupees), Azure Blob Storage (Hot, LRS), rounded up
+_usage_cache: dict = {}
+
+
+@app.get("/api/storage")
+def storage_usage():
+    """What the photos take up in storage, what that costs, and what deleting duplicates saved."""
+    storage = get_storage()
+    cached = _usage_cache.get(storage.description)
+    if not cached or time.monotonic() - cached[0] > 300:  # listing every file is slow, so keep it a while
+        cached = _usage_cache[storage.description] = (time.monotonic(), storage.usage())
+    parts = cached[1]
+    with connect() as conn:
+        total, stored = conn.execute(text(
+            "SELECT COALESCE(SUM(size), 0), "
+            "(SELECT COALESCE(SUM(size), 0) FROM (SELECT MAX(size) AS size FROM photos GROUP BY sha256) AS u) "
+            "FROM photos")).one()
+        freed = conn.execute(text("SELECT value FROM counters WHERE name = 'freed_bytes'")).scalar() or 0
+    used = sum(parts.values())
+    saved = int(total - stored) + int(freed)
+    gb = 1024 ** 3
+    return {
+        "kind": storage.kind,
+        "total_bytes": used,
+        "parts": [{"key": key, "bytes": parts.get(key, 0)} for key in ("originals", "thumbnails", "faces")],
+        "price_per_gb": BLOB_PRICE_PER_GB,
+        "monthly_cost": used / gb * BLOB_PRICE_PER_GB,
+        "saved_bytes": saved,
+        "saved_monthly": saved / gb * BLOB_PRICE_PER_GB,
+        "inr_rate": costs.inr_per("USD"),
+    }
+
+
+class ResetBody(BaseModel):
+    confirm: str
+
+
+@app.post("/api/reset")
+def delete_everything(body: ResetBody):
+    """Delete every photo, person and album, and all stored files. Used to start a demo fresh."""
+    if body.confirm != "delete everything":
+        raise HTTPException(422, "Not confirmed.")
+    with connect() as conn:
+        for table in ("album_photos", "albums", "matches", "faces", "people", "photos", "counters"):
+            conn.execute(text(f"DELETE FROM {table}"))
+    get_storage().delete_all()
+    _usage_cache.clear()
+    log.info("Everything deleted")
+    return {"ok": True}
 
 
 def _sharpest(members) -> str | None:
@@ -651,6 +720,7 @@ def remove_exact_copies():
         for photo in rows:
             if photo["sha256"] in seen:
                 _delete(conn, photo)
+                _add_freed(conn, photo["size"])
                 removed += 1
             seen.add(photo["sha256"])
     log.info("Exact copies removed", extra={"removed": removed})
@@ -817,7 +887,8 @@ def ai_status():
 @app.get("/api/costs")
 def azure_costs():
     """This month's Azure spending for the project (Azure Cost Management), cached for an hour."""
-    return costs.month_to_date()
+    report = costs.month_to_date()
+    return {**report, "inr_rate": costs.inr_per(report.get("currency") or "USD")}
 
 
 # --- Health and cloud status -------------------------------------------------------

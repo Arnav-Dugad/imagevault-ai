@@ -3,8 +3,10 @@
 Files are named by the photo's SHA-256 fingerprint, so identical photos share one file:
   originals/<sha256>        the uploaded photo
   thumbnails/<sha256>.jpg   a small preview
+  faces/<face id>.jpg       a face cut out of a photo (People page)
 """
 
+import shutil
 from functools import lru_cache
 from pathlib import Path
 
@@ -30,6 +32,19 @@ class LocalStorage:
         (self.folder / key).unlink(missing_ok=True)
 
     def check(self) -> None:
+        self.folder.mkdir(parents=True, exist_ok=True)
+
+    def usage(self) -> dict[str, int]:
+        """Bytes used by each top-level folder (originals, thumbnails, faces)."""
+        used: dict[str, int] = {}
+        for path in self.folder.rglob("*"):
+            if path.is_file():
+                part = path.relative_to(self.folder).parts[0]
+                used[part] = used.get(part, 0) + path.stat().st_size
+        return used
+
+    def delete_all(self) -> None:
+        shutil.rmtree(self.folder, ignore_errors=True)
         self.folder.mkdir(parents=True, exist_ok=True)
 
 
@@ -71,6 +86,24 @@ class AzureBlobStorage:
         """Create the container if needed; raises if Azure can't be reached."""
         if not self.container.exists():
             self.container.create_container()
+
+    def usage(self) -> dict[str, int]:
+        """Bytes used by each top-level folder (originals, thumbnails, faces)."""
+        used: dict[str, int] = {}
+        for blob in self.container.list_blobs():
+            part = blob.name.split("/", 1)[0]
+            used[part] = used.get(part, 0) + (blob.size or 0)
+        return used
+
+    def delete_all(self) -> None:
+        names = list(self.container.list_blob_names())
+        for start in range(0, len(names), 256):  # Azure deletes up to 256 blobs per request
+            chunk = names[start:start + 256]
+            try:
+                self.container.delete_blobs(*chunk)
+            except Exception:  # some emulators don't support batches: delete one by one
+                for name in chunk:
+                    self.delete(name)
 
 
 @lru_cache(maxsize=4)

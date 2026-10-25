@@ -5,6 +5,7 @@ import { PhotoBrowser } from "../components/PhotoBrowser";
 import { Button, ConfirmDialog, EmptyState, ErrorNote, PageHeading, Spinner } from "../components/ui";
 import { api } from "../lib/api";
 import { useToast } from "../lib/toast";
+import { formatBytes } from "../lib/utils";
 import type { Album } from "../types";
 
 function AlbumTile({ album, index }: { album: Album; index: number }) {
@@ -16,7 +17,7 @@ function AlbumTile({ album, index }: { album: Album; index: number }) {
         : <div className="grid aspect-[4/3] place-items-center bg-raised text-muted"><ImageOff className="h-6 w-6" /></div>}
       <div className="px-3 py-2.5">
         <p className="truncate text-sm font-semibold">{album.name}</p>
-        <p className="text-xs text-muted">{album.count} {album.count === 1 ? "photo" : "photos"}</p>
+        <p className="text-xs text-muted">{album.count} {album.count === 1 ? "photo" : "photos"}{album.count > 0 && ` · ${formatBytes(album.bytes)}`}</p>
       </div>
     </Link>
   );
