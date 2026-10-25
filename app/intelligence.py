@@ -14,6 +14,7 @@ The thresholds below were measured on real photos (see docs/how-it-works.md).
 """
 
 import base64
+import faulthandler
 import io
 import logging
 import os
@@ -45,6 +46,7 @@ HEARTBEAT_SECONDS = 5          # workers report "I'm alive" this often
 ONLINE_SECONDS = 20            # a worker not heard from for this long is considered offline
 LAPTOP_GRACE_SECONDS = 300     # if a photo waits this long, the website analyses it even when a laptop is online
 STALE_CLAIM_SECONDS = 600      # photos claimed by a worker that went silent are retried
+SLOW_PHOTO_SECONDS = 300       # analysing one photo should never take this long
 
 _wake = threading.Event()
 _worker_started = False
@@ -115,7 +117,7 @@ def set_ai_mode(mode: str) -> None:
 
 # --- Analysing one photo -------------------------------------------------------------
 
-def _release_stale_claims() -> None:
+def release_stale_claims() -> None:
     """Give photos back to the queue if the worker analysing them has gone silent."""
     with connect() as conn:
         conn.execute(text(
@@ -254,8 +256,14 @@ def save_analysis(photo_id: str, found: Analysis) -> bool:
     """Store what the AI found: faces become people, similar photos become "same subject" suggestions."""
     storage = get_storage()
     clip = found.clip
+    # Upload the face crops first, so the database transaction below stays short (no network waits inside it).
+    face_ids = [uuid.uuid4().hex for _ in found.faces]
+    for face_id, face in zip(face_ids, found.faces):
+        storage.save(face_key(face_id), face.crop, "image/jpeg")
     with connect() as conn:
         if conn.execute(text("SELECT 1 FROM photos WHERE id = :id"), {"id": photo_id}).first() is None:
+            for face_id in face_ids:
+                storage.delete(face_key(face_id))
             return False  # deleted while the AI was working
 
         # Faces -> people. When a photo is analysed again, its faces are replaced, but each face
@@ -265,17 +273,13 @@ def save_analysis(photo_id: str, found: Analysis) -> bool:
             {"id": photo_id})]
         previous = conn.execute(text("SELECT id, person_id, embedding FROM faces WHERE photo_id = :id"),
                                 {"id": photo_id}).all()
-        for old_face in previous:
-            storage.delete(face_key(old_face.id))
         conn.execute(text("DELETE FROM faces WHERE photo_id = :id"), {"id": photo_id})
-        for face in found.faces:
-            face_id = uuid.uuid4().hex
+        for face_id, face in zip(face_ids, found.faces):
             same = max(previous, default=None, key=lambda old: float(face.embedding @ ai.from_bytes(old.embedding)))
             if same is not None and same.person_id and float(face.embedding @ ai.from_bytes(same.embedding)) > 0.9:
                 person_id = same.person_id
             else:
                 person_id = _assign_person(conn, face.embedding, known)
-            storage.save(face_key(face_id), face.crop, "image/jpeg")
             conn.execute(
                 text("INSERT INTO faces (id, photo_id, person_id, x, y, w, h, embedding) "
                      "VALUES (:id, :photo, :person, :x, :y, :w, :h, :emb)"),
@@ -306,6 +310,8 @@ def save_analysis(photo_id: str, found: Analysis) -> bool:
             {"clip": ai.to_bytes(clip), "id": photo_id, "taken": found.taken_at, "sharp": found.sharpness,
              "words": found.text})
         remove_empty_people(conn)
+    for old_face in previous:  # the old face crops are no longer used
+        storage.delete(face_key(old_face.id))
     log.info("Photo analysed", extra={"faces": len(found.faces), "words": len(found.text.split())})
     return True
 
@@ -333,6 +339,8 @@ def process_pending(worker: str = "local", kind: str = "cloud", on_done=None) ->
         if time.monotonic() - last_beat > HEARTBEAT_SECONDS:
             heartbeat(worker, kind)
             last_beat = time.monotonic()
+        # If one photo takes more than 5 minutes, write where every thread is to the log, to find out why.
+        faulthandler.dump_traceback_later(SLOW_PHOTO_SECONDS, exit=False)
         try:
             analyze_photo(photo_id)
             count += 1
@@ -341,6 +349,8 @@ def process_pending(worker: str = "local", kind: str = "cloud", on_done=None) ->
         except Exception:
             log.exception("AI analysis failed")
             mark_failed(photo_id)
+        finally:
+            faulthandler.cancel_dump_traceback_later()
     return count
 
 
@@ -381,7 +391,7 @@ def run_worker(kind: str, on_status=None, on_done=None, poll_seconds: float = 30
     while True:
         try:
             heartbeat(name, kind)
-            _release_stale_claims()
+            release_stale_claims()
             process_pending(name, kind, on_done)
         except Exception:
             log.exception("AI worker error")

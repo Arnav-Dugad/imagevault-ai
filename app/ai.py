@@ -121,6 +121,7 @@ def _clip_text():
 def _face_models():
     import cv2
 
+    cv2.setNumThreads(1)  # OpenCV's own thread pool can hang inside a web server; one CPU is plenty here
     detector = cv2.FaceDetectorYN.create(str(model_dir() / "yunet.onnx"), "", (320, 320), FACE_MIN_SCORE)
     recognizer = cv2.FaceRecognizerSF.create(str(model_dir() / "sface.onnx"), "")
     return detector, recognizer
@@ -181,6 +182,7 @@ def find_faces(image: Image.Image) -> list[Face]:
 def _text_models():
     import cv2
 
+    cv2.setNumThreads(1)
     detector = cv2.dnn_TextDetectionModel_DB(cv2.dnn.readNet(str(model_dir() / "text-detect.onnx")))
     detector.setBinaryThreshold(0.3)
     detector.setPolygonThreshold(0.5)
