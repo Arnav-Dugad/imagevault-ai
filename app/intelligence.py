@@ -348,6 +348,13 @@ def analyze_photo(photo_id: str) -> None:
     save_analysis(photo_id, compute(get_storage().read(original_key(photo.sha256))))
 
 
+def release(photo_id: str) -> None:
+    """Put a photo back in the queue, for another worker."""
+    with connect() as conn:
+        conn.execute(text("UPDATE photos SET ai_status = NULL, ai_worker = NULL "
+                          "WHERE id = :id AND ai_status = 'processing'"), {"id": photo_id})
+
+
 def mark_failed(photo_id: str) -> None:
     with connect() as conn:
         conn.execute(text("UPDATE photos SET ai_status = 'failed', ai_worker = NULL WHERE id = :id"), {"id": photo_id})

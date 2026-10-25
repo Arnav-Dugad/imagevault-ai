@@ -124,7 +124,7 @@ class Runner:
             self._note("Downloading the AI models (about 245 MB, once)")
             ai.download_models()
         self.site.login()
-        name = socket.gethostname()
+        name = f"{socket.gethostname()}-{os.getpid()}"  # unique, even with two workers on one laptop
         while not self.stopping.is_set():
             try:
                 reply = self.site.post("/api/worker/next", {"name": name, "version": intelligence.ANALYSIS_VERSION})
@@ -152,7 +152,7 @@ class Runner:
             except Exception as exc:  # one bad photo must not stop the worker
                 self.on_status(f"Photo {photo['id'][:8]} failed: {exc}")
                 try:
-                    self.site.post(f"/api/worker/failed/{photo['id']}", {})
+                    self.site.post(f"/api/worker/failed/{photo['id']}", {"version": intelligence.ANALYSIS_VERSION})
                 except Exception:
                     pass
         self._note("Stopped")

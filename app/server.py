@@ -992,6 +992,9 @@ def worker_next_photo(body: WorkerHello):
 @app.post("/api/worker/result/{photo_id}")
 def worker_result(photo_id: str, body: dict):
     """What the laptop's AI found in a photo. The website stores it, exactly as if it had done the work."""
+    if body.get("version") != intelligence.ANALYSIS_VERSION:
+        intelligence.release(photo_id)  # from a laptop running older code: let an up-to-date worker redo it
+        raise HTTPException(422, "This laptop runs an older ImageVault. Update it (git pull) and restart the worker.")
     try:
         found = intelligence.Analysis.from_json(body)
     except (KeyError, TypeError, ValueError) as exc:
@@ -999,9 +1002,16 @@ def worker_result(photo_id: str, body: dict):
     return {"saved": intelligence.save_analysis(photo_id, found)}
 
 
+class WorkerFailure(BaseModel):
+    version: int = 0
+
+
 @app.post("/api/worker/failed/{photo_id}")
-def worker_failed(photo_id: str):
-    intelligence.mark_failed(photo_id)
+def worker_failed(photo_id: str, body: WorkerFailure | None = None):
+    if body is None or body.version != intelligence.ANALYSIS_VERSION:
+        intelligence.release(photo_id)  # an older laptop's failure says nothing about the photo
+    else:
+        intelligence.mark_failed(photo_id)
     return {"ok": True}
 
 

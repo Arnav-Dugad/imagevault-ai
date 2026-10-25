@@ -172,8 +172,12 @@ def test_laptop_worker_sends_its_results_over_https(client):
     assert client.get(details["people"][0]["image_url"]).headers["content-type"] == "image/jpeg"
     assert client.get("/api/ai").json()["analysed"] == 1
     assert client.post(f"/api/worker/result/{photo}", json={"clip": "?"}).status_code == 422
-    old = {k: v for k, v in found.to_json().items() if k != "version"}  # from a laptop running older code
-    assert client.post(f"/api/worker/result/{photo}", json=old).status_code == 422
+    # A laptop still running older code: its results are refused and the photo goes back in the queue.
+    second = upload(client, "landmark.jpg")
+    assert intelligence.claim_next("laptop:old", "laptop") == second
+    old = {k: v for k, v in found.to_json().items() if k != "version"}
+    assert client.post(f"/api/worker/result/{second}", json=old).status_code == 422
+    assert client.get(f"/api/photos/{second}").json()["ai_status"] is None
 
 
 def test_hindi_and_tamil_text_is_read_and_searchable(client):

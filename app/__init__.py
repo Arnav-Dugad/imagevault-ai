@@ -1,3 +1,3 @@
 """ImageVault: a small photo vault that finds duplicate photos."""
 
-__version__ = "3.7.1"
+__version__ = "3.7.2"
