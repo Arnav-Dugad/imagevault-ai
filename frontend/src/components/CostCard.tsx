@@ -37,7 +37,7 @@ export function CostCard() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="flex items-center gap-2 font-semibold"><PiggyBank className="h-4 w-4 text-acid" />This month's Azure cost</h2>
-          <p className="mt-1 text-sm text-muted">Read live from Azure Cost Management for the <code>imagevault-rg</code> resource group.</p>
+          <p className="mt-1 text-sm text-muted">From Azure Cost Management.</p>
         </div>
         {report?.configured && !report.error && (
           <p className="shrink-0 text-right text-3xl font-semibold tabular-nums tracking-tight">{money(shown, report.currency)}</p>
@@ -46,7 +46,7 @@ export function CostCard() {
 
       {!report && <div className="skeleton mt-5 h-3 w-full rounded-full" />}
       {report && !report.configured && (
-        <p className="mt-4 text-sm text-muted">Shown when the site runs on Azure. Running locally costs nothing.</p>
+        <p className="mt-4 text-sm text-muted">Shown when running on Azure.</p>
       )}
       {report?.error && <p className="mt-4 text-sm text-coral">{report.error}</p>}
       {report?.configured && !report.error && <>
@@ -54,7 +54,7 @@ export function CostCard() {
           <div className="h-2.5 overflow-hidden rounded-full bg-raised">
             <div className={cn("h-full rounded-full transition-[width] duration-1000 ease-out", tone)} style={{ width: `${Math.max(used * 100, amount > 0 ? 2 : 0)}%` }} />
           </div>
-          <p className="mt-2 text-xs text-muted">{money(amount, report.currency)} of the {money(budget, report.currency)} monthly budget ({Math.round(used * 100)}%). Email alerts at 50%, 80% and forecast 100%.</p>
+          <p className="mt-2 text-xs text-muted">{Math.round(used * 100)}% of the {money(budget, report.currency)} monthly budget</p>
         </div>}
         {report.services && report.services.length > 0 && (
           <ul className="mt-4 divide-y divide-line rounded-xl border border-line text-sm">
@@ -63,7 +63,7 @@ export function CostCard() {
             ))}
           </ul>
         )}
-        <p className="mt-3 text-xs text-muted">Azure updates cost data a few times a day, so today's usage can take up to a day to appear. Checked {report.updated_at && formatDate(report.updated_at)}.</p>
+        <p className="mt-3 text-xs text-muted">Azure updates costs a few times a day · checked {report.updated_at && formatDate(report.updated_at)}</p>
       </>}
     </section>
   );

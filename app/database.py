@@ -5,6 +5,7 @@ matches - pairs of photos that are copies ("exact"), look alike ("similar") or s
 faces   - faces found in photos, each linked to a person
 people  - groups of faces that belong to the same person
 workers - which computers are running the AI right now
+albums, album_photos - albums made by the user
 """
 
 from contextlib import contextmanager
@@ -12,6 +13,7 @@ from functools import lru_cache
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Column,
     Float,
     ForeignKey,
@@ -47,6 +49,22 @@ photos = Table(
     Column("clip", LargeBinary, nullable=True),          # 512 float32 numbers from CLIP
     Column("ai_status", String(12), nullable=True, index=True),  # NULL = waiting, 'processing', 'done', 'failed'
     Column("ai_worker", String(100), nullable=True),              # which worker is analysing it
+    Column("taken_at", String(40), nullable=True),                # camera date from EXIF, if any
+    Column("sharpness", Float, nullable=True),                    # higher is sharper
+    Column("favorite", Boolean, nullable=True),
+)
+
+albums = Table(
+    "albums", metadata,
+    Column("id", String(32), primary_key=True),
+    Column("name", String(100), nullable=False),
+    Column("created_at", String(40), nullable=False),
+)
+
+album_photos = Table(
+    "album_photos", metadata,
+    Column("album_id", String(32), ForeignKey("albums.id", ondelete="CASCADE"), primary_key=True),
+    Column("photo_id", String(32), ForeignKey("photos.id", ondelete="CASCADE"), primary_key=True, index=True),
 )
 
 # AI workers (the website on Azure, or your laptop) report here every few seconds.
@@ -70,6 +88,7 @@ people = Table(
     Column("id", String(32), primary_key=True),
     Column("name", String(100), nullable=True),
     Column("created_at", String(40), nullable=False),
+    Column("manual", Boolean, nullable=True),  # merged or split by hand: never merged automatically again
 )
 
 faces = Table(

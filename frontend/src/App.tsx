@@ -4,6 +4,9 @@ import { Layout } from "./components/Layout";
 import { Spinner } from "./components/ui";
 import { api } from "./lib/api";
 import { SystemProvider } from "./lib/system";
+import { ToastProvider } from "./lib/toast";
+import { UploadProvider } from "./lib/uploads";
+import { AlbumPage, AlbumsPage } from "./pages/AlbumsPage";
 import { CloudPage } from "./pages/CloudPage";
 import { DuplicatesPage } from "./pages/DuplicatesPage";
 import { HomePage } from "./pages/HomePage";
@@ -33,19 +36,25 @@ export default function App() {
   if (!session.logged_in) return <LoginPage onLoggedIn={check} />;
 
   return (
-    <SystemProvider>
-      <Layout showLogout={session.password_required}>
-        <Routes>
-          <Route index element={<HomePage />} />
-          <Route path="photos" element={<PhotosPage />} />
-          <Route path="upload" element={<UploadPage />} />
-          <Route path="duplicates" element={<DuplicatesPage />} />
-          <Route path="people" element={<PeoplePage />} />
-          <Route path="people/:id" element={<PersonPage />} />
-          <Route path="cloud" element={<CloudPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Layout>
-    </SystemProvider>
+    <ToastProvider>
+      <SystemProvider>
+        <UploadProvider>
+          <Layout showLogout={session.password_required}>
+            <Routes>
+              <Route index element={<HomePage />} />
+              <Route path="photos" element={<PhotosPage />} />
+              <Route path="albums" element={<AlbumsPage />} />
+              <Route path="albums/:id" element={<AlbumPage />} />
+              <Route path="upload" element={<UploadPage />} />
+              <Route path="duplicates" element={<DuplicatesPage />} />
+              <Route path="people" element={<PeoplePage />} />
+              <Route path="people/:id" element={<PersonPage />} />
+              <Route path="cloud" element={<CloudPage />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </Layout>
+        </UploadProvider>
+      </SystemProvider>
+    </ToastProvider>
   );
 }

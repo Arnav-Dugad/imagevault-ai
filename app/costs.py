@@ -74,8 +74,7 @@ def month_to_date() -> dict:
             value = cached["value"]  # keep showing the last good numbers
         elif isinstance(exc, urllib.error.HTTPError) and exc.code == 429:
             value = {"configured": True, "budget": budget,
-                     "error": "Azure's cost service is busy right now (it limits how often costs can be read). "
-                              "This card refreshes by itself in a few minutes."}
+                     "error": "Azure's cost service is busy. Trying again in a few minutes."}
         else:
             message = str(exc).splitlines()[0][:200]
             value = {"configured": True, "budget": budget, "error": f"Could not read costs: {message}"}

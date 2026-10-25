@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.4.0 (2026-10-25)
+
+- **Batch editing:** select photos (click the circle, Shift-click for a range, Ctrl+A for all) and favourite, add to an album, remove from an album, download as a ZIP, or delete them together.
+- **Albums:** create, rename and delete your own albums, plus automatic ones made by the AI: Beach, Mountains, Food & drink, Pets, Wildlife, City, Landmarks, Nature, Snow, Sunsets and People.
+- **Bursts:** photos taken seconds apart are grouped on the Duplicates page with the sharpest first, and one click keeps only the sharpest. Duplicate groups also show which copy is sharpest.
+- **Fix the AI's mistakes:** merge people who are the same person, or split faces that belong to someone else. Your corrections stay when new photos are analysed.
+- **Browsing:** sort by date taken, upload date, size or name; filter by a date range (uses the camera date when there is one); favourites; three thumbnail sizes; infinite scrolling. Sort, filter and size are remembered.
+- **Quality of life:** drop photos anywhere or paste with Ctrl+V to upload, with progress shown in the sidebar; rename a photo by clicking its name; keyboard shortcuts (press ?); back-to-top button; page names in the browser tab; short confirmation messages.
+- **Demo photos:** 83 photos (was 32): beaches, food, pets, wildlife, mountains, cities, sunsets, a 5-shot burst, more copies, and NASA portraits of Kalpana Chawla and Sunita Williams.
+- Shorter text across the site. 27 automated tests.
+
 ## 3.3.0 (2026-10-25)
 
 - **Live Azure cost card** on the Cloud page: this month's spending for the project, by service, against the US$5 budget, read from Azure Cost Management with the website's managed identity (Terraform grants the read-only *Cost Management Reader* role). Cached for an hour.

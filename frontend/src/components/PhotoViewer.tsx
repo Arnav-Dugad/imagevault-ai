@@ -1,19 +1,25 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { ChevronLeft, ChevronRight, Cloud, Download, HardDrive, LoaderCircle, Maximize2, Sparkles, Trash2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Cloud, Download, FolderOpen, HardDrive, Heart, LoaderCircle, Maximize2, Sparkles, Trash2, X } from "lucide-react";
 import { FullscreenPhoto } from "./FullscreenPhoto";
 import { FaceAvatar, personName } from "../pages/PeoplePage";
 import { api } from "../lib/api";
 import { useSystem } from "../lib/system";
-import { formatBytes, formatDate } from "../lib/utils";
+import { useToast } from "../lib/toast";
+import { cn, formatBytes, formatDate } from "../lib/utils";
 import type { PhotoDetails } from "../types";
 import { PhotoThumb } from "./PhotoCard";
 import { Button, ConfirmDialog, ErrorNote, MatchBadge, Modal } from "./ui";
 
 /** A pop-up showing one photo, its details and the photos it matches.
  *  `ids` is the list the photo was opened from, so ← → can move through it. */
-export function PhotoViewer({ id, ids, onClose, onDeleted }: { id: string; ids?: string[]; onClose: () => void; onDeleted: () => void }) {
+export function PhotoViewer({ id, ids, onClose, onDeleted, onChanged }: {
+  id: string; ids?: string[]; onClose: () => void; onDeleted: () => void; onChanged?: () => void;
+}) {
   const { onAzureStorage } = useSystem();
+  const toast = useToast();
+  const [renaming, setRenaming] = useState(false);
+  const [newName, setNewName] = useState("");
   const [currentId, setCurrentId] = useState(id);
   const [photo, setPhoto] = useState<PhotoDetails | null>(null);
   const [error, setError] = useState("");
@@ -34,17 +40,39 @@ export function PhotoViewer({ id, ids, onClose, onDeleted }: { id: string; ids?:
   const goNext = useCallback(() => { if (nextId) setCurrentId(nextId); }, [nextId]);
   const closeFullscreen = useCallback(() => setFullscreen(false), []);
 
+  const toggleFavorite = useCallback(async () => {
+    if (!photo) return;
+    const updated = await api<PhotoDetails>(`/photos/${photo.id}`, { method: "PATCH", body: JSON.stringify({ favorite: !photo.favorite }) });
+    setPhoto({ ...photo, favorite: updated.favorite });
+    toast(updated.favorite ? "Added to favourites" : "Removed from favourites");
+    onChanged?.();
+  }, [photo, toast, onChanged]);
+
+  async function rename(event: FormEvent) {
+    event.preventDefault();
+    if (!photo || !newName.trim() || newName === photo.filename) { setRenaming(false); return; }
+    try {
+      const updated = await api<PhotoDetails>(`/photos/${photo.id}`, { method: "PATCH", body: JSON.stringify({ filename: newName }) });
+      setPhoto({ ...photo, filename: updated.filename });
+      onChanged?.();
+    } catch (e) {
+      toast((e as Error).message, true);
+    }
+    setRenaming(false);
+  }
+
   useEffect(() => {
-    if (fullscreen || confirming) return;
+    if (fullscreen || confirming || renaming) return;
     const onKey = (event: KeyboardEvent) => {
       if ((event.target as HTMLElement).tagName === "INPUT") return;
       if (event.key === "ArrowLeft") goPrev();
       if (event.key === "ArrowRight") goNext();
       if (event.key.toLowerCase() === "f") setFullscreen(true);
+      if (event.key.toLowerCase() === "h") void toggleFavorite();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [fullscreen, confirming, goPrev, goNext]);
+  }, [fullscreen, confirming, renaming, goPrev, goNext, toggleFavorite]);
 
   async function remove() {
     setDeleting(true);
@@ -67,6 +95,7 @@ export function PhotoViewer({ id, ids, onClose, onDeleted }: { id: string; ids?:
   const rows = photo ? [
     ["Size", `${photo.width} × ${photo.height} px · ${formatBytes(photo.size)}`],
     ["Type", photo.content_type.replace("image/", "").toUpperCase()],
+    ...(photo.taken_at ? [["Taken", formatDate(photo.taken_at)]] : []),
     ["Uploaded", formatDate(photo.uploaded_at)],
     ["Fingerprint", `${photo.sha256.slice(0, 16)}…`],
   ] : [];
@@ -94,9 +123,17 @@ export function PhotoViewer({ id, ids, onClose, onDeleted }: { id: string; ids?:
           {ids && index >= 0 && <span className="absolute bottom-5 left-1/2 -translate-x-1/2 rounded-full bg-black/50 px-2.5 py-1 text-xs text-white/80 backdrop-blur">{index + 1} / {ids.length}</span>}
         </div>
         <aside className="flex flex-col border-t border-line p-5 lg:min-h-0 lg:overflow-y-auto lg:border-l lg:border-t-0">
-          <div className="flex items-start justify-between gap-3">
-            <h2 className="break-all text-lg font-semibold leading-snug">{photo?.filename ?? "Loading…"}</h2>
-            <button onClick={onClose} aria-label="Close" className="focus-ring -mr-1 -mt-1 rounded-lg p-1.5 text-muted hover:bg-white/5 hover:text-ink"><X className="h-5 w-5" /></button>
+          <div className="flex items-start justify-between gap-2">
+            {renaming && photo
+              ? <form onSubmit={rename} className="min-w-0 flex-1"><input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} onBlur={rename} maxLength={255}
+                  onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), setRenaming(false))} className="focus-ring h-9 w-full rounded-lg border border-line bg-canvas px-2 text-base font-semibold" /></form>
+              : <button onClick={() => { if (photo) { setNewName(photo.filename); setRenaming(true); } }} title="Rename"
+                  className="focus-ring min-w-0 rounded-lg text-left"><h2 className="break-all text-lg font-semibold leading-snug hover:underline hover:decoration-line">{photo?.filename ?? "Loading…"}</h2></button>}
+            <div className="-mr-1 -mt-1 flex shrink-0">
+              {photo && <button onClick={toggleFavorite} aria-label={photo.favorite ? "Remove from favourites (H)" : "Add to favourites (H)"} title="Favourite (H)"
+                className="focus-ring rounded-lg p-1.5 text-muted hover:bg-white/5 hover:text-coral"><Heart className={cn("h-5 w-5 transition", photo.favorite && "scale-110 fill-coral text-coral")} /></button>}
+              <button onClick={onClose} aria-label="Close" className="focus-ring rounded-lg p-1.5 text-muted hover:bg-white/5 hover:text-ink"><X className="h-5 w-5" /></button>
+            </div>
           </div>
           {error && <div className="mt-4"><ErrorNote message={error} /></div>}
           {photo && <>
@@ -104,6 +141,9 @@ export function PhotoViewer({ id, ids, onClose, onDeleted }: { id: string; ids?:
               {onAzureStorage ? <Cloud className="h-3.5 w-3.5 text-lilac" /> : <HardDrive className="h-3.5 w-3.5 text-acid" />}
               {onAzureStorage ? "Stored in Azure Blob Storage" : "Stored in a local folder"}
             </div>
+            {photo.albums.length > 0 && <div className="mt-3 flex flex-wrap gap-1.5">
+              {photo.albums.map((album) => <Link key={album.id} to={`/albums/${album.id}`} className="inline-flex items-center gap-1 rounded-full border border-line px-2.5 py-1 text-xs text-muted hover:text-ink"><FolderOpen className="h-3.5 w-3.5" />{album.name}</Link>)}
+            </div>}
             <dl className="mt-5 space-y-3 text-sm">
               {rows.map(([label, value]) => <div key={label} className="flex justify-between gap-4"><dt className="text-muted">{label}</dt><dd className="text-right">{value}</dd></div>)}
             </dl>

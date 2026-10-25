@@ -2,12 +2,14 @@
 
 import hashlib
 import hmac
+import io
 import json
 import logging
 import re
 import threading
 import time
 import uuid
+import zipfile
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -175,28 +177,74 @@ def _photos_by_id(conn, ids: list[str]) -> list[dict]:
     return [by_id[i] for i in ids if i in by_id]
 
 
+PHOTO_DATE = "COALESCE(photos.taken_at, photos.uploaded_at)"  # when it was taken, else when it was uploaded
+SORTS = {
+    "newest": "photos.uploaded_at DESC",
+    "oldest": "photos.uploaded_at ASC",
+    "taken_new": f"{PHOTO_DATE} DESC",
+    "taken_old": f"{PHOTO_DATE} ASC",
+    "largest": "photos.size DESC",
+    "smallest": "photos.size ASC",
+    "name": "LOWER(photos.filename) ASC",
+}
+
+
+def _album_photo_ids(album: str) -> list[str] | None:
+    """Photo IDs of an auto album ("auto:pets"); None for an album made by the user."""
+    if album.startswith("auto:"):
+        return intelligence.auto_albums().get(album[5:], []) if ai.enabled() and ai.models_ready() else []
+    return None
+
+
 @app.get("/api/photos")
-def list_photos(search: str = "", smart: bool = False, duplicates_only: bool = False,
+def list_photos(search: str = "", smart: bool = False, filter: str = "all", album: str = "",
+                sort: str = "newest", date_from: str = "", date_to: str = "",
                 offset: int = 0, limit: int = 60):
+    """Photos, filtered and sorted. `filter` is all, duplicates or favorites; `album` is an album
+    id or "auto:<key>"; dates are YYYY-MM-DD and use the camera date when the photo has one."""
     limit, offset = max(1, min(limit, 200)), max(0, offset)
+    ranked = None  # IDs in a fixed order (smart search results, or an auto album)
     if smart and search.strip():  # AI search: "dog on a beach"
         if not (ai.enabled() and ai.models_ready()):
             raise HTTPException(503, "Smart search is still getting ready. Try again in a minute.")
         ranked = intelligence.search(search.strip())
-        with connect() as conn:
-            return {"total": len(ranked), "items": _photos_by_id(conn, ranked[offset:offset + limit])}
+    elif album:
+        ranked = _album_photo_ids(album)
 
-    where = "WHERE LOWER(filename) LIKE :search"
-    if duplicates_only:
-        where += (f" AND id IN (SELECT photo_a FROM matches WHERE {COPIES}"
-                  f" UNION SELECT photo_b FROM matches WHERE {COPIES})")
-    params = {"search": f"%{search.lower()}%", "limit": limit, "offset": offset}
+    where, params = ["1 = 1"], {}
+    if search and not smart:
+        where.append("LOWER(photos.filename) LIKE :search")
+        params["search"] = f"%{search.lower()}%"
+    if filter == "duplicates":
+        where.append(f"photos.id IN (SELECT photo_a FROM matches WHERE {COPIES} "
+                     f"UNION SELECT photo_b FROM matches WHERE {COPIES})")
+    elif filter == "favorites":
+        where.append("photos.favorite = :yes")
+        params["yes"] = True
+    if album and ranked is None:
+        where.append("photos.id IN (SELECT photo_id FROM album_photos WHERE album_id = :album)")
+        params["album"] = album
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_from):
+        where.append(f"SUBSTR({PHOTO_DATE}, 1, 10) >= :date_from")
+        params["date_from"] = date_from
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_to):
+        where.append(f"SUBSTR({PHOTO_DATE}, 1, 10) <= :date_to")
+        params["date_to"] = date_to
+
+    sql = f"SELECT {PHOTO_COLUMNS} FROM photos WHERE {' AND '.join(where)}"
     with connect() as conn:
-        total = conn.execute(text(f"SELECT COUNT(*) FROM photos {where}"), params).scalar_one()
-        rows = conn.execute(
-            text(f"SELECT {PHOTO_COLUMNS} FROM photos {where} ORDER BY uploaded_at DESC LIMIT :limit OFFSET :offset"),
-            params,
-        ).mappings().all()
+        if ranked is not None:  # keep the AI's order, apply the other filters
+            if not ranked:
+                return {"total": 0, "items": []}
+            rows = conn.execute(text(f"{sql} AND photos.id IN :ids").bindparams(bindparam("ids", expanding=True)),
+                                {**params, "ids": ranked}).mappings().all()
+            position = {photo_id: i for i, photo_id in enumerate(ranked)}
+            rows = sorted(rows, key=lambda r: position[r["id"]])
+            return {"total": len(rows), "items": [_with_match(r) for r in rows[offset:offset + limit]]}
+        total = conn.execute(text(f"SELECT COUNT(*) FROM ({sql}) AS matching"), params).scalar_one()
+        rows = conn.execute(text(f"{sql} ORDER BY {SORTS.get(sort, SORTS['newest'])}, photos.id "
+                                 "LIMIT :limit OFFSET :offset"),
+                            {**params, "limit": limit, "offset": offset}).mappings().all()
     return {"total": total, "items": [_with_match(row) for row in rows]}
 
 
@@ -235,6 +283,8 @@ def upload_photo(file: UploadFile = File(...)):
             "phash": info.phash,
             "dhash": info.dhash,
             "uploaded_at": datetime.now(timezone.utc).isoformat(),
+            "taken_at": info.taken_at,
+            "sharpness": info.sharpness,
         }
         conn.execute(
             text(f"INSERT INTO photos ({', '.join(photo)}) VALUES ({', '.join(':' + k for k in photo)})"), photo
@@ -284,9 +334,13 @@ def photo_details(photo_id: str):
                     WHERE faces.photo_id = :id ORDER BY faces.x"""),
             {"id": photo_id},
         ).mappings().all()
+        in_albums = conn.execute(text(
+            "SELECT albums.id, albums.name FROM albums JOIN album_photos ON album_photos.album_id = albums.id "
+            "WHERE album_photos.photo_id = :id ORDER BY albums.name"), {"id": photo_id}).mappings().all()
     result = _photo_json(photo)
     result["matches"] = [{"kind": m["kind"], "similarity": m["similarity"], "photo": _photo_json(m)} for m in found]
     result["people"] = [{**dict(face), "image_url": f"/api/faces/{face['id']}/image"} for face in in_photo]
+    result["albums"] = [dict(a) for a in in_albums]
     return result
 
 
@@ -324,8 +378,9 @@ def _delete(conn, photo) -> None:
     for face_id in face_ids:
         storage.delete(intelligence.face_key(face_id))
     conn.execute(text("DELETE FROM faces WHERE photo_id = :id"), {"id": photo["id"]})
-    conn.execute(text("DELETE FROM people WHERE id NOT IN (SELECT person_id FROM faces WHERE person_id IS NOT NULL)"))
+    intelligence.remove_empty_people(conn)
     conn.execute(text("DELETE FROM matches WHERE photo_a = :id OR photo_b = :id"), {"id": photo["id"]})
+    conn.execute(text("DELETE FROM album_photos WHERE photo_id = :id"), {"id": photo["id"]})
     conn.execute(text("DELETE FROM photos WHERE id = :id"), {"id": photo["id"]})
     sha = {"sha": photo["sha256"]}
     still_used = conn.execute(text("SELECT 1 FROM photos WHERE sha256 = :sha LIMIT 1"), sha).first()
@@ -339,6 +394,151 @@ def delete_photo(photo_id: str):
     with connect() as conn:
         _delete(conn, _get_photo(conn, photo_id))
     log.info("Photo deleted")
+    return {"ok": True}
+
+
+class PhotoEdit(BaseModel):
+    filename: str | None = None
+    favorite: bool | None = None
+
+
+@app.patch("/api/photos/{photo_id}")
+def edit_photo(photo_id: str, body: PhotoEdit):
+    """Rename a photo or mark it as a favourite."""
+    with connect() as conn:
+        _get_photo(conn, photo_id)
+        if body.filename is not None:
+            name = Path(body.filename.strip()).name[:255]
+            if not name:
+                raise HTTPException(422, "The name can't be empty.")
+            conn.execute(text("UPDATE photos SET filename = :name WHERE id = :id"), {"name": name, "id": photo_id})
+        if body.favorite is not None:
+            conn.execute(text("UPDATE photos SET favorite = :fav WHERE id = :id"),
+                         {"fav": body.favorite, "id": photo_id})
+        return _photo_json(_get_photo(conn, photo_id))
+
+
+class BatchAction(BaseModel):
+    ids: list[str]
+    action: str                      # delete, favorite, unfavorite, add_to_album, remove_from_album
+    album_id: str | None = None
+    new_album: str | None = None     # with add_to_album: create this album first
+
+
+@app.post("/api/photos/batch")
+def batch_action(body: BatchAction):
+    """Do the same thing to many photos at once."""
+    ids = list(dict.fromkeys(body.ids))[:1000]
+    if not ids:
+        raise HTTPException(422, "No photos selected.")
+    expanding = bindparam("ids", expanding=True)
+    with connect() as conn:
+        photos = conn.execute(text("SELECT * FROM photos WHERE id IN :ids").bindparams(expanding),
+                              {"ids": ids}).mappings().all()
+        if body.action == "delete":
+            for photo in photos:
+                _delete(conn, photo)
+        elif body.action in ("favorite", "unfavorite"):
+            conn.execute(text("UPDATE photos SET favorite = :fav WHERE id IN :ids").bindparams(expanding),
+                         {"fav": body.action == "favorite", "ids": ids})
+        elif body.action in ("add_to_album", "remove_from_album"):
+            album_id = body.album_id
+            if body.action == "add_to_album" and body.new_album:
+                album_id = _create_album(conn, body.new_album)
+            if not album_id or not conn.execute(text("SELECT 1 FROM albums WHERE id = :id"), {"id": album_id}).first():
+                raise HTTPException(404, "Album not found.")
+            conn.execute(text("DELETE FROM album_photos WHERE album_id = :album AND photo_id IN :ids")
+                         .bindparams(expanding), {"album": album_id, "ids": ids})
+            if body.action == "add_to_album":
+                conn.execute(text("INSERT INTO album_photos (album_id, photo_id) VALUES (:album, :photo)"),
+                             [{"album": album_id, "photo": p["id"]} for p in photos])
+        else:
+            raise HTTPException(422, f"Unknown action: {body.action}")
+    log.info("Batch action", extra={"action": body.action, "photos": len(photos)})
+    return {"done": len(photos)}
+
+
+@app.get("/api/zip")
+def download_zip(ids: str):
+    """Download several photos as one ZIP file (up to 100 at a time)."""
+    wanted = [i for i in ids.split(",") if i][:100]
+    with connect() as conn:
+        rows = conn.execute(text("SELECT * FROM photos WHERE id IN :ids").bindparams(bindparam("ids", expanding=True)),
+                            {"ids": wanted}).mappings().all()
+    if not rows:
+        raise HTTPException(404, "No photos found.")
+    buffer, used = io.BytesIO(), set()
+    storage = get_storage()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_STORED) as archive:  # photos are already compressed
+        for row in rows:
+            name, n = row["filename"], 1
+            while name.lower() in used:  # two photos with the same name: "name (2).jpg"
+                n += 1
+                name = f"{Path(row['filename']).stem} ({n}){Path(row['filename']).suffix}"
+            used.add(name.lower())
+            archive.writestr(name, storage.read(original_key(row["sha256"])))
+    return Response(buffer.getvalue(), media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="imagevault-{len(rows)}-photos.zip"'})
+
+
+# --- Albums ----------------------------------------------------------------------------------
+
+def _create_album(conn, name: str) -> str:
+    name = name.strip()[:100]
+    if not name:
+        raise HTTPException(422, "The album needs a name.")
+    album_id = uuid.uuid4().hex
+    conn.execute(text("INSERT INTO albums (id, name, created_at) VALUES (:id, :name, :at)"),
+                 {"id": album_id, "name": name, "at": datetime.now(timezone.utc).isoformat()})
+    return album_id
+
+
+class AlbumBody(BaseModel):
+    name: str
+
+
+@app.get("/api/albums")
+def list_albums():
+    """Albums made by the user, and albums made automatically by the AI."""
+    with connect() as conn:
+        mine = conn.execute(text(
+            "SELECT albums.id, albums.name, COUNT(album_photos.photo_id) AS count, "
+            "(SELECT ap.photo_id FROM album_photos ap WHERE ap.album_id = albums.id LIMIT 1) AS cover_id "
+            "FROM albums LEFT JOIN album_photos ON album_photos.album_id = albums.id "
+            "GROUP BY albums.id, albums.name, albums.created_at ORDER BY albums.created_at DESC")).mappings().all()
+    auto = []
+    if ai.enabled() and ai.models_ready():
+        for key, ids in intelligence.auto_albums().items():
+            auto.append({"id": f"auto:{key}", "name": intelligence.ALBUM_NAMES[key], "count": len(ids),
+                         "cover_id": ids[0]})
+    cover = lambda a: {**dict(a), "cover_url": f"/api/photos/{a['cover_id']}/thumb" if a["cover_id"] else None}  # noqa: E731
+    return {"mine": [cover(a) for a in mine], "auto": [cover(a) for a in auto]}
+
+
+@app.post("/api/albums", status_code=201)
+def create_album(body: AlbumBody):
+    with connect() as conn:
+        return {"id": _create_album(conn, body.name), "name": body.name.strip()[:100]}
+
+
+@app.patch("/api/albums/{album_id}")
+def rename_album(album_id: str, body: AlbumBody):
+    name = body.name.strip()[:100]
+    if not name:
+        raise HTTPException(422, "The album needs a name.")
+    with connect() as conn:
+        renamed = conn.execute(text("UPDATE albums SET name = :name WHERE id = :id"), {"name": name, "id": album_id})
+        if not renamed.rowcount:
+            raise HTTPException(404, "Album not found.")
+    return {"id": album_id, "name": name}
+
+
+@app.delete("/api/albums/{album_id}")
+def delete_album(album_id: str):
+    """Delete an album. The photos in it are kept."""
+    with connect() as conn:
+        conn.execute(text("DELETE FROM album_photos WHERE album_id = :id"), {"id": album_id})
+        conn.execute(text("DELETE FROM albums WHERE id = :id"), {"id": album_id})
     return {"ok": True}
 
 
@@ -369,6 +569,15 @@ def stats():
         "ai": intelligence.status(),
         "recent": [_with_match(row) for row in recent],
     }
+
+
+def _sharpest(members) -> str | None:
+    """The clearly sharpest photo of a group, if one stands out (15% sharper than the blurriest)."""
+    scored = [m for m in members if m["sharpness"]]
+    if len(scored) < 2:
+        return None
+    best, worst = max(scored, key=lambda m: m["sharpness"]), min(scored, key=lambda m: m["sharpness"])
+    return best["id"] if best["sharpness"] >= worst["sharpness"] * 1.15 else None
 
 
 def _matched_groups(kinds: str) -> tuple[list, list[list]]:
@@ -426,7 +635,8 @@ def duplicate_groups():
                 relation = {"kind": "similar", "similarity": best_similarity[photo["id"]]}
             seen_files.add(photo["sha256"])
             items.append({**relation, "photo": _photo_json(photo)})
-        result.append({"id": keeper["id"], "items": items, "extra_bytes": sum(p["size"] for p in members[1:])})
+        result.append({"id": keeper["id"], "items": items, "extra_bytes": sum(p["size"] for p in members[1:]),
+                       "sharpest_id": _sharpest(members)})
     result.sort(key=lambda g: max(i["photo"]["uploaded_at"] for i in g["items"]), reverse=True)
     return result
 
@@ -451,6 +661,8 @@ def remove_exact_copies():
 def related_groups():
     """Different photos of the same subject or scene, found by AI. These are never deleted automatically."""
     found, groups = _matched_groups("kind = 'subject'")
+    in_bursts = {p["id"] for group in intelligence.bursts() for p in group} if ai.enabled() else set()
+    groups = [kept for members in groups if len(kept := [p for p in members if p["id"] not in in_bursts]) > 1]
     best = {}
     for m in found:
         for photo_id in (m["photo_a"], m["photo_b"]):
@@ -459,19 +671,35 @@ def related_groups():
     for members in groups:
         members.sort(key=lambda p: p["uploaded_at"])
         items = [{"kind": "subject", "similarity": best[p["id"]], "photo": _photo_json(p)} for p in members]
-        result.append({"id": members[0]["id"], "items": items, "extra_bytes": 0})
+        result.append({"id": members[0]["id"], "items": items, "extra_bytes": 0, "sharpest_id": _sharpest(members)})
     result.sort(key=lambda g: len(g["items"]), reverse=True)
+    return result
+
+
+@app.get("/api/bursts")
+def burst_groups():
+    """Photos taken seconds apart that show the same scene, sharpest first: keep one, delete the rest."""
+    groups = intelligence.bursts() if ai.enabled() else []
+    with connect() as conn:
+        result = []
+        for group in groups:
+            photos = _photos_by_id(conn, [g["id"] for g in group])
+            if len(photos) > 1:
+                result.append({"id": photos[0]["id"], "sharpest_id": photos[0]["id"], "extra_bytes":
+                               sum(p["size"] for p in photos[1:]),
+                               "items": [{"kind": "burst", "similarity": 1.0, "photo": p} for p in photos]})
     return result
 
 
 # --- People (face recognition) -------------------------------------------------------
 
-# People who appear in at least two different photos; one-off faces are not worth showing.
+# People who appear in at least two different photos (one-off faces are not worth showing),
+# plus anyone the user has merged or split by hand.
 PEOPLE_QUERY = """
     SELECT people.id, people.name, COUNT(DISTINCT faces.photo_id) AS photos
     FROM people JOIN faces ON faces.person_id = people.id
-    GROUP BY people.id, people.name
-    HAVING COUNT(DISTINCT faces.photo_id) >= 2
+    GROUP BY people.id, people.name, people.manual
+    HAVING COUNT(DISTINCT faces.photo_id) >= 2 OR people.manual IS TRUE
 """
 
 
@@ -504,7 +732,58 @@ def person_details(person_id: str):
             "ORDER BY uploaded_at DESC"), {"id": person_id}).scalars().all()
         photos = _photos_by_id(conn, list(ids))
         cover = _cover_faces(conn).get(person_id)
-    return {**dict(person), "image_url": cover, "photos": photos}
+        faces = conn.execute(text("SELECT id, photo_id FROM faces WHERE person_id = :id"),
+                             {"id": person_id}).mappings().all()
+    return {**dict(person), "image_url": cover, "photos": photos,
+            "faces": [{**dict(f), "image_url": f"/api/faces/{f['id']}/image"} for f in faces]}
+
+
+class MergePeople(BaseModel):
+    ids: list[str]
+
+
+@app.post("/api/people/merge")
+def merge_people(body: MergePeople):
+    """These people are really one person: join them. The AI won't separate them again."""
+    ids = list(dict.fromkeys(body.ids))
+    if len(ids) < 2:
+        raise HTTPException(422, "Pick at least two people to merge.")
+    with connect() as conn:
+        rows = conn.execute(text("SELECT id, name FROM people WHERE id IN :ids ORDER BY created_at")
+                            .bindparams(bindparam("ids", expanding=True)), {"ids": ids}).mappings().all()
+        if len(rows) < 2:
+            raise HTTPException(404, "Person not found.")
+        keep = next((r["id"] for r in rows if r["name"]), rows[0]["id"])
+        others = [r["id"] for r in rows if r["id"] != keep]
+        conn.execute(text("UPDATE faces SET person_id = :keep WHERE person_id IN :others")
+                     .bindparams(bindparam("others", expanding=True)), {"keep": keep, "others": others})
+        conn.execute(text("DELETE FROM people WHERE id IN :others").bindparams(bindparam("others", expanding=True)),
+                     {"others": others})
+        conn.execute(text("UPDATE people SET manual = :yes WHERE id = :id"), {"yes": True, "id": keep})
+    return {"id": keep}
+
+
+class SplitPerson(BaseModel):
+    face_ids: list[str]
+
+
+@app.post("/api/people/{person_id}/split")
+def split_person(person_id: str, body: SplitPerson):
+    """These faces are someone else: move them to a new person. The AI won't join them back."""
+    with connect() as conn:
+        if not conn.execute(text("SELECT 1 FROM people WHERE id = :id"), {"id": person_id}).first():
+            raise HTTPException(404, "Person not found.")
+        new_id = uuid.uuid4().hex
+        conn.execute(text("INSERT INTO people (id, name, created_at, manual) VALUES (:id, NULL, :at, :yes)"),
+                     {"id": new_id, "at": datetime.now(timezone.utc).isoformat(), "yes": True})
+        moved = conn.execute(text("UPDATE faces SET person_id = :new WHERE person_id = :old AND id IN :faces")
+                             .bindparams(bindparam("faces", expanding=True)),
+                             {"new": new_id, "old": person_id, "faces": body.face_ids or [""]}).rowcount
+        if not moved:
+            raise HTTPException(422, "Pick at least one face to move.")
+        conn.execute(text("UPDATE people SET manual = :yes WHERE id = :id"), {"yes": True, "id": person_id})
+        intelligence.remove_empty_people(conn)
+    return {"id": new_id, "moved": moved}
 
 
 class PersonName(BaseModel):

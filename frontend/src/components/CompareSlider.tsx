@@ -1,12 +1,12 @@
 import { useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { ChevronsLeftRight, X } from "lucide-react";
 import { formatBytes } from "../lib/utils";
-import type { MatchKind, Photo } from "../types";
-import { MatchBadge, Modal } from "./ui";
+import type { Photo } from "../types";
+import { MatchBadge, Modal, type BadgeKind } from "./ui";
 
 /** Two photos on top of each other with a divider you drag to compare them. */
 export function CompareSlider({ left, right, leftKind, kind, similarity, onClose }: {
-  left: Photo; right: Photo; leftKind: MatchKind | "keep"; kind: MatchKind | "keep"; similarity: number; onClose: () => void;
+  left: Photo; right: Photo; leftKind: BadgeKind; kind: BadgeKind; similarity: number; onClose: () => void;
 }) {
   const [position, setPosition] = useState(50);
   const [dragging, setDragging] = useState(false);
@@ -33,7 +33,7 @@ export function CompareSlider({ left, right, leftKind, kind, similarity, onClose
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold">Compare</h2>
-          <p className="text-sm text-muted">Drag the divider (or use ← →) to see how the two photos differ.</p>
+          <p className="text-sm text-muted">Drag the divider or use ← →.</p>
         </div>
         <button onClick={onClose} aria-label="Close" className="focus-ring rounded-lg p-1.5 text-muted hover:bg-white/5 hover:text-ink"><X className="h-5 w-5" /></button>
       </div>

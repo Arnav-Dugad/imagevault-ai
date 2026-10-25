@@ -54,7 +54,7 @@ function Architecture({ laptopOnline }: { laptopOnline: boolean }) {
   return (
     <section className="panel overflow-hidden p-5 sm:p-6">
       <h2 className="font-semibold">Architecture</h2>
-      <p className="mt-1 text-sm text-muted">Everything in the Azure box is created by Terraform and updated by GitHub Actions.</p>
+      <p className="mt-1 text-sm text-muted">Built with Terraform, deployed by GitHub Actions.</p>
       <div className="mt-5 grid items-center gap-3 lg:grid-cols-[180px_auto_1fr]">
         <Box icon={Globe} title="Browser" subtitle="React website" />
         <div className="grid place-items-center text-muted"><ArrowRight className="hidden h-5 w-5 lg:block" /><ArrowDown className="h-5 w-5 lg:hidden" /></div>
@@ -77,8 +77,8 @@ function Architecture({ laptopOnline }: { laptopOnline: boolean }) {
         <div className="grid place-items-center text-muted"><ArrowRight className="hidden h-5 w-5 lg:block" /><ArrowDown className="h-5 w-5 lg:hidden" /></div>
         <p className="text-sm leading-6 text-muted">
           {laptopOnline
-            ? <>Your laptop is analysing new photos (people, smart search, same subject) and saving the results to PostgreSQL and Blob Storage. The free App Service plan stays light.</>
-            : <>Run <code className="text-ink">python -m app.worker</code> on your laptop to do the AI work there ("edge computing"). While it's off, App Service does it.</>}
+            ? <>Your laptop is doing the AI work and saving results to Azure.</>
+            : <>Run <code className="text-ink">python -m app.worker</code> to do the AI work on your laptop. Until then, App Service does it.</>}
         </p>
       </div>
     </section>
@@ -110,14 +110,14 @@ export function CloudPage() {
   const onAzure = system.environment === "Azure";
   const build = system.build;
   return <>
-    <PageHeading title="Cloud" description="The Azure services behind ImageVault, checked live every time you open this page."
+    <PageHeading title="Cloud" description="The Azure services behind ImageVault."
       action={<Button variant="secondary" onClick={recheck} loading={refreshing}>{!refreshing && <RefreshCw className="h-4 w-4" />}Check again</Button>} />
 
     <div className={cn("mb-6 flex items-center gap-3 rounded-2xl border p-4 text-sm", onAzure ? "border-acid/30 bg-acid/[.06]" : "border-lilac/25 bg-lilac/[.06]")}>
       <Cloud className={cn("h-5 w-5 shrink-0", onAzure ? "text-acid" : "text-lilac")} />
       {onAzure
         ? <span>Running on <b>Microsoft Azure</b> · version {system.version}</span>
-        : <span>Running <b>locally</b> with SQLite and a local folder. On Azure, these become the managed services below.</span>}
+        : <span>Running <b>locally</b> (SQLite and a folder instead of Azure).</span>}
     </div>
 
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -134,13 +134,13 @@ export function CloudPage() {
         {build ? <>
           Deployed commit <a className={link} href={`${build.repository}/commit/${build.commit}`} target="_blank" rel="noreferrer"><code>{build.commit.slice(0, 7)}</code></a> on {formatDate(build.deployed_at)}.{" "}
           <a className={link} href={build.run_url} target="_blank" rel="noreferrer">View pipeline run <ExternalLink className="h-3 w-3" /></a>
-        </> : <>Every push is tested; pushes to <code>main</code> are deployed to App Service automatically. <a className={link} href={`${REPO}/actions`} target="_blank" rel="noreferrer">See runs <ExternalLink className="h-3 w-3" /></a></>}
+        </> : <>Every push is tested; <code>main</code> deploys automatically. <a className={link} href={`${REPO}/actions`} target="_blank" rel="noreferrer">See runs <ExternalLink className="h-3 w-3" /></a></>}
       </DevOpsCard>
       <DevOpsCard icon={Layers} title="Infrastructure as Code · Terraform">
-        All Azure resources are defined in code and created with one command. <a className={link} href={`${REPO}/tree/main/infra`} target="_blank" rel="noreferrer">View infra/ <ExternalLink className="h-3 w-3" /></a>
+        Every Azure resource is defined in code. <a className={link} href={`${REPO}/tree/main/infra`} target="_blank" rel="noreferrer">View infra/ <ExternalLink className="h-3 w-3" /></a>
       </DevOpsCard>
       <DevOpsCard icon={Wallet} title="Cost control · Budget alerts">
-        Free tiers everywhere (App Service F1, PostgreSQL B1ms, capped logs, AI that runs on our own machines). A US$5 monthly budget emails an alert at 50% and 80% of spending, and when it's forecast to reach 100%.
+        Free tiers only, capped logs, and a US$5 monthly budget with email alerts.
       </DevOpsCard>
     </div>
   </>;

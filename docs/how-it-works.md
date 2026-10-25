@@ -94,7 +94,7 @@ The same worker code runs in two places:
 - **Your laptop** (`python -m app.worker`) connects to the Azure database and Blob Storage, using your `az login` account and a firewall rule for your IP address, both created by Terraform. It reports a *heartbeat* every 5 seconds to a `workers` table.
 - **The website** checks that table. While a laptop is online, it leaves new photos alone. It only steps in if the laptop has been silent for 20 seconds, or if a photo has waited more than 5 minutes.
 
-Each worker *claims* a photo with an atomic `UPDATE … WHERE ai_status IS NULL`, so no photo is analysed twice. If a worker disappears mid-photo, its claim is released and another worker retries it. Tested locally: with the laptop worker running, it analysed all 32 demo photos in about 5 seconds while the website stayed idle; after stopping it, the website analysed the next upload on its own.
+Each worker *claims* a photo with an atomic `UPDATE … WHERE ai_status IS NULL`, so no photo is analysed twice. If a worker disappears mid-photo, its claim is released and another worker retries it. Tested locally: with the laptop worker running, it analysed the demo photos in a few seconds while the website stayed idle; after stopping it, the website analysed the next upload on its own.
 
 Why bother, if both are free? The free App Service plan has 1 GB of memory and 60 CPU-minutes a day. Doing the AI on the laptop keeps the website fast and well inside those limits, and it's a real example of edge computing, one of the course's suggested domains.
 

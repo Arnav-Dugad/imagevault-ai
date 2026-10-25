@@ -117,7 +117,7 @@ def test_search_and_duplicates_filter(client):
     upload(client, "beach copy.png", encode(scene()))
     upload(client, "notes.png", encode(document()))
     assert client.get("/api/photos?search=BEACH").json()["total"] == 2
-    assert client.get("/api/photos?duplicates_only=true").json()["total"] == 2
+    assert client.get("/api/photos?filter=duplicates").json()["total"] == 2
 
 
 def test_health_and_cloud_status(client):
@@ -174,3 +174,62 @@ def test_cost_card(client, monkeypatch):
     assert report["amount"] == 0.12 and report["budget"] == 5 and report["error"] is None
     client.get("/api/costs")
     assert len(calls) == 1  # cached for an hour, so Azure's API is not called on every page view
+
+
+def photo_taken(when: str, color: str = "red", **save) -> bytes:
+    image = Image.new("RGB", (64, 48), color)
+    exif = Image.Exif()
+    exif[306] = when  # the camera's date, as phones write it
+    return encode(image, "JPEG", exif=exif, **save)
+
+
+def test_camera_date_filters_and_sorting(client):
+    old = upload(client, "old.jpg", photo_taken("2024:01:05 10:00:00", "red")).json()["photo"]
+    new = upload(client, "new.jpg", photo_taken("2026:03:01 09:30:00", "blue")).json()["photo"]
+    big = upload(client, "big.png", encode(scene())).json()["photo"]  # no camera date: uses the upload date
+    assert old["taken_at"] == "2024-01-05T10:00:00"
+
+    def names(query):
+        return [p["filename"] for p in client.get(f"/api/photos?{query}").json()["items"]]
+
+    assert names("date_from=2024-01-01&date_to=2024-12-31") == ["old.jpg"]
+    assert names("sort=taken_old")[:2] == ["old.jpg", "new.jpg"]
+    assert names("sort=largest")[0] == "big.png"
+    assert names("sort=name") == ["big.png", "new.jpg", "old.jpg"]
+    assert {new["id"], big["id"]} <= {p["id"] for p in client.get("/api/photos?date_from=2026-01-01").json()["items"]}
+
+
+def test_batch_favourite_album_download_and_delete(client):
+    ids = [upload(client, f"{c}.jpg", photo_taken("2026:01:01 00:00:00", c)).json()["photo"]["id"]
+           for c in ("red", "green", "blue")]
+
+    assert client.post("/api/photos/batch", json={"ids": ids[:2], "action": "favorite"}).json() == {"done": 2}
+    assert client.get("/api/photos?filter=favorites").json()["total"] == 2
+
+    added = client.post("/api/photos/batch", json={"ids": ids, "action": "add_to_album", "new_album": "Trip"})
+    assert added.json() == {"done": 3}
+    album = client.get("/api/albums").json()["mine"][0]
+    assert album["name"] == "Trip" and album["count"] == 3
+    client.post("/api/photos/batch", json={"ids": ids[:1], "action": "remove_from_album", "album_id": album["id"]})
+    assert client.get(f"/api/photos?album={album['id']}").json()["total"] == 2
+
+    renamed = client.patch(f"/api/photos/{ids[0]}", json={"filename": "holiday.jpg", "favorite": False}).json()
+    assert renamed["filename"] == "holiday.jpg" and not renamed["favorite"]
+
+    archive = client.get(f"/api/zip?ids={','.join(ids)}")
+    assert archive.headers["content-type"] == "application/zip"
+    import zipfile
+    assert sorted(zipfile.ZipFile(io.BytesIO(archive.content)).namelist()) == ["blue.jpg", "green.jpg", "holiday.jpg"]
+
+    assert client.post("/api/photos/batch", json={"ids": ids, "action": "delete"}).json() == {"done": 3}
+    assert client.get("/api/photos").json()["total"] == 0
+    assert client.get("/api/albums").json()["mine"][0]["count"] == 0  # the album stays, now empty
+
+
+def test_sharpest_photo_in_a_group(client):
+    from PIL import ImageFilter
+
+    sharp = upload(client, "sharp.png", encode(scene())).json()["photo"]
+    upload(client, "blurry.png", encode(scene().filter(ImageFilter.GaussianBlur(2))))
+    group = client.get("/api/duplicates").json()[0]
+    assert group["sharpest_id"] == sharp["id"]

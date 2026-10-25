@@ -25,7 +25,7 @@ import numpy as np
 from PIL import Image, ImageOps
 from sqlalchemy import bindparam, text
 
-from app import ai
+from app import ai, photos
 from app.database import connect
 from app.storage import get_storage, original_key
 
@@ -130,25 +130,42 @@ def _face_crop(image: Image.Image, box) -> bytes:
     return buffer.getvalue()
 
 
+def remove_empty_people(conn) -> None:
+    """Forget people who no longer have any faces (their photos were deleted or moved)."""
+    conn.execute(text("DELETE FROM people WHERE id NOT IN "
+                      "(SELECT person_id FROM faces WHERE person_id IS NOT NULL)"))
+
+
 def _assign_person(conn, embedding: np.ndarray, known: list) -> str:
-    """Find the person this face belongs to (or create a new one). Joins people the face connects."""
-    matched = {person for person, other in known if float(embedding @ other) >= SAME_PERSON}
-    if not matched:
+    """Find the person this face belongs to (or create a new one).
+
+    If the face looks like two different people, they are probably the same person, so they're
+    merged - unless one of them was merged or split by hand, which is always respected.
+    """
+    best: dict[str, float] = {}
+    for person, other in known:
+        score = float(embedding @ other)
+        if score >= SAME_PERSON and score > best.get(person, -1):
+            best[person] = score
+    if not best:
         person_id = uuid.uuid4().hex
         conn.execute(text("INSERT INTO people (id, name, created_at) VALUES (:id, NULL, :at)"),
                      {"id": person_id, "at": _now()})
         return person_id
-    rows = conn.execute(
-        text("SELECT id, name FROM people WHERE id IN :ids ORDER BY created_at").bindparams(
-            bindparam("ids", expanding=True)), {"ids": list(matched)},
-    ).all()
-    keep = next((r.id for r in rows if r.name), rows[0].id)  # keep a named person if there is one
-    for other in matched - {keep}:
+    rows = {r.id: r for r in conn.execute(
+        text("SELECT id, name, manual FROM people WHERE id IN :ids").bindparams(
+            bindparam("ids", expanding=True)), {"ids": list(best)},
+    )}
+    closest = max(best, key=best.get)
+    if any(rows[p].manual for p in best):
+        return closest  # never undo a manual merge or split
+    keep = next((p for p in sorted(best, key=best.get, reverse=True) if rows[p].name), closest)
+    for other in set(best) - {keep}:
         conn.execute(text("UPDATE faces SET person_id = :keep WHERE person_id = :other"),
                      {"keep": keep, "other": other})
         conn.execute(text("DELETE FROM people WHERE id = :other"), {"other": other})
     for i, (person, vector) in enumerate(known):
-        if person in matched:
+        if person in best:
             known[i] = (keep, vector)
     return keep
 
@@ -158,8 +175,9 @@ def analyze_photo(photo_id: str) -> None:
         photo = conn.execute(text("SELECT id, sha256 FROM photos WHERE id = :id"), {"id": photo_id}).first()
     if photo is None:
         return
-    image = ImageOps.exif_transpose(Image.open(io.BytesIO(get_storage().read(original_key(photo.sha256)))))
-    image = image.convert("RGB")
+    raw = Image.open(io.BytesIO(get_storage().read(original_key(photo.sha256))))
+    date = photos.taken_at(raw)
+    image = ImageOps.exif_transpose(raw).convert("RGB")
     clip = ai.image_embedding(image)
     found = ai.find_faces(image)
 
@@ -168,14 +186,23 @@ def analyze_photo(photo_id: str) -> None:
         if conn.execute(text("SELECT 1 FROM photos WHERE id = :id"), {"id": photo_id}).first() is None:
             return  # deleted while we were working
 
-        # Faces -> people
+        # Faces -> people. When a photo is analysed again, its faces are replaced, but each face
+        # keeps the person it belonged to, so names and manual merges/splits survive.
         known = [(r.person_id, ai.from_bytes(r.embedding)) for r in conn.execute(
             text("SELECT person_id, embedding FROM faces WHERE person_id IS NOT NULL AND photo_id != :id"),
             {"id": photo_id})]
+        previous = conn.execute(text("SELECT id, person_id, embedding FROM faces WHERE photo_id = :id"),
+                                {"id": photo_id}).all()
+        for old_face in previous:
+            storage.delete(face_key(old_face.id))
         conn.execute(text("DELETE FROM faces WHERE photo_id = :id"), {"id": photo_id})
         for face in found:
             face_id = uuid.uuid4().hex
-            person_id = _assign_person(conn, face.embedding, known)
+            same = max(previous, default=None, key=lambda old: float(face.embedding @ ai.from_bytes(old.embedding)))
+            if same is not None and same.person_id and float(face.embedding @ ai.from_bytes(same.embedding)) > 0.9:
+                person_id = same.person_id
+            else:
+                person_id = _assign_person(conn, face.embedding, known)
             storage.save(face_key(face_id), _face_crop(image, face.box), "image/jpeg")
             conn.execute(
                 text("INSERT INTO faces (id, photo_id, person_id, x, y, w, h, embedding) "
@@ -201,8 +228,11 @@ def analyze_photo(photo_id: str) -> None:
                     text("INSERT INTO matches (photo_a, photo_b, kind, similarity) VALUES (:a, :b, 'subject', :s)"),
                     {"a": photo_id, "b": other.id, "s": round(min(similarity, 0.99), 3)},
                 )
-        conn.execute(text("UPDATE photos SET clip = :clip, ai_status = 'done' WHERE id = :id"),
-                     {"clip": ai.to_bytes(clip), "id": photo_id})
+        conn.execute(text(
+            "UPDATE photos SET clip = :clip, ai_status = 'done', taken_at = COALESCE(taken_at, :taken), "
+            "sharpness = COALESCE(sharpness, :sharp) WHERE id = :id"),
+            {"clip": ai.to_bytes(clip), "id": photo_id, "taken": date, "sharp": photos.sharpness(image)})
+        remove_empty_people(conn)
     log.info("Photo analysed", extra={"faces": len(found)})
 
 
@@ -248,6 +278,8 @@ def run_worker(kind: str, on_status=None, on_done=None, poll_seconds: float = 30
     with connect() as conn:  # photos this worker was analysing when it stopped are tried again
         conn.execute(text("UPDATE photos SET ai_status = NULL, ai_worker = NULL "
                           "WHERE ai_status = 'processing' AND ai_worker = :name"), {"name": name})
+        # Photos from older versions have no sharpness score yet: analyse them once more.
+        conn.execute(text("UPDATE photos SET ai_status = NULL WHERE ai_status = 'done' AND sharpness IS NULL"))
     delay = 10
     while not ai.models_ready():
         try:
@@ -315,8 +347,90 @@ def search(query: str) -> list[str]:
         rows = conn.execute(text("SELECT id, clip FROM photos WHERE clip IS NOT NULL")).all()
     if not rows:
         return []
-    photos = np.stack([ai.from_bytes(r.clip) for r in rows])
-    scores = photos @ query_vector - (photos @ _generic_captions().T).max(axis=1)
+    vectors = np.stack([ai.from_bytes(r.clip) for r in rows])
+    scores = vectors @ query_vector - (vectors @ _generic_captions().T).max(axis=1)
     cutoff = max(SEARCH_MIN, float(scores.max()) - SEARCH_WINDOW)
     ranked = sorted(((float(s), r.id) for s, r in zip(scores, rows) if s >= cutoff), reverse=True)
     return [photo_id for _, photo_id in ranked]
+
+
+# --- Auto albums ------------------------------------------------------------------------------
+# Each album is a few short descriptions. A photo joins an album when one of them describes it
+# clearly better than a generic caption does (the same idea as smart search).
+
+AUTO_ALBUMS = {
+    "beach": ("Beach", ["a beach with sand and sea", "the seaside"]),
+    "mountains": ("Mountains", ["mountains", "a mountain landscape", "a fjord between mountains"]),
+    "food": ("Food & drink", ["food", "a plate of food", "fruit", "a cup of coffee"]),
+    "pets": ("Pets", ["a cat", "a dog", "a puppy", "a pet"]),
+    "animals": ("Wildlife", ["a wild animal", "wildlife", "a sea creature"]),
+    "city": ("City", ["a city skyline", "city buildings and streets"]),
+    "landmarks": ("Landmarks", ["a famous landmark", "a palace", "a castle", "a monument"]),
+    "nature": ("Nature", ["a forest", "a waterfall", "a river in nature"]),
+    "snow": ("Snow", ["snow", "a snowy winter scene"]),
+    "sunsets": ("Sunsets", ["a sunset", "the sky at sunset"]),
+}
+ALBUM_MIN = 0.02  # how much better an album description must fit than a generic caption
+ALBUM_NAMES = {key: name for key, (name, _) in AUTO_ALBUMS.items()} | {"people": "People"}
+
+
+@lru_cache(maxsize=1)
+def _album_vectors() -> dict[str, np.ndarray]:
+    return {key: np.stack([ai.text_embedding(f"a photo of {p}.") for p in prompts])
+            for key, (_, prompts) in AUTO_ALBUMS.items()}
+
+
+def auto_albums() -> dict[str, list[str]]:
+    """{album key: [photo ids, best match first]} for every auto album that has photos."""
+    with connect() as conn:
+        rows = conn.execute(text("SELECT id, clip FROM photos WHERE clip IS NOT NULL ORDER BY uploaded_at")).all()
+        with_faces = conn.execute(text(
+            "SELECT photo_id FROM faces GROUP BY photo_id ORDER BY COUNT(*) DESC")).scalars().all()
+    scored = {}  # album key -> {photo id: how well it fits}
+    if rows:
+        vectors = np.stack([ai.from_bytes(r.clip) for r in rows])
+        baseline = (vectors @ _generic_captions().T).max(axis=1)
+        for key, prompts in _album_vectors().items():
+            scores = (vectors @ prompts.T).max(axis=1) - baseline
+            scored[key] = {r.id: float(s) for s, r in zip(scores, rows) if s >= ALBUM_MIN}
+    # An animal is either a pet or wildlife: a house cat goes to Pets, a leopard to Wildlife.
+    pets, wild = scored.get("pets", {}), scored.get("animals", {})
+    for photo_id in set(pets) & set(wild):
+        del (wild if pets[photo_id] >= wild[photo_id] else pets)[photo_id]
+    result = {key: sorted(members, key=members.get, reverse=True) for key, members in scored.items()}
+    if with_faces:  # face recognition finds people far more reliably than CLIP does
+        result["people"] = list(with_faces)
+    return {key: ids for key, ids in result.items() if ids}
+
+
+# --- Bursts: photos taken seconds apart --------------------------------------------------------
+
+BURST_SECONDS = 10      # photos taken this close together...
+BURST_SIMILARITY = 0.8  # ...that also look alike (CLIP) form a burst
+
+
+def bursts() -> list[list[dict]]:
+    """Groups of photos taken within a few seconds of each other that show the same scene,
+    each sorted sharpest first. Needs the camera date (EXIF), which messaging apps often remove."""
+    with connect() as conn:
+        rows = conn.execute(text(
+            "SELECT id, sha256, taken_at, sharpness, clip FROM photos "
+            "WHERE taken_at IS NOT NULL AND clip IS NOT NULL ORDER BY taken_at")).mappings().all()
+    groups, current, seen = [], [], set()
+    for row in rows:
+        if row["sha256"] in seen:  # an exact copy is a duplicate, not another shot
+            continue
+        seen.add(row["sha256"])
+        when = datetime.fromisoformat(row["taken_at"])
+        if current:
+            last = current[-1]
+            close = (when - datetime.fromisoformat(last["taken_at"])).total_seconds() <= BURST_SECONDS
+            alike = float(ai.from_bytes(row["clip"]) @ ai.from_bytes(last["clip"])) >= BURST_SIMILARITY
+            if not (close and alike):
+                groups.append(current)
+                current = []
+        current.append(row)
+    groups.append(current)
+    return [sorted(({"id": r["id"], "sharpness": r["sharpness"] or 0} for r in g),
+                   key=lambda r: r["sharpness"], reverse=True)
+            for g in groups if len(g) > 1]

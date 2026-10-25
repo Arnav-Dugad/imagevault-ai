@@ -12,18 +12,19 @@
 
 ## What it does
 
-- **Upload photos** in the browser by dragging them in (JPG, PNG, WEBP, GIF, BMP).
-- **Finds exact copies:** the same file uploaded twice. Each identical file is stored only once.
-- **Finds similar photos:** resized, compressed or edited versions of the same picture, using perceptual hashing.
-- **Review duplicates** side by side and delete the copies you don't need.
-- **Free AI recognition** that runs inside the app (no paid API, photos never leave your cloud):
-  - 👤 **People:** recognises the same person across photos, even in a group photo, and lets you name them;
-  - 🔍 **Smart search:** find photos by describing them, like "a cat", "a palace at sunset" or "a man in a suit";
-  - 🏛️ **Same subject, different shot:** suggests photos of the same scene taken from another angle or in other colours.
-- **Compare slider** to see exactly how a copy differs, and a **full-screen viewer** with ← → / swipe browsing.
-- **Cloud page:** a live view of every Azure service behind the site (health and response time), **this month's Azure cost** against the budget, and the architecture.
+- **Upload** by dragging photos anywhere on the page, choosing files, or pasting with Ctrl+V.
+- **Duplicates:** finds exact copies (stored only once) and resized, compressed or edited versions. Compare them with a slider and delete the extras.
+- **Bursts:** photos taken seconds apart are grouped, and the sharpest one is picked for you.
+- **People:** recognises the same person across photos, even in group photos. Name people, and merge or split them by hand when the AI gets it wrong.
+- **Albums:** make your own, or use the ones made automatically (Beach, Food & drink, Pets, Mountains, City, Sunsets and more).
+- **Smart search:** describe a photo ("a dog on a beach", "a bridge at night") instead of remembering its name.
+- **Batch editing:** select many photos (Shift-click, Ctrl+A) to favourite, add to an album, download as a ZIP or delete.
+- **Browse** with sort (date taken, size, name), a date range filter, favourites, three thumbnail sizes and a full-screen viewer.
+- **Cloud page:** live health of every Azure service, this month's Azure cost against the budget, and the architecture.
 
-Try it with the [demo photos](frontend/public/demo-photos.zip). They're real photos from Unsplash and Wikimedia Commons, with copies ImageVault should catch, look-alikes it should *not* match, and portraits for the People page.
+The AI is free: the models run inside the app (on your laptop or in App Service), with no paid API and no photos sent to another company.
+
+Try it with the [demo photos](frontend/public/demo-photos.zip): 83 real photos from Unsplash and Wikimedia Commons, with copies, a burst, look-alikes and portraits. The zip's `README.txt` says what each one shows.
 
 ## Cloud architecture
 
@@ -33,6 +34,7 @@ flowchart LR
     APP --> DB[("Azure Database for<br/>PostgreSQL")]
     APP -->|managed identity| BLOB["Azure Blob Storage"]
     APP --> AI["Application Insights"]
+    LAP["Laptop AI worker<br/>(optional)"] --> DB & BLOB
     GH["GitHub Actions<br/>CI/CD"] -->|OIDC deploy| APP
     TF["Terraform<br/>IaC"] -. creates .-> APP & DB & BLOB & AI & BUD["Budget alert"]
 ```
@@ -91,7 +93,7 @@ git push                                          # GitHub Actions deploys the s
 ## Project structure
 
 ```
-app/            Python backend: API, duplicate detection, free AI, database, storage, monitoring
+app/            Python backend: API, duplicates, free AI, albums, database, storage, monitoring
 frontend/       React website (Vite + Tailwind CSS); public/demo-photos.zip
 infra/          Terraform: every Azure resource
 tests/          Automated tests (run against SQLite and against PostgreSQL + Azure Storage emulator)
