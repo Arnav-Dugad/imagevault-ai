@@ -95,6 +95,6 @@ export function PhotosPage() {
     {photos && photos.length < total && (
       <div className="mt-8 text-center"><Button variant="secondary" loading={loadingMore} onClick={loadMore}>Load more photos</Button></div>
     )}
-    {openId && <PhotoViewer id={openId} onClose={() => setOpenId(null)} onDeleted={reload} />}
+    {openId && <PhotoViewer id={openId} ids={photos?.map((p) => p.id)} onClose={() => setOpenId(null)} onDeleted={reload} />}
   </>;
 }

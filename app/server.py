@@ -26,7 +26,7 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 from sqlalchemy import bindparam, make_url, text  # noqa: E402
 
-from app import __version__, ai, intelligence  # noqa: E402
+from app import __version__, ai, costs, intelligence  # noqa: E402
 from app.database import connect, init_db  # noqa: E402
 from app.photos import NotAPhoto, analyze, compare  # noqa: E402
 from app.storage import get_storage, original_key, thumbnail_key  # noqa: E402
@@ -533,6 +533,12 @@ def face_image(face_id: str):
 @app.get("/api/ai")
 def ai_status():
     return intelligence.status()
+
+
+@app.get("/api/costs")
+def azure_costs():
+    """This month's Azure spending for the project (Azure Cost Management), cached for an hour."""
+    return costs.month_to_date()
 
 
 # --- Health and cloud status -------------------------------------------------------

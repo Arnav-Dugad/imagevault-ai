@@ -20,7 +20,8 @@
   - 👤 **People:** recognises the same person across photos, even in a group photo, and lets you name them;
   - 🔍 **Smart search:** find photos by describing them, like "a cat", "a palace at sunset" or "a man in a suit";
   - 🏛️ **Same subject, different shot:** suggests photos of the same scene taken from another angle or in other colours.
-- **Cloud page:** a live view of every Azure service behind the site, with health and response time.
+- **Compare slider** to see exactly how a copy differs, and a **full-screen viewer** with ← → / swipe browsing.
+- **Cloud page:** a live view of every Azure service behind the site (health and response time), **this month's Azure cost** against the budget, and the architecture.
 
 Try it with the [demo photos](frontend/public/demo-photos.zip). They're real photos from Unsplash and Wikimedia Commons, with copies ImageVault should catch, look-alikes it should *not* match, and portraits for the People page.
 
@@ -45,7 +46,7 @@ flowchart LR
 | **Free AI models** (CLIP, YuNet, SFace via ONNX Runtime + OpenCV) on **your laptop** (edge), with App Service as backup | People, smart search and same-subject suggestions, at no extra cost |
 | **Terraform** | Creates all of the above with one command (Infrastructure as Code) |
 | **GitHub Actions** | Tests every push and deploys `main` to Azure (CI/CD) |
-| **Cost Management budget** | Emails alerts at 50%, 80% and forecast 100% of the monthly budget |
+| **Cost Management** (budget + Query API) | Emails alerts at 50%, 80% and forecast 100% of the US$5 monthly budget; the Cloud page shows the live month-to-date cost |
 | **Managed identities + OIDC** | No storage keys and no deployment passwords |
 
 ## Run it on your computer

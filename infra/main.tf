@@ -151,13 +151,21 @@ resource "azurerm_linux_web_app" "main" {
     AZURE_STORAGE_CONTAINER               = azurerm_storage_container.photos.name
     APPLICATIONINSIGHTS_CONNECTION_STRING = azurerm_application_insights.main.connection_string
     APP_PASSWORD                          = var.app_password
-    IMAGEVAULT_MODEL_DIR                  = "/home/models" # free AI models, downloaded once and kept across restarts
+    IMAGEVAULT_MODEL_DIR                  = "/home/models"                 # free AI models, downloaded once and kept across restarts
+    AZURE_COST_SCOPE                      = azurerm_resource_group.main.id # for the live cost card on the Cloud page
+    MONTHLY_BUDGET                        = tostring(var.monthly_budget)
   }
 }
 
 resource "azurerm_role_assignment" "web_reads_and_writes_blobs" {
   scope                = azurerm_storage_account.photos.id
   role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = azurerm_linux_web_app.main.identity[0].principal_id
+}
+
+resource "azurerm_role_assignment" "web_reads_costs" {
+  scope                = azurerm_resource_group.main.id
+  role_definition_name = "Cost Management Reader" # read-only: lets the Cloud page show this month's cost
   principal_id         = azurerm_linux_web_app.main.identity[0].principal_id
 }
 
@@ -171,11 +179,11 @@ resource "azurerm_user_assigned_identity" "github" {
 }
 
 resource "azurerm_federated_identity_credential" "github_main" {
-  name      = "github-main-branch"
-  parent_id = azurerm_user_assigned_identity.github.id
-  audience  = ["api://AzureADTokenExchange"]
-  issuer    = "https://token.actions.githubusercontent.com"
-  subject   = "repo:${var.github_repository}:ref:refs/heads/main"
+  name                      = "github-main-branch"
+  user_assigned_identity_id = azurerm_user_assigned_identity.github.id
+  audience                  = ["api://AzureADTokenExchange"]
+  issuer                    = "https://token.actions.githubusercontent.com"
+  subject                   = "repo:${var.github_repository}:ref:refs/heads/main"
 }
 
 resource "azurerm_role_assignment" "github_deploys_website" {

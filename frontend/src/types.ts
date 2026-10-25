@@ -83,6 +83,16 @@ export interface PersonDetails {
   photos: Photo[];
 }
 
+export interface CostReport {
+  configured: boolean;
+  budget: number | null;
+  amount?: number;
+  currency?: string;
+  services?: { name: string; amount: number }[];
+  updated_at?: string;
+  error?: string | null;
+}
+
 export interface CloudService {
   id: "app-service" | "database" | "storage" | "monitoring" | "ai";
   name: string;
