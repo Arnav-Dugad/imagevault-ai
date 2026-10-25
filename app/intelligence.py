@@ -52,7 +52,7 @@ STALE_CLAIM_SECONDS = 600      # photos claimed by a worker that went silent are
 SLOW_PHOTO_SECONDS = 300       # analysing one photo should never take this long
 # Raise this whenever the analysis finds something new (for example word positions). Photos analysed by an
 # older version are analysed again, and laptop workers running older code get no photos until updated.
-ANALYSIS_VERSION = 3
+ANALYSIS_VERSION = 4
 
 _wake = threading.Event()
 _worker_started = False
@@ -225,18 +225,25 @@ class Analysis:
     sharpness: float
     words: list[ai.Word]
     flatness: float = 0.0
+    jpeg_quality: int | None = None
+    camera: bool = False
 
     @property
     def text(self) -> str:
-        return " ".join(word.text for word in self.words)
+        """The text, one line of the photo per line."""
+        lines: dict[int, list[str]] = {}
+        for word in self.words:
+            lines.setdefault(word.line, []).append(word.text)
+        return "\n".join(" ".join(words) for _, words in sorted(lines.items()))
 
     def words_json(self) -> list[dict]:
-        return [{"text": w.text, "box": [round(v, 4) for v in w.box]} for w in self.words]
+        return [{"text": w.text, "box": [round(v, 4) for v in w.box], "line": w.line} for w in self.words]
 
     def to_json(self) -> dict:
         b64 = lambda data: base64.b64encode(data).decode()  # noqa: E731
         return {"clip": b64(ai.to_bytes(self.clip)), "taken_at": self.taken_at, "sharpness": self.sharpness,
                 "flatness": self.flatness, "words": self.words_json(), "version": ANALYSIS_VERSION,
+                "jpeg_quality": self.jpeg_quality, "camera": self.camera,
                 "faces": [{"box": list(f.box), "embedding": b64(ai.to_bytes(f.embedding)), "crop": b64(f.crop)}
                           for f in self.faces]}
 
@@ -259,9 +266,12 @@ class Analysis:
 
         faces = [FoundFace(box(f["box"]), vector(f["embedding"], 128), base64.b64decode(f["crop"], validate=True))
                  for f in data.get("faces", [])]
-        words = [ai.Word(str(w["text"])[:100], box(w["box"])) for w in data.get("words", [])[:200] if w.get("text")]
+        words = [ai.Word(str(w["text"])[:100], box(w["box"]), int(w.get("line") or 0))
+                 for w in data.get("words", [])[:500] if w.get("text")]
+        quality = data.get("jpeg_quality")
         return cls(vector(data["clip"], 512), faces, data.get("taken_at"), float(data.get("sharpness") or 0), words,
-                   min(1.0, max(0.0, float(data.get("flatness") or 0))))
+                   min(1.0, max(0.0, float(data.get("flatness") or 0))),
+                   None if quality is None else max(1, min(100, int(quality))), bool(data.get("camera")))
 
 
 def compute(data: bytes) -> Analysis:
@@ -271,7 +281,7 @@ def compute(data: bytes) -> Analysis:
     image = ImageOps.exif_transpose(raw).convert("RGB")
     faces = [FoundFace(f.box, f.embedding, _face_crop(image, f.box)) for f in ai.find_faces(image)]
     return Analysis(ai.image_embedding(image), faces, date, photos.sharpness(image), ai.read_text(image),
-                    photos.flatness(image))
+                    photos.flatness(image), photos.jpeg_quality(raw), photos.has_camera_info(raw))
 
 
 def save_analysis(photo_id: str, found: Analysis) -> bool:
@@ -328,11 +338,13 @@ def save_analysis(photo_id: str, found: Analysis) -> bool:
                 )
         conn.execute(text(
             "UPDATE photos SET clip = :clip, ai_status = 'done', ai_worker = NULL, ocr_text = :text, "
-            "ocr_words = :words, flatness = :flat, ai_version = :version, taken_at = COALESCE(taken_at, :taken), "
+            "ocr_words = :words, ocr_search = :search, flatness = :flat, ai_version = :version, "
+            "jpeg_quality = :quality, camera = :camera, taken_at = COALESCE(taken_at, :taken), "
             "sharpness = COALESCE(sharpness, :sharp) WHERE id = :id"),
             {"clip": ai.to_bytes(clip), "id": photo_id, "taken": found.taken_at, "sharp": found.sharpness,
              "text": found.text, "words": json.dumps(found.words_json(), ensure_ascii=False), "flat": found.flatness,
-             "version": ANALYSIS_VERSION})
+             "version": ANALYSIS_VERSION, "search": squeeze(found.text), "quality": found.jpeg_quality,
+             "camera": found.camera})
         remove_empty_people(conn)
     for old_face in previous:  # the old face crops are no longer used
         storage.delete(face_key(old_face.id))
@@ -536,9 +548,30 @@ DOCUMENT_MIN = 0.035
 SCREENSHOT_FLAT = 0.45  # a lossless picture without a camera date and this much flat colour is a screenshot
 RECEIPT_WORDS = ("total", "subtotal", "amount", "invoice", "receipt", "qty", "cash", "change", "gst", "tax", "bill")
 SCREENSHOT_NAME = re.compile(r"screen ?shot|screen[_-]?capture|scrnli", re.IGNORECASE)
+# Forwarded: named the way messaging apps name saved photos (WhatsApp, Telegram, Signal), or a small, heavily
+# compressed JPEG without camera details, which is what those apps send.
+FORWARDED_NAME = re.compile(r"^(IMG-\d{8}-WA\d+|WhatsApp Image|photo_\d{4}-\d{2}-\d{2}|signal-\d{4})", re.IGNORECASE)
+FORWARDED_QUALITY = 70
+MEME_TEXT = 0.05  # caption letters at least this tall (as a share of the photo's height)
+
+
+def is_meme(words: list[dict]) -> bool:
+    """Big caption text at the top and at the bottom of a photo, the classic meme layout."""
+    big = [w["box"] for w in words if w["box"][3] >= MEME_TEXT]
+    top = any(y + h / 2 < 0.3 for _, y, _, h in big)
+    bottom = any(y + h / 2 > 0.7 for _, y, _, h in big)
+    return top and bottom and len(words) <= 30
+
+
+def is_forwarded(row) -> bool:
+    if FORWARDED_NAME.search(row.filename):
+        return True
+    return (row.content_type == "image/jpeg" and row.camera is False and row.jpeg_quality is not None
+            and row.jpeg_quality <= FORWARDED_QUALITY and max(row.width, row.height) <= 1600)
 ALBUM_MIN = 0.02  # how much better an album description must fit than a generic caption
 ALBUM_NAMES = {key: name for key, (name, _) in AUTO_ALBUMS.items()} | {
-    "documents": "Documents & receipts", "screenshots": "Screenshots", "people": "People"}
+    "documents": "Documents & receipts", "screenshots": "Screenshots", "memes": "Memes", "forwarded": "Forwarded",
+    "people": "People"}
 
 
 @lru_cache(maxsize=1)
@@ -556,8 +589,9 @@ def _album_vectors() -> dict[str, np.ndarray]:
 def auto_albums() -> dict[str, list[str]]:
     """{album key: [photo ids, best match first]} for every auto album that has photos."""
     with connect() as conn:
-        rows = conn.execute(text("SELECT id, clip, filename, content_type, taken_at, flatness, ocr_text "
-                                 "FROM photos WHERE clip IS NOT NULL ORDER BY uploaded_at")).all()
+        rows = conn.execute(text(
+            "SELECT id, clip, filename, content_type, width, height, taken_at, flatness, ocr_text, ocr_words, "
+            "jpeg_quality, camera FROM photos WHERE clip IS NOT NULL ORDER BY uploaded_at")).all()
         with_faces = conn.execute(text(
             "SELECT photo_id FROM faces GROUP BY photo_id ORDER BY COUNT(*) DESC")).scalars().all()
     scored = {}  # album key -> {photo id: how well it fits}
@@ -575,12 +609,17 @@ def auto_albums() -> dict[str, list[str]]:
     for i, row in enumerate(rows):
         words = (row.ocr_text or "").split()
         if (document_scores[i] >= DOCUMENT_MIN or len(words) >= 20
-                or sum(any(k in w for k in RECEIPT_WORDS) for w in words) >= 2):
+                or sum(any(k in w.lower() for k in RECEIPT_WORDS) for w in words) >= 2):
             scored.setdefault("documents", {})[row.id] = float(document_scores[i])
         lossless = row.content_type in ("image/png", "image/webp", "image/bmp", "image/gif")
-        if SCREENSHOT_NAME.search(row.filename) or (
-                lossless and row.taken_at is None and (row.flatness or 0) >= SCREENSHOT_FLAT):
+        screenshot = SCREENSHOT_NAME.search(row.filename) or (
+            lossless and row.taken_at is None and (row.flatness or 0) >= SCREENSHOT_FLAT)
+        if screenshot:
             scored.setdefault("screenshots", {})[row.id] = row.flatness or 0
+        elif row.ocr_words and is_meme(json.loads(row.ocr_words)):
+            scored.setdefault("memes", {})[row.id] = 1.0
+        if is_forwarded(row):
+            scored.setdefault("forwarded", {})[row.id] = float(100 - (row.jpeg_quality or 100))
     # An animal is either a pet or wildlife: a house cat goes to Pets, a leopard to Wildlife.
     pets, wild = scored.get("pets", {}), scored.get("animals", {})
     for photo_id in set(pets) & set(wild):

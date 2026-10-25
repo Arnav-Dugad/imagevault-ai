@@ -24,11 +24,10 @@ export function UploadPage() {
   const [dragging, setDragging] = useState(false);
   const input = useRef<HTMLInputElement>(null);
 
+  // Dropped files are added by the page-wide drop handler (Layout), so its "Drop to upload" overlay closes too.
   function onDrop(event: DragEvent) {
     event.preventDefault();
-    event.stopPropagation(); // the whole-window drop zone must not add them a second time
     setDragging(false);
-    void add(Array.from(event.dataTransfer.files));
   }
 
   const done = items.filter((i) => i.state === "done");

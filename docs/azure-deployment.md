@@ -18,7 +18,7 @@ Terraform (`infra/main.tf`) creates everything in one resource group called **im
 | Azure Database for PostgreSQL Flexible Server | Burstable B1ms, 32 GB | Free for 12 months under Azure's free services (750 h/month); otherwise about US$13–15/month from your credit |
 | Storage account (Blob) | Standard LRS | A few cents per GB per month |
 | Log Analytics + Application Insights | Pay-as-you-go, **capped at 0.1 GB a day** | Free: the cap keeps it under the 5 GB/month free allowance |
-| Free AI recognition (CLIP, YuNet, SFace, PP-OCR + CRNN, Hindi and Tamil readers) | Runs on your laptop, or in the Web App | Free: no AI service is created or billed |
+| Free AI recognition (CLIP, YuNet, SFace, PaddleOCR text readers) | Runs on your laptop, or in the Web App | Free: no AI service is created or billed |
 | Managed identity for GitHub Actions | | Free |
 | Budget with email alerts | US$5 a month | Free |
 

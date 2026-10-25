@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { NavLink, useLocation } from "react-router-dom";
-import { ArrowUp, Cloud, Copy, FolderOpen, House, ImagePlus, Images, LoaderCircle, LogOut, Menu, Upload, Users, X } from "lucide-react";
+import { Link, NavLink, useLocation } from "react-router-dom";
+import { ArrowUp, CheckCircle2, Cloud, Copy, FolderOpen, House, ImagePlus, Images, LoaderCircle, LogOut, Menu, Upload, Users, X } from "lucide-react";
 import { api } from "../lib/api";
 import { useSystem } from "../lib/system";
 import { useToast } from "../lib/toast";
@@ -30,6 +30,49 @@ function UploadProgress() {
   );
 }
 
+/** A small panel while photos upload, so the queue is visible on every page (and on phones,
+ *  where the sidebar is hidden). It stays a few seconds after the last upload, then goes. */
+function UploadDock() {
+  const { items, busy } = useUploads();
+  const { pathname } = useLocation();
+  const [closed, setClosed] = useState(false);
+  const [lingering, setLingering] = useState(false);
+  useEffect(() => {
+    if (busy) {
+      setClosed(false);
+      setLingering(true);
+      return;
+    }
+    const timer = setTimeout(() => setLingering(false), 6000);
+    return () => clearTimeout(timer);
+  }, [busy]);
+  if (pathname === "/upload" || closed || !(busy || lingering)) return null;
+  const queue = items.filter((i) => i.state !== "stored" && i.state !== "checking");
+  const done = queue.filter((i) => i.state === "done").length;
+  const failed = queue.filter((i) => i.state === "failed").length;
+  const stored = items.filter((i) => i.state === "stored").length;
+  const copies = queue.filter((i) => i.result?.match).length;
+  const current = items.find((i) => i.state === "uploading");
+  const share = queue.length ? (done + failed + (current ? current.progress / 100 : 0)) / queue.length : 1;
+  return (
+    <div role="status" className="fixed inset-x-3 bottom-3 z-40 rounded-2xl border border-line bg-raised/95 p-4 shadow-2xl backdrop-blur sm:inset-x-auto sm:right-20 sm:bottom-5 sm:w-80">
+      <div className="flex items-center gap-2">
+        {busy ? <LoaderCircle className="h-4 w-4 shrink-0 animate-spin text-acid" /> : <CheckCircle2 className="h-4 w-4 shrink-0 text-acid" />}
+        <p className="flex-1 text-sm font-semibold">{busy ? `Uploading ${Math.min(done + failed + 1, queue.length)} of ${queue.length}` : `${done} uploaded`}</p>
+        <button onClick={() => setClosed(true)} aria-label="Hide" className="focus-ring rounded-md p-1 text-muted hover:text-ink"><X className="h-4 w-4" /></button>
+      </div>
+      {current && <p className="mt-1 truncate text-xs text-muted">{current.file.name}</p>}
+      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-canvas">
+        <div className="h-full rounded-full bg-acid transition-[width] duration-300" style={{ width: `${Math.round(share * 100)}%` }} />
+      </div>
+      <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted">
+        <span className="truncate">{[copies && `${copies} ${copies === 1 ? "copy" : "copies"} found`, stored && `${stored} already stored`, failed && `${failed} failed`].filter(Boolean).join(" · ") || "\u00a0"}</span>
+        <Link to="/upload" className="shrink-0 font-medium text-acid hover:underline">View queue</Link>
+      </div>
+    </div>
+  );
+}
+
 /** Drop photos anywhere in the window to upload them. */
 function DropAnywhere() {
   const { add } = useUploads();
@@ -40,6 +83,7 @@ function DropAnywhere() {
     const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
     const enter = (e: DragEvent) => { if (hasFiles(e)) { depth.current += 1; setActive(true); } };
     const leave = () => { depth.current = Math.max(0, depth.current - 1); if (!depth.current) setActive(false); };
+    const reset = () => { depth.current = 0; setActive(false); }; // drag cancelled, or the window lost focus
     const over = (e: DragEvent) => { if (hasFiles(e)) e.preventDefault(); };
     const drop = (e: DragEvent) => {
       depth.current = 0;
@@ -48,16 +92,19 @@ function DropAnywhere() {
       e.preventDefault();
       const files = Array.from(e.dataTransfer?.files ?? []);
       if (!files.length) return;
-      void add(files).then(({ queued, stored }) => {
-        if (queued) toast(`Uploading ${queued} ${queued === 1 ? "photo" : "photos"}`);
-        if (stored) toast(`${stored} already stored, not uploaded again. See the Upload page.`);
+      void add(files).then(({ stored }) => {
+        if (stored) toast(`${stored} already stored, not uploaded again`);
       });
     };
     window.addEventListener("dragenter", enter);
     window.addEventListener("dragleave", leave);
     window.addEventListener("dragover", over);
     window.addEventListener("drop", drop);
+    window.addEventListener("dragend", reset);
+    window.addEventListener("blur", reset);
     return () => {
+      window.removeEventListener("dragend", reset);
+      window.removeEventListener("blur", reset);
       window.removeEventListener("dragenter", enter);
       window.removeEventListener("dragleave", leave);
       window.removeEventListener("dragover", over);
@@ -82,7 +129,7 @@ function BackToTop() {
   if (!show) return null;
   return (
     <button onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} aria-label="Back to top"
-      className="pop-in focus-ring fixed bottom-24 right-4 z-30 grid h-11 w-11 sm:bottom-6 sm:right-6 place-items-center rounded-full border border-line bg-raised shadow-xl hover:bg-[#20252c]">
+      className="pop-in focus-ring fixed bottom-36 right-4 z-30 grid h-11 w-11 sm:bottom-6 sm:right-6 place-items-center rounded-full border border-line bg-raised shadow-xl hover:bg-[#20252c]">
       <ArrowUp className="h-5 w-5" />
     </button>
   );
@@ -209,6 +256,7 @@ export function Layout({ children, showLogout }: { children: ReactNode; showLogo
         <div className="mx-auto max-w-6xl">{children}</div>
       </main>
       <DropAnywhere />
+      <UploadDock />
       <BackToTop />
     </div>
   );

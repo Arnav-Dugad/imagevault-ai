@@ -139,10 +139,20 @@ def test_merge_and_split_people_by_hand(client):
     assert sorted(p["photos"] for p in client.get("/api/people").json()) == [1, 3]
 
 
-def text_photo(words: str) -> bytes:
-    image = Image.new("RGB", (900, 400), "white")
+def text_photo(words: str, bottom: str = "", photo: str | None = None) -> bytes:
+    """A picture with text on it. With `photo` and `bottom`, a meme: captions at the top and the bottom."""
     from PIL import ImageDraw, ImageFont
-    ImageDraw.Draw(image).text((60, 150), words, fill="black", font=ImageFont.load_default(size=72))
+
+    if photo:
+        image = Image.open(ASSETS / photo).convert("RGB").resize((900, 700))
+    else:
+        image = Image.new("RGB", (900, 400), "white")
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default(size=64 if photo else 40)
+    style = {"fill": "white", "stroke_width": 4, "stroke_fill": "black"} if photo else {"fill": "black"}
+    draw.text((40, 30 if photo else 120), words, font=font, **style)
+    if bottom:
+        draw.text((40, image.height - 110 if photo else 220), bottom, font=font, **style)
     buffer = io.BytesIO()
     image.save(buffer, "JPEG", quality=92)
     return buffer.getvalue()
@@ -153,9 +163,42 @@ def test_text_in_photos_is_searchable(client):
     upload(client, "landmark.jpg")
     intelligence.process_pending()
 
-    assert "paradise" in client.get(f"/api/photos/{sign}").json()["text"]
+    assert client.get(f"/api/photos/{sign}").json()["text"] == "HOTEL PARADISE"  # capitals and spaces kept
     assert [p["id"] for p in client.get("/api/photos?search=paradise").json()["items"]] == [sign]
-    assert [p["id"] for p in client.get("/api/photos?search=hotel paradise").json()["items"]] == [sign]
+    found = client.get("/api/photos?search=hotel paradise").json()["items"]
+    assert [p["id"] for p in found] == [sign]
+    assert len(found[0]["highlights"]) == 2  # both words are outlined on the thumbnail
+
+
+def test_phone_numbers_dates_and_prices_in_photos(client):
+    bill = upload(client, "bill.jpg", text_photo("Call +91 98765 43210", "Total Rs 450.00  26/01/2026"))
+    intelligence.process_pending()
+
+    found = client.get(f"/api/photos/{bill}").json()["found"]
+    assert found["phones"][0]["dial"] == "+919876543210"
+    assert found["dates"][0]["iso"] == "2026-01-26"
+    assert found["prices"][0]["text"].endswith("450.00")
+
+
+def test_album_name_suggestions(client):
+    ids = [upload(client, f"goa-{i}.jpg", text_photo(f"WELCOME TO GOA {i}")) for i in (1, 2)]
+    intelligence.process_pending()
+
+    names = client.post("/api/albums/suggest", json={"ids": ids}).json()["names"]
+    assert names[0] == "Goa"  # a word written in both photos
+    assert client.post("/api/albums/suggest", json={"ids": []}).json() == {"names": []}
+
+
+def test_memes_and_forwarded_images(client):
+    meme = upload(client, "meme.jpg", text_photo("MONDAY MORNING", "BEFORE THE DEMO", photo="landmark.jpg"))
+    forwarded = upload(client, "IMG-20251024-WA0007.jpg", (ASSETS / "person-b.jpg").read_bytes())
+    intelligence.process_pending()
+
+    albums = intelligence.auto_albums()
+    assert meme in albums["memes"] and forwarded in albums["forwarded"]
+    offered = {i["photo"]["id"]: i for i in client.get("/api/cleanup").json()["items"]}
+    assert offered[meme]["reason"] == "Meme" and not offered[meme]["suggested"]
+    assert offered[forwarded]["reason"] == "Forwarded image" and not offered[forwarded]["suggested"]
 
 
 def test_laptop_worker_sends_its_results_over_https(client):
@@ -185,7 +228,8 @@ def test_hindi_and_tamil_text_is_read_and_searchable(client):
     intelligence.process_pending()
 
     words = client.get(f"/api/photos/{board}").json()["words"]
-    assert {w["text"] for w in words} == {"रेलवेस्टेशन", "சென்னைமத்திய"}
+    text = "".join(w["text"] for w in words)
+    assert "रेलवे" in text and "சென்னை" in text
     assert all(0 <= v <= 1 for w in words for v in w["box"])  # where each word is, for highlighting
     for query in ("स्टेशन", "சென்னை"):
         assert [p["id"] for p in client.get("/api/photos", params={"search": query}).json()["items"]] == [board]

@@ -1,5 +1,19 @@
 # Changelog
 
+## 3.8.0 (2026-10-25)
+
+- **Telugu text** is read too, next to English, Hindi and Tamil.
+- **Better English reading:** PaddleOCR's reader keeps capitals, spaces and punctuation, is twice as fast and much smaller than the old one.
+- **Phone numbers, dates, prices, emails and links** are picked out of the text and shown as chips: tap to call, email or open, or click to copy.
+- **Copy the text** of a photo with one click.
+- **Matching words are outlined on thumbnails** in search results, not just in the photo viewer.
+- **Memes and Forwarded** albums (WhatsApp, Telegram and Signal images, or heavily compressed images without camera details). Both are offered, unticked, in the "Free up" list.
+- **Album name suggestions** from the words in the photos, what they show and when they were taken.
+- Fixed: dropping photos on the Upload page left the "Drop to upload" overlay on top of the queue.
+- New upload panel in the corner while photos upload, on every page and on phones.
+- Long word lists in the viewer are shortened, with "Show all".
+- Demo photos: 97, with a Telugu station board, memes and WhatsApp-style forwards. 40 automated tests.
+
 ## 3.7.2 (2026-10-25)
 
 - Fixed: a photo rejected from an outdated laptop worker now goes back in the queue instead of being marked failed, and each worker run has its own name, so two workers on one laptop can't hide each other's stuck photos.

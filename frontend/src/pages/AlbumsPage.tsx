@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, FolderOpen, ImageOff, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
+import { NameSuggestions } from "../components/NameSuggestions";
 import { PhotoBrowser } from "../components/PhotoBrowser";
 import { Button, ConfirmDialog, EmptyState, ErrorNote, PageHeading, Spinner } from "../components/ui";
 import { api } from "../lib/api";
@@ -69,7 +70,13 @@ export function AlbumPage() {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const [photoIds, setPhotoIds] = useState<string[]>([]); // for name suggestions while renaming
   const auto = id.startsWith("auto:");
+  useEffect(() => {
+    if (!editing) return;
+    api<{ items: { id: string }[] }>(`/photos?album=${encodeURIComponent(id)}&limit=200`)
+      .then((r) => setPhotoIds(r.items.map((p) => p.id))).catch(() => setPhotoIds([]));
+  }, [editing, id]);
 
   const load = useCallback(() => {
     api<{ mine: Album[]; auto: Album[] }>("/albums").then((all) => {
@@ -97,8 +104,11 @@ export function AlbumPage() {
       <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           {editing
-            ? <form onSubmit={rename} className="flex gap-2"><input autoFocus value={name} onChange={(e) => setName(e.target.value)} maxLength={100}
-                onKeyDown={(e) => e.key === "Escape" && setEditing(false)} className="focus-ring h-11 rounded-xl border border-line bg-canvas px-3 text-2xl font-semibold" /><Button type="submit">Save</Button></form>
+            ? <div className="space-y-2">
+                <form onSubmit={rename} className="flex gap-2"><input autoFocus value={name} onChange={(e) => setName(e.target.value)} maxLength={100}
+                  onKeyDown={(e) => e.key === "Escape" && setEditing(false)} className="focus-ring h-11 rounded-xl border border-line bg-canvas px-3 text-2xl font-semibold" /><Button type="submit">Save</Button></form>
+                <NameSuggestions ids={photoIds} onPick={setName} />
+              </div>
             : <h1 className="flex items-center gap-2 text-3xl font-semibold tracking-tight sm:text-4xl">{auto && <Sparkles className="h-6 w-6 text-sky-300" />}{album?.name ?? "Album"}</h1>}
           <p className="mt-2 text-sm text-muted">{total ?? "…"} {total === 1 ? "photo" : "photos"}{auto && " · sorted by the AI"}</p>
         </div>
