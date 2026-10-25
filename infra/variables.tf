@@ -23,7 +23,13 @@ variable "alert_email" {
 variable "monthly_budget" {
   description = "Monthly budget in your billing currency (USD for Azure for Students); alerts at 50%, 80% and 100%"
   type        = number
-  default     = 10
+  default     = 5
+}
+
+variable "laptop_worker" {
+  description = "Let the computer running Terraform run the AI worker (python -m app.worker): opens the database to its IP address and gives your Azure account access to the photos"
+  type        = bool
+  default     = true
 }
 
 variable "create_budget" {

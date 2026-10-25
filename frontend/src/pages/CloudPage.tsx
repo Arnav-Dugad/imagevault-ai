@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Activity, ArrowDown, ArrowRight, Cloud, Database, ExternalLink, GitBranch, Globe, HardDrive, Layers, RefreshCw, Server, Sparkles, Wallet, type LucideIcon } from "lucide-react";
+import { Activity, ArrowDown, ArrowRight, Cloud, Database, ExternalLink, GitBranch, Globe, HardDrive, Laptop, Layers, RefreshCw, Server, Sparkles, Wallet, type LucideIcon } from "lucide-react";
 import { Button, PageHeading, Spinner } from "../components/ui";
 import { useSystem } from "../lib/system";
 import { cn, formatDate } from "../lib/utils";
@@ -49,7 +49,7 @@ function Box({ icon: Icon, title, subtitle, accent }: { icon: LucideIcon; title:
 }
 
 /** A simple picture of how the pieces connect. */
-function Architecture() {
+function Architecture({ laptopOnline }: { laptopOnline: boolean }) {
   return (
     <section className="panel overflow-hidden p-5 sm:p-6">
       <h2 className="font-semibold">Architecture</h2>
@@ -59,7 +59,7 @@ function Architecture() {
         <div className="grid place-items-center text-muted"><ArrowRight className="hidden h-5 w-5 lg:block" /><ArrowDown className="h-5 w-5 lg:hidden" /></div>
         <div className="rounded-2xl border border-dashed border-lilac/30 p-3 sm:p-4">
           <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-lilac">Microsoft Azure · resource group imagevault-rg</p>
-          <Box icon={Server} title="App Service" subtitle="Python FastAPI · HTTPS · managed identity · free AI models (CLIP, YuNet, SFace)" accent />
+          <Box icon={Server} title="App Service" subtitle={`Python FastAPI · HTTPS · managed identity${laptopOnline ? " · AI on standby" : " · free AI models"}`} accent />
           <div className="my-2 grid place-items-center text-muted"><ArrowDown className="h-4 w-4" /></div>
           <div className="grid gap-2 sm:grid-cols-3">
             <Box icon={Database} title="PostgreSQL" subtitle="Photo details" />
@@ -67,6 +67,18 @@ function Architecture() {
             <Box icon={Activity} title="App Insights" subtitle="Logs & metrics" />
           </div>
         </div>
+      </div>
+      <div className="mt-3 grid items-center gap-3 lg:grid-cols-[180px_auto_1fr]">
+        <div className={cn("flex items-center gap-3 rounded-xl border px-4 py-3 transition", laptopOnline ? "border-sky-300/50 bg-sky-300/[.07]" : "border-dashed border-line opacity-70")}>
+          <Laptop className={cn("h-5 w-5 shrink-0", laptopOnline ? "text-sky-300" : "text-muted")} />
+          <div className="min-w-0"><p className="text-sm font-semibold leading-tight">Your laptop</p><p className="text-xs text-muted">{laptopOnline ? "Edge AI · online" : "Edge AI · offline"}</p></div>
+        </div>
+        <div className="grid place-items-center text-muted"><ArrowRight className="hidden h-5 w-5 lg:block" /><ArrowDown className="h-5 w-5 lg:hidden" /></div>
+        <p className="text-sm leading-6 text-muted">
+          {laptopOnline
+            ? <>Your laptop is analysing new photos (people, smart search, same subject) and saving the results to PostgreSQL and Blob Storage. The free App Service plan stays light.</>
+            : <>Run <code className="text-ink">python -m app.worker</code> on your laptop to do the AI work there ("edge computing"). While it's off, App Service does it.</>}
+        </p>
       </div>
     </section>
   );
@@ -111,7 +123,7 @@ export function CloudPage() {
       {system.services.map((service, i) => <ServiceCard key={service.id} service={service} index={i} />)}
     </div>
 
-    <div className="mt-6"><Architecture /></div>
+    <div className="mt-6"><Architecture laptopOnline={system.ai_runs_on === "laptop"} /></div>
 
     <h2 className="mb-3 mt-8 text-lg font-semibold">DevOps</h2>
     <div className="grid gap-3 lg:grid-cols-3">
@@ -125,7 +137,7 @@ export function CloudPage() {
         All Azure resources are defined in code and created with one command. <a className={link} href={`${REPO}/tree/main/infra`} target="_blank" rel="noreferrer">View infra/ <ExternalLink className="h-3 w-3" /></a>
       </DevOpsCard>
       <DevOpsCard icon={Wallet} title="Cost control · Budget alerts">
-        A monthly Azure budget emails an alert at 50% and 80% of spending, and when spending is forecast to reach 100%.
+        Free tiers everywhere (App Service F1, PostgreSQL B1ms, capped logs, AI that runs on our own machines). A US$5 monthly budget emails an alert at 50% and 80% of spending, and when it's forecast to reach 100%.
       </DevOpsCard>
     </div>
   </>;

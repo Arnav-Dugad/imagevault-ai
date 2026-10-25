@@ -4,6 +4,7 @@ photos  - one row per uploaded photo, plus its AI description (CLIP numbers)
 matches - pairs of photos that are copies ("exact"), look alike ("similar") or show the same subject ("subject")
 faces   - faces found in photos, each linked to a person
 people  - groups of faces that belong to the same person
+workers - which computers are running the AI right now
 """
 
 from contextlib import contextmanager
@@ -24,6 +25,7 @@ from sqlalchemy import (
     inspect,
     text,
 )
+from sqlalchemy.exc import DatabaseError
 from sqlalchemy.pool import NullPool
 
 from app.config import database_url
@@ -44,6 +46,15 @@ photos = Table(
     Column("uploaded_at", String(40), nullable=False),  # ISO 8601 text, sorts correctly
     Column("clip", LargeBinary, nullable=True),          # 512 float32 numbers from CLIP
     Column("ai_status", String(12), nullable=True, index=True),  # NULL = waiting, 'processing', 'done', 'failed'
+    Column("ai_worker", String(100), nullable=True),              # which worker is analysing it
+)
+
+# AI workers (the website on Azure, or your laptop) report here every few seconds.
+workers = Table(
+    "workers", metadata,
+    Column("name", String(100), primary_key=True),
+    Column("kind", String(10), nullable=False),  # 'cloud' or 'laptop'
+    Column("last_seen", String(40), nullable=False),
 )
 
 matches = Table(
@@ -101,7 +112,10 @@ def connect():
 def init_db() -> None:
     """Create missing tables, and add columns that newer versions introduced to existing tables."""
     eng = engine()
-    metadata.create_all(eng)
+    try:
+        metadata.create_all(eng)
+    except DatabaseError:  # another process (the website or a laptop worker) created them at the same moment
+        metadata.create_all(eng)
     existing = {table: {c["name"] for c in inspect(eng).get_columns(table)} for table in metadata.tables}
     with eng.begin() as conn:
         for table in metadata.sorted_tables:

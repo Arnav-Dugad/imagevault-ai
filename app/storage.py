@@ -8,7 +8,7 @@ Files are named by the photo's SHA-256 fingerprint, so identical photos share on
 from functools import lru_cache
 from pathlib import Path
 
-from app.config import data_dir, env
+from app.config import data_dir, env, running_on_azure
 
 
 class LocalStorage:
@@ -42,9 +42,11 @@ class AzureBlobStorage:
         if connection_string:
             service = BlobServiceClient.from_connection_string(connection_string)
         else:
-            from azure.identity import DefaultAzureCredential  # the App Service's managed identity
+            from azure.identity import DefaultAzureCredential
 
-            service = BlobServiceClient(account_url, credential=DefaultAzureCredential())
+            # On Azure this uses the App Service's managed identity; on a laptop, your "az login" account.
+            credential = DefaultAzureCredential(exclude_managed_identity_credential=not running_on_azure())
+            service = BlobServiceClient(account_url, credential=credential)
         self.container = service.get_container_client(container_name)
         self.description = f"{service.account_name} / {container_name}"
 

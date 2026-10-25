@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.2.0 (2026-10-25)
+
+**AI on your laptop, Azure for everything else** (edge computing), plus guards that keep Azure credit use at about zero.
+
+- New `python -m app.worker`: your laptop analyses new photos for the live website, connecting straight to the Azure database and Blob Storage (about 10× faster than the free cloud plan).
+- Laptop first, cloud as backup: while the laptop is online the website leaves new photos to it, and it takes over automatically about 20 seconds after the laptop stops. Heartbeats and atomic claims mean no photo is analysed twice.
+- Terraform: a database firewall rule for your IP address and Blob access for your `az login` account (`laptop_worker = true`), plus a `laptop_worker_env` output for the worker's settings.
+- Cost guards: hard daily caps on Log Analytics and Application Insights (0.1 GB/day), and the budget alert lowered to US$5. The deployment guide has a new "Keeping your credit safe" section, including pausing the database.
+- The Cloud page shows whether the AI runs on your laptop or in App Service, and the architecture diagram includes the laptop.
+- 5 new tests for the laptop/cloud hand-over (19 in total).
+
 ## 3.1.0 (2026-10-22)
 
 **Free AI recognition**, running inside the app: no paid AI service, nothing sent to third parties.
