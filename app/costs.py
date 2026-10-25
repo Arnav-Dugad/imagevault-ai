@@ -11,6 +11,7 @@ day, and the API allows a limited number of calls.
 import json
 import threading
 import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 
@@ -69,8 +70,15 @@ def month_to_date() -> dict:
         value = {"configured": True, "budget": budget, "error": None, **_query(scope)}
         lifetime = CACHE_SECONDS
     except Exception as exc:  # cost data is nice to have; never break the page
-        message = str(exc).splitlines()[0][:200]
-        value = {"configured": True, "budget": budget, "error": f"Could not read costs: {message}"}
+        if cached and cached["value"].get("error") is None:
+            value = cached["value"]  # keep showing the last good numbers
+        elif isinstance(exc, urllib.error.HTTPError) and exc.code == 429:
+            value = {"configured": True, "budget": budget,
+                     "error": "Azure's cost service is busy right now (it limits how often costs can be read). "
+                              "This card refreshes by itself in a few minutes."}
+        else:
+            message = str(exc).splitlines()[0][:200]
+            value = {"configured": True, "budget": budget, "error": f"Could not read costs: {message}"}
         lifetime = ERROR_CACHE_SECONDS
     value["updated_at"] = datetime.now(timezone.utc).isoformat()
     with _lock:

@@ -12,6 +12,7 @@ Set IMAGEVAULT_AI=off to turn all of this off.
 
 import hashlib
 import logging
+import os
 import threading
 import urllib.request
 from dataclasses import dataclass
@@ -24,6 +25,7 @@ from PIL import Image
 from app.config import data_dir, env
 
 log = logging.getLogger("imagevault")
+os.environ.setdefault("OPENCV_LOG_LEVEL", "ERROR")  # hide OpenCV's technical warnings in the worker window
 
 _CLIP = "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/d15189d7028b43f1d3e65039190477f6af591c2a"
 _ZOO = "https://github.com/opencv/opencv_zoo/raw/48b10fa505aeb51fbd127fc60a5c660040e823b7/models"

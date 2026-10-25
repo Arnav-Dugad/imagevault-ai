@@ -186,6 +186,26 @@ resource "azurerm_federated_identity_credential" "github_main" {
   subject                   = "repo:${var.github_repository}:ref:refs/heads/main"
 }
 
+# GitHub can also identify the repository with its permanent ID numbers ("owner@123/repo@456"),
+# which still match after a rename. Trust that form too, looking the numbers up from GitHub.
+data "http" "github_repository" {
+  url             = "https://api.github.com/repos/${var.github_repository}"
+  request_headers = { Accept = "application/vnd.github+json" }
+}
+
+locals {
+  github_repo          = jsondecode(data.http.github_repository.response_body)
+  github_repo_with_ids = "${local.github_repo.owner.login}@${local.github_repo.owner.id}/${local.github_repo.name}@${local.github_repo.id}"
+}
+
+resource "azurerm_federated_identity_credential" "github_main_ids" {
+  name                      = "github-main-branch-ids"
+  user_assigned_identity_id = azurerm_user_assigned_identity.github.id
+  audience                  = ["api://AzureADTokenExchange"]
+  issuer                    = "https://token.actions.githubusercontent.com"
+  subject                   = "repo:${local.github_repo_with_ids}:ref:refs/heads/main"
+}
+
 resource "azurerm_role_assignment" "github_deploys_website" {
   scope                = azurerm_resource_group.main.id
   role_definition_name = "Website Contributor"
