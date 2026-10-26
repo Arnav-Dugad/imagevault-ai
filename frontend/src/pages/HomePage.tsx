@@ -10,9 +10,9 @@ import type { Stats } from "../types";
 
 function StatCard({ icon: Icon, label, value, note, index }: { icon: LucideIcon; label: string; value: string; note: string; index: number }) {
   return (
-    <div className="pop-in panel p-5" style={{ animationDelay: `${index * 60}ms`, animationFillMode: "backwards" }}>
+    <div className="pop-in panel p-4 sm:p-5" style={{ animationDelay: `${index * 60}ms`, animationFillMode: "backwards" }}>
       <div className="flex items-center gap-2 text-sm text-muted"><Icon className="h-4 w-4 text-acid" />{label}</div>
-      <p className="mt-3 text-3xl font-semibold tracking-tight">{value}</p>
+      <p className="mt-2 text-2xl font-semibold tracking-tight sm:mt-3 sm:text-3xl">{value}</p>
       <p className="mt-1 text-xs text-muted">{note}</p>
     </div>
   );
@@ -53,9 +53,9 @@ export function HomePage() {
   const shortcut = "focus-ring group flex items-center justify-between gap-3 rounded-2xl border p-4 transition";
   return <>
     <PageHeading title="Home" action={uploadButton} />
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      <StatCard index={0} icon={Images} label="Photos" value={stats.photos.toLocaleString()} note={formatBytes(stats.total_bytes)} />
-      <StatCard index={1} icon={stats.storage === "azure" ? Cloud : HardDrive} label="Storage used" value={formatBytes(stats.stored_bytes)} note={stats.storage === "azure" ? "Azure Blob Storage" : "Local folder"} />
+    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+      <StatCard index={0} icon={Images} label="Photos" value={stats.photos.toLocaleString()} note={`${formatBytes(stats.total_bytes)} with copies`} />
+      <StatCard index={1} icon={stats.storage === "azure" ? Cloud : HardDrive} label="Photo files" value={formatBytes(stats.stored_bytes)} note="Each file stored once" />
       <StatCard index={2} icon={Copy} label="Exact copies" value={stats.exact_copies.toLocaleString()} note={stats.saved_bytes > 0 ? `${formatBytes(stats.saved_bytes)} saved` : "Stored once"} />
       <StatCard index={3} icon={Sparkles} label="Similar" value={stats.similar_pairs.toLocaleString()} note="Resized or edited" />
     </div>
@@ -84,7 +84,7 @@ export function HomePage() {
 
     <div className="mb-4 mt-10 flex items-center justify-between">
       <h2 className="text-lg font-semibold">Recent</h2>
-      <Link to="/photos" className="focus-ring rounded-lg text-sm text-muted hover:text-ink">All photos →</Link>
+      <Link to="/photos" className="focus-ring -my-1.5 rounded-lg py-1.5 text-sm text-muted hover:text-ink">All photos →</Link>
     </div>
     <PhotoGrid photos={stats.recent} onOpen={setOpenId} />
     {openId && <PhotoViewer id={openId} ids={stats.recent.map((p) => p.id)} onClose={() => setOpenId(null)} onDeleted={load} onChanged={load} />}

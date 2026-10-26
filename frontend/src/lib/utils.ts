@@ -1,7 +1,13 @@
+import { useEffect } from "react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
 export function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
+
+/** The browser tab's title for a page about one thing (an album, a person), once its name is known. */
+export function usePageTitle(title: string | undefined) {
+  useEffect(() => { if (title) document.title = `${title} · ImageVault`; }, [title]);
+}
 
 export function formatBytes(bytes: number): string {
   if (!bytes) return "0 B";

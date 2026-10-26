@@ -1099,8 +1099,11 @@ def person_details(person_id: str):
             "ORDER BY uploaded_at DESC"), {"id": person_id}).scalars().all()
         photos = _photos_by_id(conn, list(ids))
         cover = _cover_faces(conn).get(person_id)
-        faces = conn.execute(text("SELECT id, photo_id FROM faces WHERE person_id = :id"),
+        faces = conn.execute(text("SELECT id, photo_id, x, y, w, h FROM faces WHERE person_id = :id"),
                              {"id": person_id}).mappings().all()
+    centres = {f["photo_id"]: [round(f["x"] + f["w"] / 2, 3), round(f["y"] + f["h"] / 2, 3)] for f in faces}
+    for photo in photos:
+        photo["focus"] = centres.get(photo["id"])  # thumbnails are cropped around this person's face
     return {**dict(person), "image_url": cover, "photos": photos,
             "faces": [{**dict(f), "image_url": f"/api/faces/{f['id']}/image"} for f in faces]}
 

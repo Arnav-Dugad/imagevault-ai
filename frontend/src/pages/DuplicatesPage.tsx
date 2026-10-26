@@ -29,7 +29,7 @@ function GroupRow({ group, onOpen, onDelete, onCompare, action }: {
           const sharpest = photo.id === group.sharpest_id;
           return (
             <div key={photo.id} className={cn("w-44 shrink-0 overflow-hidden rounded-xl border bg-canvas/60 sm:w-52", kind === "keep" || sharpest ? "border-acid/40" : "border-line")}>
-              <button onClick={() => onOpen(photo.id)} className="focus-ring relative block w-full">
+              <button onClick={() => onOpen(photo.id)} aria-label={`Open ${photo.filename}`} className="focus-ring relative block w-full">
                 <PhotoThumb photo={photo} className="aspect-[4/3] w-full" />
                 <span className="absolute left-2 top-2 flex flex-wrap gap-1">
                   {kind !== "burst" && <MatchBadge kind={kind} similarity={similarity} />}

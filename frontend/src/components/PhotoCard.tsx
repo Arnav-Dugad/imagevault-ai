@@ -26,6 +26,7 @@ export function PhotoThumb({ photo, className }: { photo: Photo; className?: str
   const [loaded, setLoaded] = useState(false);
   if (failed) return <div className={cn("grid place-items-center bg-raised text-muted", className)}><ImageOff className="h-5 w-5" /></div>;
   return <img src={photo.thumb_url} alt={photo.filename} loading="lazy" onError={() => setFailed(true)} onLoad={() => setLoaded(true)}
+    style={photo.focus ? { objectPosition: `${photo.focus[0] * 100}% ${photo.focus[1] * 100}%` } : undefined}
     className={cn("bg-raised object-cover transition-[filter,opacity] duration-500", loaded ? "opacity-100 blur-0" : "opacity-60 blur-md", className)} />;
 }
 
@@ -62,7 +63,7 @@ export function PhotoCard({ photo, onOpen, selecting, selected, onSelect, compac
       </button>
       {onSelect && (
         <button onClick={(e) => { e.stopPropagation(); onSelect(e); }} aria-label={selected ? "Unselect" : "Select"} aria-pressed={selected}
-          className={cn("focus-ring absolute right-2 top-2 grid h-6 w-6 place-items-center rounded-full border-2 transition",
+          className={cn("focus-ring absolute right-2 top-2 grid h-6 w-6 place-items-center rounded-full border-2 transition max-sm:h-8 max-sm:w-8 [@media(hover:none)]:opacity-100",
             selected ? "border-acid bg-acid text-[#11150c]" : "border-white/80 bg-black/30 text-transparent opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
             selecting && "opacity-100")}>
           <Check className="h-3.5 w-3.5" strokeWidth={3} />

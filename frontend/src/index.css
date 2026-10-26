@@ -84,10 +84,14 @@ body {
 .shake { animation: shake .45s cubic-bezier(.36, .07, .19, .97) both; }
 @keyframes flash-ok { from { background-color: rgb(185 243 106 / .2); } to { background-color: transparent; } }
 .flash-ok { animation: flash-ok 1.8s ease-out; }
+/* The phone menu slides in from the left */
+@keyframes slide-in { from { transform: translateX(-100%); } }
+.slide-in { animation: slide-in .22s cubic-bezier(.22, 1, .36, 1); }
 /* Bars (like a shop's share of the spending) fill in from the left */
 @keyframes grow-x { from { transform: scaleX(0); } }
 .grow-x { animation: grow-x .6s cubic-bezier(.22, 1, .36, 1) backwards; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  .scan-line { animation: none !important; top: 50%; } /* a still line instead of a fast flicker */
 }
