@@ -4,7 +4,7 @@
 **Project:** ImageVault, a cloud photo vault with duplicate detection  
 **Cloud provider:** Microsoft Azure (Azure for Students)  
 **Repository:** https://github.com/Arnav-Dugad/imagevault-ai  
-**Version:** 3.8.0
+**Version:** 3.9.0
 
 ---
 
@@ -12,7 +12,7 @@
 
 ImageVault is a web application for storing photos in the cloud. It automatically finds **exact duplicates** (the same file uploaded more than once) and **similar photos** (resized, compressed or edited copies). Users upload photos in the browser, review matching photos side by side, and delete the copies they don't need.
 
-It also includes **free AI recognition** that runs inside the application, with no paid AI service: it recognises the **same person** across photos (People), finds photos by **description** (smart search), sorts photos into **automatic albums** (Beach, Food & drink, Pets and others), picks the **sharpest photo in a burst**, makes **text in photos searchable** in English, Hindi, Tamil and Telugu (OCR) and picks out phone numbers, dates and prices, suggests the **biggest space-wasters** to delete, and suggests photos of the **same subject taken differently**. Users can correct the AI by merging or splitting people by hand, and can edit many photos at once (favourite, add to an album, download as a ZIP, delete).
+It also includes **free AI recognition** that runs inside the application, with no paid AI service: it recognises the **same person** across photos (People), finds photos by **description** (smart search), sorts photos into **automatic albums** (Beach, Food & drink, Pets and others), picks the **sharpest photo in a burst**, makes **text in photos searchable** in English, Hindi, Tamil, Telugu and Kannada (OCR), picks out phone numbers, dates, prices and QR codes, turns **receipts into a spending table** grouped by shop, suggests the **biggest space-wasters** to delete, and suggests photos of the **same subject taken differently**. Users can correct the AI by merging or splitting people by hand, and can edit many photos at once (favourite, add to an album, download as a ZIP, delete).
 
 The project's main focus is **cloud architecture and DevOps**, as the guidelines require:
 
@@ -152,8 +152,8 @@ The frontend is a single-page app that the backend serves as static files, so on
 |---|---|
 | `POST /api/photos` | Upload one photo (multipart). Returns the photo and its best match |
 | `POST /api/photos/check` | Which SHA-256 fingerprints (worked out in the browser) are already stored, so the upload page can warn before uploading a copy |
-| `GET /api/photos?search=&smart=&filter=&album=&sort=&date_from=&date_to=&offset=&limit=` | Paginated photo list. Search by file name, or by description when `smart=true`; filter all / duplicates / favorites; one album; sort by upload date, date taken, size or name; date range on the camera date |
-| `GET /api/photos/{id}` | Photo details, all of its matches, its albums, the faces/people in it, and the words read from it with their positions |
+| `GET /api/photos?search=&smart=&filter=&album=&sort=&date_from=&date_to=&offset=&limit=` | Paginated photo list. Search by file name, or by description when `smart=true`; filter all / duplicates / favorites / text (only photos with text); one album; sort by upload date, date taken, size or name; date range on the camera date |
+| `GET /api/photos/{id}` | Photo details, all of its matches, its albums, the faces/people in it, the words read from it with their positions, the phone numbers, dates, prices, emails and links found in them, its QR codes, and the shop, date and total if it is a receipt |
 | `PATCH /api/photos/{id}` | Rename, favourite / unfavourite |
 | `POST /api/photos/batch` | One action on many photos: delete, favourite, unfavourite, add to album (or a new album), remove from album |
 | `GET /api/zip?ids=` | Download up to 100 photos as one ZIP file |
@@ -164,6 +164,8 @@ The frontend is a single-page app that the backend serves as static files, so on
 | `GET /api/duplicates` | Duplicate groups with the suggested best copy |
 | `POST /api/duplicates/remove-exact` | Remove all exact copies, keeping the first upload of each |
 | `GET /api/related` | AI "same subject, different shot" groups (never deleted automatically) |
+| `GET /api/memes` | The same meme picture with different captions, grouped by the hash of its middle band |
+| `GET /api/receipts` | Spending read from receipts: shop, date and total of each, grouped by shop, with totals per currency |
 | `GET /api/bursts` | Photos taken seconds apart, sharpest first |
 | `GET /api/cleanup` | The biggest space-wasters: lower-quality copies, blurrier burst shots and very blurry photos, biggest first |
 | `GET /api/people`, `GET /api/people/{id}`, `PUT /api/people/{id}` | Recognised people, their photos and faces, renaming |
@@ -208,6 +210,8 @@ erDiagram
         text ocr_search "the text, lowercase without spaces"
         int jpeg_quality "estimated; low for forwarded images"
         boolean camera "still has its camera details"
+        text qr_codes "QR codes: text and position (JSON)"
+        varchar core_hash "hash of the middle band, for memes"
         int ai_version "which analysis produced the results"
         bytea clip "512 float32 CLIP numbers"
         varchar ai_status "NULL | processing | done | failed"
@@ -332,12 +336,12 @@ The app is stateless: all data lives in PostgreSQL and Blob Storage. So moving f
 
 ### 5.8 Testing
 
-- **40 automated backend tests** (including `tests/test_worker.py`, 8 tests: the website leaves new photos to an online laptop, takes over when photos wait too long or no laptop is online, releases claims of silent workers, the switch keeps the AI on one side, "waiting for your laptop" is shown, the worker settings file is read, and the worker loop rests and stops when asked, as the tray icon does):
+- **44 automated backend tests** (including `tests/test_worker.py`, 8 tests: the website leaves new photos to an online laptop, takes over when photos wait too long or no laptop is online, releases claims of silent workers, the switch keeps the AI on one side, "waiting for your laptop" is shown, the worker settings file is read, and the worker loop rests and stops when asked, as the tray icon does):
   - `tests/test_app.py` (18 tests): upload/download, exact copies and storage deduplication including file deletion, resized/compressed/brightened copies, non-matches, grouping and best copy, bulk removal, invalid files, search/filter, health/cloud status, password protection and lockout, the cost card, camera-date filters and sorting, batch actions (favourite, album, ZIP download, delete), the sharpest photo in a group, storage usage, space saved and "delete everything", and the space-waster list and the "already stored" check.
-  - `tests/test_ai.py` (14 tests, real public-domain photos and made-up text): the same person recognised across photos but not confused with another person; a mirrored, cropped, recoloured shot grouped as "same subject" rather than as a copy; smart search finding the right photos, and nothing for an absent subject; automatic albums; a burst keeping its sharpest frame (exact copies are not a burst); merging and splitting people by hand; text in a photo found by search; Hindi and Tamil words read, located and found by search; smart search using the text in photos; the Documents and Screenshots albums; outlines in search results; phone numbers, dates and prices; album name suggestions; memes and forwarded images; the laptop worker's results sent over HTTPS and stored.
+  - `tests/test_ai.py` (18 tests, real public-domain photos and made-up text): the same person recognised across photos but not confused with another person; a mirrored, cropped, recoloured shot grouped as "same subject" rather than as a copy; smart search finding the right photos, and nothing for an absent subject; automatic albums; a burst keeping its sharpest frame (exact copies are not a burst); merging and splitting people by hand; text in a photo found by search; Hindi and Tamil words read, located and found by search; smart search using the text in photos; the Documents and Screenshots albums; outlines in search results; phone numbers, dates and prices; album name suggestions; memes and forwarded images; receipts read and grouped by shop, including a total printed before its label; the "Text" filter; QR codes read; the same meme picture with different captions; the laptop worker's results sent over HTTPS and stored.
 - The same tests run in two modes in CI: SQLite + local folder, and PostgreSQL 16 + Azurite, so the cloud code paths are exercised on every push. The AI models are cached between runs.
 - Website: TypeScript type-checking, ESLint, production build.
-- Manual end-to-end check with the 97 demo photos (Sections 5.1, 5.9, 5.10, 5.11 and 5.12).
+- Manual end-to-end check with the 102 demo photos (Sections 5.1, 5.9, 5.10, 5.11 and 5.12).
 - **Live deployment check (2026-10-25)** on `https://imagevault-4g8kx.azurewebsites.net`:
   - `terraform apply` created all 19 resources;
   - the CD pipeline deployed and passed its smoke test;
@@ -356,7 +360,7 @@ The app is stateless: all data lives in PostgreSQL and Blob Storage. So moving f
 | Azure AI Face (verify/identify same person) | Rejected. Limited Access: only for customers managed by Microsoft; not available to students |
 | Azure AI Vision multimodal embeddings | Possible, but the free tier exists but is region-limited and capped per month; adds an external dependency |
 | PyTorch CLIP + face libraries (as in v1) | Rejected. About 2 GB of libraries; too heavy for the free App Service plan |
-| **Quantised ONNX models in the app** | **Chosen.** 235 MB of models, about 320 MB of memory, CPU only, free, works offline and locally |
+| **Quantised ONNX models in the app** | **Chosen.** 240 MB of models, about 320 MB of memory, CPU only, free, works offline and locally |
 
 **Design** (`app/ai.py`, `app/intelligence.py`):
 
@@ -406,7 +410,7 @@ The app is stateless: all data lives in PostgreSQL and Blob Storage. So moving f
 
 ### 5.12 Text in photos, documents and screenshots
 
-**Reading text (OCR)** (`ai.read_text`): the PP-OCRv3 detector (OpenCV Zoo) finds text regions; each is straightened with a perspective transform and read as a whole line by PaddleOCR readers (community ONNX conversions, Apache 2.0, pinned by commit and SHA-256): PP-OCRv5 English, which keeps capitals, spaces and punctuation, and PP-OCRv3 Hindi (Devanagari), Tamil and Telugu. The most confident reading wins; Indian-language readings only count if at least 80% of their letters are in that script with at least 3 different letters, and anything below 85% confidence is dropped. To keep the free plan fast, the Indian readers only try the 20 clearest regions, and not lines where English is 97% sure or found two real words. The reader reports where along the line each letter is, so each word is stored with its own box (`ocr_words`) for outlining. An earlier version used OpenCV's CRNN for English: it knew only a–z and 0–9, read one word at a time and was 34 MB; PaddleOCR's reader is better on every test photo, twice as fast, and 7.8 MB. Phone numbers, dates, prices, emails and links are then found with strict rules (`app/textinfo.py`).
+**Reading text (OCR)** (`ai.read_text`): the PP-OCRv3 detector (OpenCV Zoo) finds text regions; each is straightened with a perspective transform and read as a whole line by PaddleOCR readers (community ONNX conversions, Apache 2.0, pinned by commit and SHA-256): PP-OCRv5 English, which keeps capitals, spaces and punctuation, and PP-OCRv3 Hindi (Devanagari), Tamil, Telugu and Kannada. No ready ONNX file existed for Kannada, so PaddleOCR's official Kannada model was converted with `paddle2onnx` and published as a release file of this repository (pinned by SHA-256 like the others). Bengali has no PaddleOCR model at all, so it is not read. The most confident reading wins; Indian-language readings only count if at least 80% of their letters are in that script with at least 3 different letters, and anything below 85% confidence is dropped. To keep the free plan fast, the Indian readers only try the 20 clearest regions, and not lines where English is 97% sure or found two real words. The reader reports where along the line each letter is, so each word is stored with its own box (`ocr_words`) for outlining. An earlier version used OpenCV's CRNN for English: it knew only a–z and 0–9, read one word at a time and was 34 MB; PaddleOCR's reader is better on every test photo, twice as fast, and 7.8 MB. Phone numbers, dates, prices, emails and links are then found with strict rules (`app/textinfo.py`).
 
 **Search:** the normal search compares the text with spaces and punctuation removed (Unicode-safe, so Devanagari vowel signs are kept). Smart search adds up to 0.05 to a photo's CLIP score in proportion to how many words of the search are written in it, and always includes such photos.
 
@@ -414,7 +418,15 @@ The app is stateless: all data lives in PostgreSQL and Blob Storage. So moving f
 
 **Memes and forwarded images:** a meme has big caption text (≥ 5% of the height) both in the top and the bottom 30% of the photo and at most 30 words; a forwarded image is named like a WhatsApp/Telegram/Signal file, or is a JPEG ≤ 1600 px without camera details and with an estimated JPEG quality ≤ 70 (from its quantisation tables). **Album names** (`/api/albums/suggest`) come from a word written in several of the photos, the automatic album most of them are in, and their camera month or year.
 
-**Validation:** CLIP alone could not separate screenshots (a phone screenshot +0.023, a hiker photo +0.018), so the flatness rule was chosen; it selects exactly the 2 screenshots out of 97 photos, and the meme and forwarded rules each select exactly their 2. The document rule selects the receipt, the letter and the menu board, and none of the 9 official portraits (best 0.029).
+**Receipts** (`app/receipts.py`): a photo counts as a receipt if its text has a receipt word (total, GST, invoice, cash and others) and either a "total" line with an amount or at least two prices. The shop is the first of the top lines that is mostly letters and not a heading like "TAX INVOICE"; the date is the first date found (day first, as in India); the total is the amount on the last "total" line that is not a subtotal, on the line after it, or a bare amount on the line before it (the text reader often puts the right-hand column first). Dates and times are removed from that line first, and an amount with two decimals wins. Shops are grouped by their name without spaces or punctuation, so "Green Basket" and "GREEN BASKET." are one shop. The Receipts page shows the result next to each photo, so a wrong reading is easy to spot, and exports a CSV file.
+
+**QR codes:** OpenCV's `QRCodeDetector` reads every QR code in the photo (resized to at most 1600 px). The text is shown as a chip that opens web links, and it is searchable like other text.
+
+**Same meme, different caption:** captions are at the top and bottom, so a second perceptual hash is taken of the middle 20–80% of the height (`photos.core_hash`). Memes whose middle hashes differ by at most 10 of 64 bits are grouped (union-find) on the Duplicates page. They are only shown, never deleted automatically.
+
+**Contacts and calendar:** the photo viewer turns a phone number into a contact card (`.vcf`, vCard 3.0) and a date into an all-day calendar reminder (`.ics`, with an alarm), made in the browser, so nothing extra is stored or sent.
+
+**Validation:** CLIP alone could not separate screenshots (a phone screenshot +0.023, a hiker photo +0.018), so the flatness rule was chosen; it selects exactly the 2 screenshots out of 102 photos, the meme rule exactly the 3 memes and the forwarded rule exactly its 2. The document rule selects the 4 receipts, the letter, the menu board and the Kannada notice (and no screenshots), and none of the 9 official portraits (best 0.029).
 
 ## 6. Lessons Learned
 

@@ -1,36 +1,72 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { CalendarDays, ChevronLeft, ChevronRight, Cloud, Copy, Download, FolderOpen, HardDrive, Heart, IndianRupee, Link2, LoaderCircle, Mail, Maximize2, Phone, ScanText, Sparkles, Trash2, X, type LucideIcon } from "lucide-react";
+import { CalendarDays, CalendarPlus, ChevronLeft, ChevronRight, Cloud, Copy, Download, FolderOpen, HardDrive, Heart, IndianRupee, Link2, LoaderCircle, Mail, Maximize2, Phone, QrCode, ReceiptText, ScanText, Sparkles, Trash2, UserPlus, X, type LucideIcon } from "lucide-react";
 import { FullscreenPhoto } from "./FullscreenPhoto";
 import { FaceAvatar, personName } from "../pages/PeoplePage";
 import { api } from "../lib/api";
 import { useSystem } from "../lib/system";
 import { useToast } from "../lib/toast";
 import { cn, formatBytes, formatDate, wordMatches } from "../lib/utils";
-import type { PhotoDetails, TextFinds } from "../types";
+import { calendarEvent, contactCard } from "../lib/files";
+import type { PhotoDetails } from "../types";
 import { PhotoThumb } from "./PhotoCard";
 import { Button, ConfirmDialog, ErrorNote, MatchBadge, Modal } from "./ui";
 
 const WORDS_SHOWN = 40; // a full page of text has hundreds of words; show the first ones until asked
+const FINDS_SHOWN = 8; // a receipt can list a dozen prices
 
 /** Phone numbers, dates, prices, emails and links found in a photo's text, ready to use. */
-function Finds({ found, copy }: { found: TextFinds; copy: (value: string, message: string) => Promise<void> }) {
-  const chip = "focus-ring inline-flex max-w-full items-center gap-1.5 truncate rounded-lg border border-sky-300/30 bg-sky-300/[.07] px-2 py-1 text-xs text-sky-200 hover:border-sky-300/60";
-  const items: { icon: LucideIcon; label: string; href?: string; copyText?: string; title: string }[] = [
-    ...found.phones.map((p) => ({ icon: Phone, label: p.text, href: `tel:${p.dial}`, title: "Call" })),
-    ...found.emails.map((e) => ({ icon: Mail, label: e.text, href: `mailto:${e.text}`, title: "Write an email" })),
-    ...found.links.map((l) => ({ icon: Link2, label: l.text, href: l.url, title: "Open the link" })),
-    ...found.dates.map((d) => ({ icon: CalendarDays, label: formatDay(d.iso), copyText: d.text, title: `Written as "${d.text}". Click to copy.` })),
-    ...found.prices.map((p) => ({ icon: IndianRupee, label: p.text, copyText: p.text, title: "Click to copy" })),
+type Copy = (value: string, message: string) => Promise<void>;
+
+interface Find {
+  icon: LucideIcon;
+  label: string;
+  value: string;              // what Copy copies
+  href?: string;              // tap to call, email or open
+  title: string;
+  extra?: { icon: LucideIcon; title: string; run: () => void };
+}
+
+/** Phone numbers, dates, prices, emails, links and QR codes found in a photo, ready to use. */
+function Finds({ photo, copy }: { photo: PhotoDetails; copy: Copy }) {
+  const { found, receipt } = photo;
+  const [showAll, setShowAll] = useState(false);
+  const who = receipt?.shop || photo.filename.replace(/\.[^.]+$/, "");
+  const items: Find[] = [
+    ...photo.qr_codes.map((q) => ({ icon: QrCode, label: q.text, value: q.text, title: "QR code",
+      href: /^https?:\/\//i.test(q.text) ? q.text : undefined })),
+    ...found.phones.map((p) => ({ icon: Phone, label: p.text, value: p.text, href: `tel:${p.dial}`, title: "Call",
+      extra: { icon: UserPlus, title: "Add to contacts (.vcf)", run: () => contactCard(who, p.dial, `From the photo ${photo.filename}`) } })),
+    ...found.emails.map((e) => ({ icon: Mail, label: e.text, value: e.text, href: `mailto:${e.text}`, title: "Write an email" })),
+    ...found.links.map((l) => ({ icon: Link2, label: l.text, value: l.url, href: l.url, title: "Open the link" })),
+    ...found.dates.map((d) => ({ icon: CalendarDays, label: formatDay(d.iso), value: d.text, title: `Written as "${d.text}"`,
+      extra: { icon: CalendarPlus, title: "Add to calendar (.ics)", run: () => calendarEvent(who, d.iso, `From the photo ${photo.filename}`) } })),
+    ...found.prices.map((p) => ({ icon: IndianRupee, label: p.text, value: p.text, title: "Price" })),
   ];
-  if (!items.length) return null;
-  return (
-    <div className="mb-3 flex flex-wrap gap-1.5">
-      {items.map(({ icon: Icon, label, href, copyText, title }, i) => href
-        ? <a key={i} href={href} target={href.startsWith("http") ? "_blank" : undefined} rel="noreferrer" className={chip} title={title}><Icon className="h-3.5 w-3.5 shrink-0" />{label}</a>
-        : <button key={i} onClick={() => void copy(copyText ?? label, `Copied ${label}`)} className={chip} title={title}><Icon className="h-3.5 w-3.5 shrink-0" />{label}</button>)}
-    </div>
-  );
+  const shown = showAll ? items : items.slice(0, FINDS_SHOWN);
+  return <>
+    {receipt && <Link to="/receipts" className="focus-ring mb-3 flex items-center gap-2 rounded-xl border border-acid/30 bg-acid/[.06] px-3 py-2 text-sm hover:bg-acid/10">
+      <ReceiptText className="h-4 w-4 shrink-0 text-acid" />
+      <span className="min-w-0 flex-1 truncate">{receipt.shop ?? "Receipt"}{receipt.date && ` · ${formatDay(receipt.date)}`}</span>
+      {receipt.total !== null && <b className="shrink-0 tabular-nums">{receipt.currency}{receipt.total.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</b>}
+    </Link>}
+    {items.length > 0 && <div className="mb-3 flex flex-wrap gap-1.5">
+      {shown.map(({ icon: Icon, label, value, href, title, extra }, i) => (
+        <span key={i} className="inline-flex max-w-full items-stretch overflow-hidden rounded-lg border border-sky-300/30 bg-sky-300/[.07] text-xs text-sky-200">
+          {href
+            ? <a href={href} target={href.startsWith("http") ? "_blank" : undefined} rel="noreferrer" title={title}
+                className="focus-ring inline-flex min-w-0 items-center gap-1.5 px-2 py-1 hover:bg-sky-300/10"><Icon className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{label}</span></a>
+            : <span title={title} className="inline-flex min-w-0 items-center gap-1.5 px-2 py-1"><Icon className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{label}</span></span>}
+          {extra && <button onClick={extra.run} title={extra.title} aria-label={extra.title}
+            className="focus-ring border-l border-sky-300/20 px-1.5 hover:bg-sky-300/10"><extra.icon className="h-3.5 w-3.5" /></button>}
+          <button onClick={() => void copy(value, `Copied ${label.length > 30 ? "it" : label}`)} title="Copy" aria-label={`Copy ${label}`}
+            className="focus-ring border-l border-sky-300/20 px-1.5 hover:bg-sky-300/10"><Copy className="h-3.5 w-3.5" /></button>
+        </span>
+      ))}
+      {items.length > FINDS_SHOWN && <button onClick={() => setShowAll(!showAll)} className="focus-ring rounded-lg px-2 py-1 text-xs text-sky-200 hover:underline">
+        {showAll ? "Show fewer" : `${items.length - FINDS_SHOWN} more`}</button>}
+    </div>}
+  </>;
 }
 
 function formatDay(iso: string) {
@@ -149,6 +185,11 @@ export function PhotoViewer({ id, ids, onClose, onDeleted, onChanged, highlight 
                 {face.name && <span className={`absolute left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-canvas/90 px-1.5 py-0.5 text-[11px] font-medium text-sky-200 ${namedIndex(face.id) % 2 ? "-top-6" : "-bottom-6"}`}>{face.name}</span>}
               </span>
             ))}
+            {imageLoaded && photo.qr_codes.map((code, i) => (
+              <span key={`qr-${i}`} title={code.text}
+                className="face-box pointer-events-none absolute rounded-md border-2 border-dashed border-sky-300 shadow-[0_0_0_1px_rgba(0,0,0,.4)]"
+                style={{ left: `${code.box[0] * 100}%`, top: `${code.box[1] * 100}%`, width: `${code.box[2] * 100}%`, height: `${code.box[3] * 100}%`, animationDelay: `${300 + i * 80}ms` }} />
+            ))}
             {imageLoaded && photo.words.map((word, i) => {
               const match = !!highlight && wordMatches(word.text, highlight);
               return <span key={`${photo.id}-${i}`} title={word.text}
@@ -189,14 +230,14 @@ export function PhotoViewer({ id, ids, onClose, onDeleted, onChanged, highlight 
             <dl className="mt-5 space-y-3 text-sm">
               {rows.map(([label, value]) => <div key={label} className="flex justify-between gap-4"><dt className="text-muted">{label}</dt><dd className="text-right">{value}</dd></div>)}
             </dl>
-            {photo.text && <div className="mt-5">
+            <div className="mt-5"><Finds key={photo.id} photo={photo} copy={copy} /></div>
+            {photo.text && <div className="mt-2">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted"><ScanText className="h-3.5 w-3.5" />Text in the photo</p>
                 <button onClick={() => void copy(photo.text, "Text copied")} className="focus-ring inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted hover:bg-white/5 hover:text-ink">
                   <Copy className="h-3.5 w-3.5" />Copy
                 </button>
               </div>
-              <Finds found={photo.found} copy={copy} />
               <p className="flex flex-wrap gap-1.5">{photo.words.slice(0, allWords ? undefined : WORDS_SHOWN).map((word, i) => (
                 <button key={`${word.text}-${i}`} onMouseEnter={() => setPointed(i)} onMouseLeave={() => setPointed(null)}
                   onFocus={() => setPointed(i)} onBlur={() => setPointed(null)} title="Show where it is"

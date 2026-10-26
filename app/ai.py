@@ -5,7 +5,10 @@
   YuNet (OpenCV Zoo, MIT license)    finds faces in a photo
   SFace (OpenCV Zoo, Apache 2.0)     turns a face into 128 numbers; the same person gives similar numbers
   PP-OCRv3 text detector (OpenCV Zoo, Apache 2.0)  finds where text is written in a photo
-  PaddleOCR readers (Apache 2.0)     read the text: English (PP-OCRv5), Hindi, Tamil and Telugu (PP-OCRv3)
+  PaddleOCR readers (Apache 2.0)     read the text: English (PP-OCRv5), Hindi, Tamil, Telugu and Kannada
+                                     (PP-OCRv3). Kannada was converted to ONNX for this project (see the
+                                     "models-1" release on GitHub); the others come from monkt/paddleocr-onnx.
+  OpenCV's QR code reader            reads QR codes (no model to download)
 
 The models (about 235 MB) are downloaded once into the models folder and checked against a
 SHA-256 fingerprint, so a changed or corrupted file is never used.
@@ -32,6 +35,8 @@ os.environ.setdefault("OPENCV_LOG_LEVEL", "ERROR")  # hide OpenCV's technical wa
 _CLIP = "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/d15189d7028b43f1d3e65039190477f6af591c2a"
 _ZOO = "https://github.com/opencv/opencv_zoo/raw/48b10fa505aeb51fbd127fc60a5c660040e823b7/models"
 _PADDLE = "https://huggingface.co/monkt/paddleocr-onnx/resolve/7b02d0a30a07ba2b92ad1ff5a8941ae2c633de65/languages"
+_RELEASE = "https://github.com/Arnav-Dugad/imagevault-ai/releases/download/models-1"
+_PADDLE_DICTS = "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/dab3fe35379033fdcb2d0e9572fac0b36c9a9ebf/ppocr/utils/dict"
 MODELS = {  # file name: (download URL, SHA-256)
     "clip-vision.onnx": (f"{_CLIP}/onnx/vision_model_quantized.onnx",
                          "583fd1110a514667812fee7d684952aaf82a99b959760c8d7dca7e0ab9839299"),
@@ -61,6 +66,10 @@ MODELS = {  # file name: (download URL, SHA-256)
                               "669946d9ad4de93e8d1b13f7e72c59cc2cc2de91bb24e22aad7503a6cc5757ee"),
     "text-read-telugu.txt": (f"{_PADDLE}/telugu/dict.txt",
                              "ee9946a60d7701977474e89883694a4ca20eaa3868a23334bf7940dcd008f0f9"),
+    "text-read-kannada.onnx": (f"{_RELEASE}/text-read-kannada.onnx",
+                               "240d0edc4493d0e1411874fb1c704df28f7ffc2430131eafc715eaf593bf7ed8"),
+    "text-read-kannada.txt": (f"{_PADDLE_DICTS}/ka_dict.txt",
+                              "fad3f765943275eec2134a6fbc9b52785426641104d4e7db3a159dc73f341dde"),
 }
 
 CLIP_MEAN = np.array([0.48145466, 0.4578275, 0.40821073], dtype=np.float32)
@@ -73,7 +82,8 @@ TEXT_MIN_CONFIDENCE = 0.85  # lines the reader is less sure about are mostly noi
 TEXT_MAX_LINES = 80     # text areas read per photo; keeps busy street photos quick to analyse
 TEXT_SURE = 0.97        # English read this confidently is not tried in the Indian languages
 TEXT_MAX_INDIAN = 20    # ...and only the 20 clearest text areas are, so busy street photos stay quick
-SCRIPTS = {"hindi": (0x0900, 0x097F), "tamil": (0x0B80, 0x0BFF), "telugu": (0x0C00, 0x0C7F)}  # Unicode blocks
+SCRIPTS = {"hindi": (0x0900, 0x097F), "tamil": (0x0B80, 0x0BFF), "telugu": (0x0C00, 0x0C7F),  # Unicode blocks
+           "kannada": (0x0C80, 0x0CFF)}
 
 _download_lock = threading.Lock()
 _face_lock = threading.Lock()  # OpenCV's face detector is not safe to share between threads
@@ -273,6 +283,34 @@ def _box_part(corners: np.ndarray, start: float, end: float) -> np.ndarray:
     top, bottom = corners[2] - corners[1], corners[3] - corners[0]
     return np.array([corners[1] + start * top, corners[1] + end * top,
                      corners[0] + start * bottom, corners[0] + end * bottom])
+
+
+@dataclass
+class QrCode:
+    text: str
+    box: tuple[float, float, float, float]  # x, y, width, height as fractions of the photo
+
+
+def read_qr_codes(image: Image.Image) -> list[QrCode]:
+    """QR codes in the photo (links, Wi-Fi details, payment codes...), with where they are."""
+    import cv2
+
+    bgr = cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2BGR)
+    scale = min(1.0, 1600 / max(bgr.shape[:2]))
+    if scale < 1:
+        bgr = cv2.resize(bgr, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+    height, width = bgr.shape[:2]
+    try:
+        found, texts, corners, _ = cv2.QRCodeDetector().detectAndDecodeMulti(bgr)
+    except cv2.error:
+        return []
+    codes = []
+    for text, points in zip(texts if found else [], corners if found else []):
+        if text:
+            xs, ys = np.clip(points[:, 0] / width, 0, 1), np.clip(points[:, 1] / height, 0, 1)
+            codes.append(QrCode(text, (float(xs.min()), float(ys.min()), float(xs.max() - xs.min()),
+                                       float(ys.max() - ys.min()))))
+    return codes
 
 
 def read_text(image: Image.Image) -> list[Word]:

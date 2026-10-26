@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.9.0 (2026-10-26)
+
+- **Receipts page:** the shop, date and total of each receipt in a small spending table, grouped by shop, with totals, each shop's share of the spending and a CSV download.
+- **Kannada text** is read too (PaddleOCR's Kannada model, converted for the app).
+- **Save a phone number as a contact** (.vcf) and **add a date to your calendar** (.ics) from the photo viewer.
+- **QR codes** are read, outlined on the photo and can be opened. Their text is searchable.
+- **Copy button on every chip** (phone numbers, dates, prices, emails, links, QR codes); long lists show the first 8.
+- **"Text" filter** on the Photos page: only photos with text in them.
+- **Same meme, different caption:** the Duplicates page groups memes made from the same picture.
+- **Failed uploads** are listed in the upload panel with the reason, and a Retry button for the ones that can work on a second try (not for files that aren't photos or are too big).
+- Fixed: a total printed before its "TOTAL" label wasn't read; screenshots full of words also landed in Documents & receipts.
+- Demo photos: 102, with made-up receipts from two made-up shops, a second cat meme and a Kannada temple notice. 44 automated tests.
+
 ## 3.8.0 (2026-10-25)
 
 - **Telugu text** is read too, next to English, Hindi and Tamil.

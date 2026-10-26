@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { UploadResult } from "../types";
-import { api, uploadPhoto } from "./api";
+import { ApiError, api, uploadPhoto } from "./api";
 
 export interface UploadItem {
   key: string;
@@ -10,6 +10,7 @@ export interface UploadItem {
   existing?: string; // with "stored": the name it already has in ImageVault
   result?: UploadResult;
   error?: string;
+  final?: boolean; // failed for a reason trying again can't fix: not a photo, or too big
 }
 
 interface Uploads {
@@ -52,7 +53,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         const result = await uploadPhoto(item.file, (progress) => update(item.key, { progress }));
         update(item.key, { state: "done", result });
       } catch (e) {
-        update(item.key, { state: "failed", error: (e as Error).message });
+        update(item.key, { state: "failed", error: (e as Error).message, final: e instanceof ApiError && (e.status === 413 || e.status === 415) });
       }
     }
   }, []);
@@ -114,7 +115,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   const skipStored = useCallback(() => setItems((all) => all.filter((i) => i.state !== "stored")), []);
 
   const retryFailed = useCallback(() => {
-    const failed = items.filter((i) => i.state === "failed");
+    const failed = items.filter((i) => i.state === "failed" && !i.final);
     failed.forEach((i) => update(i.key, { state: "waiting", error: undefined }));
     pending.current.push(...failed);
     void pump();

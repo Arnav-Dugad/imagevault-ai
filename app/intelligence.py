@@ -24,7 +24,7 @@ import socket
 import threading
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 
@@ -52,7 +52,7 @@ STALE_CLAIM_SECONDS = 600      # photos claimed by a worker that went silent are
 SLOW_PHOTO_SECONDS = 300       # analysing one photo should never take this long
 # Raise this whenever the analysis finds something new (for example word positions). Photos analysed by an
 # older version are analysed again, and laptop workers running older code get no photos until updated.
-ANALYSIS_VERSION = 4
+ANALYSIS_VERSION = 5
 
 _wake = threading.Event()
 _worker_started = False
@@ -227,6 +227,8 @@ class Analysis:
     flatness: float = 0.0
     jpeg_quality: int | None = None
     camera: bool = False
+    qr_codes: list[ai.QrCode] = field(default_factory=list)
+    core_hash: str = ""
 
     @property
     def text(self) -> str:
@@ -236,6 +238,9 @@ class Analysis:
             lines.setdefault(word.line, []).append(word.text)
         return "\n".join(" ".join(words) for _, words in sorted(lines.items()))
 
+    def qr_json(self) -> list[dict]:
+        return [{"text": q.text, "box": [round(v, 4) for v in q.box]} for q in self.qr_codes]
+
     def words_json(self) -> list[dict]:
         return [{"text": w.text, "box": [round(v, 4) for v in w.box], "line": w.line} for w in self.words]
 
@@ -243,7 +248,8 @@ class Analysis:
         b64 = lambda data: base64.b64encode(data).decode()  # noqa: E731
         return {"clip": b64(ai.to_bytes(self.clip)), "taken_at": self.taken_at, "sharpness": self.sharpness,
                 "flatness": self.flatness, "words": self.words_json(), "version": ANALYSIS_VERSION,
-                "jpeg_quality": self.jpeg_quality, "camera": self.camera,
+                "jpeg_quality": self.jpeg_quality, "camera": self.camera, "core_hash": self.core_hash,
+                "qr_codes": self.qr_json(),
                 "faces": [{"box": list(f.box), "embedding": b64(ai.to_bytes(f.embedding)), "crop": b64(f.crop)}
                           for f in self.faces]}
 
@@ -269,9 +275,13 @@ class Analysis:
         words = [ai.Word(str(w["text"])[:100], box(w["box"]), int(w.get("line") or 0))
                  for w in data.get("words", [])[:500] if w.get("text")]
         quality = data.get("jpeg_quality")
+        codes = [ai.QrCode(str(q["text"])[:2000], box(q["box"])) for q in data.get("qr_codes", [])[:20]]
+        core = str(data.get("core_hash") or "")
+        if core and not re.fullmatch(r"[0-9a-f]{16}", core):
+            raise ValueError("core_hash must be 16 hex digits")
         return cls(vector(data["clip"], 512), faces, data.get("taken_at"), float(data.get("sharpness") or 0), words,
                    min(1.0, max(0.0, float(data.get("flatness") or 0))),
-                   None if quality is None else max(1, min(100, int(quality))), bool(data.get("camera")))
+                   None if quality is None else max(1, min(100, int(quality))), bool(data.get("camera")), codes, core)
 
 
 def compute(data: bytes) -> Analysis:
@@ -281,7 +291,8 @@ def compute(data: bytes) -> Analysis:
     image = ImageOps.exif_transpose(raw).convert("RGB")
     faces = [FoundFace(f.box, f.embedding, _face_crop(image, f.box)) for f in ai.find_faces(image)]
     return Analysis(ai.image_embedding(image), faces, date, photos.sharpness(image), ai.read_text(image),
-                    photos.flatness(image), photos.jpeg_quality(raw), photos.has_camera_info(raw))
+                    photos.flatness(image), photos.jpeg_quality(raw), photos.has_camera_info(raw),
+                    ai.read_qr_codes(image), photos.core_hash(image))
 
 
 def save_analysis(photo_id: str, found: Analysis) -> bool:
@@ -339,12 +350,15 @@ def save_analysis(photo_id: str, found: Analysis) -> bool:
         conn.execute(text(
             "UPDATE photos SET clip = :clip, ai_status = 'done', ai_worker = NULL, ocr_text = :text, "
             "ocr_words = :words, ocr_search = :search, flatness = :flat, ai_version = :version, "
-            "jpeg_quality = :quality, camera = :camera, taken_at = COALESCE(taken_at, :taken), "
+            "jpeg_quality = :quality, camera = :camera, qr_codes = :qr, core_hash = :core, "
+            "taken_at = COALESCE(taken_at, :taken), "
             "sharpness = COALESCE(sharpness, :sharp) WHERE id = :id"),
             {"clip": ai.to_bytes(clip), "id": photo_id, "taken": found.taken_at, "sharp": found.sharpness,
              "text": found.text, "words": json.dumps(found.words_json(), ensure_ascii=False), "flat": found.flatness,
-             "version": ANALYSIS_VERSION, "search": squeeze(found.text), "quality": found.jpeg_quality,
-             "camera": found.camera})
+             "version": ANALYSIS_VERSION, "quality": found.jpeg_quality, "camera": found.camera,
+             "search": squeeze(" ".join([found.text, *(q.text for q in found.qr_codes)])),  # QR text is searchable
+             "qr": json.dumps(found.qr_json(), ensure_ascii=False) if found.qr_codes else None,
+             "core": found.core_hash or None})
         remove_empty_people(conn)
     for old_face in previous:  # the old face crops are no longer used
         storage.delete(face_key(old_face.id))
@@ -606,14 +620,15 @@ def auto_albums() -> dict[str, list[str]]:
     # Documents: looks like a document, or has a lot of text, or words you only find on receipts.
     # Screenshots: named like one ("Screenshot_2026-10-25.png"), or a lossless picture without a camera date
     # that is mostly flat colour, like an app or a web page.
+    # A screenshot of an app is full of words too, but it belongs in Screenshots only.
     for i, row in enumerate(rows):
         words = (row.ocr_text or "").split()
-        if (document_scores[i] >= DOCUMENT_MIN or len(words) >= 20
-                or sum(any(k in w.lower() for k in RECEIPT_WORDS) for w in words) >= 2):
-            scored.setdefault("documents", {})[row.id] = float(document_scores[i])
         lossless = row.content_type in ("image/png", "image/webp", "image/bmp", "image/gif")
         screenshot = SCREENSHOT_NAME.search(row.filename) or (
             lossless and row.taken_at is None and (row.flatness or 0) >= SCREENSHOT_FLAT)
+        if not screenshot and (document_scores[i] >= DOCUMENT_MIN or len(words) >= 20
+                               or sum(any(k in w.lower() for k in RECEIPT_WORDS) for w in words) >= 2):
+            scored.setdefault("documents", {})[row.id] = float(document_scores[i])
         if screenshot:
             scored.setdefault("screenshots", {})[row.id] = row.flatness or 0
         elif row.ocr_words and is_meme(json.loads(row.ocr_words)):

@@ -248,10 +248,62 @@ def test_smart_search_uses_the_text_in_photos(client):
 def test_documents_and_screenshots_albums(client):
     receipt = upload(client, "receipt.jpg", text_photo("TOTAL 14.21  CASH 20.00"))
     shot = upload(client, "Screenshot_2026-10-25.png", (ASSETS / "landmark.jpg").read_bytes())
+    chat = upload(client, "Screenshot_2026-10-26.png", text_photo("HELLO SEE YOU AT THE STATION TODAY", "TOTAL CASH"))
     intelligence.process_pending()
 
     albums = intelligence.auto_albums()
     assert receipt in albums["documents"]
     assert shot in albums["screenshots"]
+    assert chat in albums["screenshots"] and chat not in albums["documents"]  # words, but still a screenshot
     cleanup = {i["photo"]["id"]: i for i in client.get("/api/cleanup").json()["items"]}
     assert cleanup[shot]["reason"] == "Screenshot" and cleanup[shot]["suggested"] is False  # offered, not ticked
+
+
+def test_receipts_are_read_and_grouped_by_shop(client):
+    first = upload(client, "bill-1.jpg", text_photo("GREEN BASKET STORES", "TOTAL Rs 450.00  12/10/2026"))
+    upload(client, "bill-2.jpg", text_photo("GREEN BASKET STORES", "TOTAL Rs 120.50  14/10/2026"))
+    upload(client, "sign.jpg", text_photo("WELCOME TO GOA"))
+    intelligence.process_pending()
+
+    spending = client.get("/api/receipts").json()
+    assert spending["count"] == 2 and spending["totals"] == {"₹": 570.5}
+    assert [s["name"] for s in spending["shops"]] == ["Green Basket Stores"]
+    receipt = client.get(f"/api/photos/{first}").json()["receipt"]
+    assert receipt == {"shop": "Green Basket Stores", "date": "2026-10-12", "total": 450.0, "currency": "₹"}
+    assert len(client.get("/api/photos?filter=text").json()["items"]) == 3  # the "Text" filter
+
+
+def test_receipt_total_printed_before_its_label():
+    from app import receipts
+
+    # The text reader often puts the right-hand amount on the line before "TOTAL".
+    text = "ANNAPOORNA TIFFINS\nDate: 20/10/2026\n12.50\nGST 5%\n262.50\nTOTAL Rs\nThank you! Visit again"
+    assert receipts.read(text) == {"shop": "Annapoorna Tiffins", "date": "2026-10-20", "total": 262.5, "currency": "₹"}
+
+
+def test_qr_codes_are_read(client):
+    import cv2
+    import numpy as np
+
+    code = cv2.QRCodeEncoder.create().encode("https://example.com/menu")
+    code = cv2.resize(code, (300, 300), interpolation=cv2.INTER_NEAREST)
+    page = np.full((500, 700), 255, dtype=np.uint8)
+    page[100:400, 200:500] = code
+    buffer = io.BytesIO()
+    Image.fromarray(page).convert("RGB").save(buffer, "PNG")
+    photo = upload(client, "qr.png", buffer.getvalue())
+    intelligence.process_pending()
+
+    codes = client.get(f"/api/photos/{photo}").json()["qr_codes"]
+    assert [c["text"] for c in codes] == ["https://example.com/menu"]
+    assert [p["id"] for p in client.get("/api/photos?search=example.com/menu").json()["items"]] == [photo]
+
+
+def test_same_meme_picture_with_different_captions(client):
+    first = upload(client, "meme-1.jpg", text_photo("MONDAY MORNING", "BEFORE THE DEMO", photo="landmark.jpg"))
+    second = upload(client, "meme-2.jpg", text_photo("WHEN THE CODE", "WORKS FIRST TIME", photo="landmark.jpg"))
+    upload(client, "meme-3.jpg", text_photo("ME AT 3 AM", "FIXING ONE BUG", photo="person-b.jpg"))
+    intelligence.process_pending()
+
+    groups = client.get("/api/memes").json()
+    assert [sorted(i["photo"]["id"] for i in g["items"]) for g in groups] == [sorted([first, second])]

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { CheckCircle2, ChevronsLeftRight, Focus, Recycle, Sparkles, Timer, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronsLeftRight, Focus, Laugh, Recycle, Sparkles, Timer, Trash2 } from "lucide-react";
 import { CompareSlider } from "../components/CompareSlider";
 import { PhotoThumb } from "../components/PhotoCard";
 import { PhotoViewer } from "../components/PhotoViewer";
@@ -67,6 +67,7 @@ export function DuplicatesPage() {
   const [groups, setGroups] = useState<DuplicateGroup[] | null>(null);
   const [related, setRelated] = useState<DuplicateGroup[]>([]);
   const [bursts, setBursts] = useState<DuplicateGroup[]>([]);
+  const [memes, setMemes] = useState<DuplicateGroup[]>([]);
   const [error, setError] = useState("");
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   const [busy, setBusy] = useState(false);
@@ -80,6 +81,7 @@ export function DuplicatesPage() {
     api<DuplicateGroup[]>("/duplicates").then(setGroups).catch((e: Error) => setError(e.message));
     api<DuplicateGroup[]>("/related").then(setRelated).catch(() => {});
     api<DuplicateGroup[]>("/bursts").then(setBursts).catch(() => {});
+    api<DuplicateGroup[]>("/memes").then(setMemes).catch(() => {});
     api<StorageUsage>("/storage").then(setSaved).catch(() => {});
     setVersion((v) => v + 1);
   }, []);
@@ -114,7 +116,7 @@ export function DuplicatesPage() {
   const extraBytes = groups?.reduce((sum, g) => sum + g.extra_bytes, 0) ?? 0;
   const row = (group: DuplicateGroup, action?: React.ReactNode) =>
     <GroupRow key={group.id} group={group} onOpen={setOpenId} onCompare={compare} onDelete={(photo) => setConfirm({ kind: "one", photo })} action={action} />;
-  const nothing = groups?.length === 0 && related.length === 0 && bursts.length === 0;
+  const nothing = groups?.length === 0 && related.length === 0 && bursts.length === 0 && memes.length === 0;
 
   return <>
     <PageHeading title="Duplicates"
@@ -138,6 +140,10 @@ export function DuplicatesPage() {
         </Button>))}
     </Section>}
 
+    {memes.length > 0 && <Section icon={Laugh} title="Same meme, different caption" hint="The same picture with different text.">
+      {memes.map((group) => row(group))}
+    </Section>}
+
     {related.length > 0 && <Section icon={Sparkles} title="Same subject, different shot" hint="Not copies, so nothing here is removed automatically.">
       {related.map((group) => row(group))}
     </Section>}
@@ -148,7 +154,7 @@ export function DuplicatesPage() {
       message={confirm.kind === "one" ? <>“{confirm.photo.filename}” will be deleted. This can't be undone.</>
         : confirm.kind === "exact" ? "The first upload of each photo is kept. Similar photos are never removed automatically."
         : <>“{confirm.keep.filename}” is kept. This can't be undone.</>} />}
-    {openId && <PhotoViewer id={openId} ids={[...(groups ?? []), ...bursts, ...related].flatMap((g) => g.items.map((i) => i.photo.id))}
+    {openId && <PhotoViewer id={openId} ids={[...(groups ?? []), ...bursts, ...memes, ...related].flatMap((g) => g.items.map((i) => i.photo.id))}
       onClose={() => setOpenId(null)} onDeleted={load} onChanged={load} />}
     {comparing && <CompareSlider left={comparing[0].photo} right={comparing[1].photo} leftKind={comparing[0].kind}
       kind={comparing[1].kind} similarity={comparing[1].similarity} onClose={() => setComparing(null)} />}

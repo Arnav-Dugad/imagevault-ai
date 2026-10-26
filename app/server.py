@@ -28,9 +28,9 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 from sqlalchemy import bindparam, make_url, text  # noqa: E402
 
-from app import __version__, ai, costs, intelligence, textinfo  # noqa: E402
+from app import __version__, ai, costs, intelligence, receipts, textinfo  # noqa: E402
 from app.database import connect, init_db  # noqa: E402
-from app.photos import NotAPhoto, analyze, compare  # noqa: E402
+from app.photos import NotAPhoto, analyze, compare, hash_distance  # noqa: E402
 from app.storage import get_storage, original_key, thumbnail_key  # noqa: E402
 
 APP_DIR = Path(__file__).resolve().parent
@@ -133,7 +133,7 @@ def logout():
 
 def _photo_json(row) -> dict:
     photo = dict(row)
-    for hidden in ("phash", "dhash", "clip", "ocr_text", "ocr_words", "ocr_search"):
+    for hidden in ("phash", "dhash", "clip", "ocr_text", "ocr_words", "ocr_search", "qr_codes", "core_hash"):
         photo.pop(hidden, None)
     photo["thumb_url"] = f"/api/photos/{photo['id']}/thumb"
     photo["file_url"] = f"/api/photos/{photo['id']}/file"
@@ -228,6 +228,8 @@ def list_photos(search: str = "", smart: bool = False, filter: str = "all", albu
     if filter == "duplicates":
         where.append(f"photos.id IN (SELECT photo_a FROM matches WHERE {COPIES} "
                      f"UNION SELECT photo_b FROM matches WHERE {COPIES})")
+    elif filter == "text":  # photos with words written in them, or a QR code
+        where.append("(photos.ocr_search IS NOT NULL AND photos.ocr_search != '')")
     elif filter == "favorites":
         where.append("photos.favorite = :yes")
         params["yes"] = True
@@ -373,6 +375,8 @@ def photo_details(photo_id: str):
     result["albums"] = [dict(a) for a in in_albums]
     result["text"] = photo["ocr_text"] or ""
     result["found"] = textinfo.find(result["text"])  # phone numbers, dates, prices, emails and links
+    result["qr_codes"] = json.loads(photo["qr_codes"]) if photo["qr_codes"] else []
+    result["receipt"] = receipts.read(result["text"])  # shop, date and total, if it is a receipt
     result["words"] = json.loads(photo["ocr_words"]) if photo["ocr_words"] else []
     return result
 
@@ -806,6 +810,65 @@ def remove_exact_copies():
             seen.add(photo["sha256"])
     log.info("Exact copies removed", extra={"removed": removed})
     return {"removed": removed}
+
+
+@app.get("/api/receipts")
+def receipt_list():
+    """Every photo that looks like a receipt, with its shop, date and total, grouped by shop."""
+    with connect() as conn:
+        rows = conn.execute(text(f"SELECT {PHOTO_COLUMNS} FROM photos WHERE ocr_text IS NOT NULL AND ocr_text != ''"))\
+            .mappings().all()
+    found = []
+    for row in rows:
+        receipt = receipts.read(row["ocr_text"])
+        if receipt:
+            found.append({**receipt, "photo": _with_match(row)})
+    found.sort(key=lambda r: (r["date"] or "", r["photo"]["uploaded_at"]), reverse=True)
+    shops: dict[str, dict] = {}
+    for item in found:
+        name = item["shop"] or "Unknown shop"
+        key = intelligence.squeeze(name)[:16] or "unknown"
+        shop = shops.setdefault(key, {"name": name, "receipts": [], "totals": {}})
+        shop["receipts"].append(item)
+        if item["total"] is not None:
+            shop["totals"][item["currency"]] = round(shop["totals"].get(item["currency"], 0) + item["total"], 2)
+    totals: dict[str, float] = {}
+    for item in found:
+        if item["total"] is not None:
+            totals[item["currency"]] = round(totals.get(item["currency"], 0) + item["total"], 2)
+    groups = sorted(shops.values(), key=lambda s: (-len(s["receipts"]), s["name"].lower()))
+    return {"count": len(found), "totals": totals, "shops": groups}
+
+
+MEME_SAME_PICTURE = 10  # core hashes (the middle of the picture) this close mean the same meme picture
+
+
+@app.get("/api/memes")
+def meme_groups():
+    """Memes made from the same picture, whatever their captions say."""
+    ids = intelligence.auto_albums().get("memes", []) if ai.enabled() and ai.models_ready() else []
+    with connect() as conn:
+        memes = _photos_by_id(conn, ids)
+        hashes = dict(conn.execute(text("SELECT id, core_hash FROM photos WHERE id IN :ids")
+                                   .bindparams(bindparam("ids", expanding=True)), {"ids": ids or [""]}).all())
+    parent = {m["id"]: m["id"] for m in memes}
+
+    def root(x):
+        while parent[x] != x:
+            x = parent[x]
+        return x
+
+    for i, a in enumerate(memes):
+        for b in memes[i + 1:]:
+            ha, hb = hashes.get(a["id"]), hashes.get(b["id"])
+            if ha and hb and hash_distance(ha, hb) <= MEME_SAME_PICTURE:
+                parent[root(a["id"])] = root(b["id"])
+    groups: dict[str, list] = {}
+    for meme in memes:
+        groups.setdefault(root(meme["id"]), []).append(meme)
+    return [{"id": members[0]["id"], "items": [{"kind": "meme", "similarity": 1.0, "photo": m} for m in members],
+             "extra_bytes": sum(m["size"] for m in members[1:]), "sharpest_id": None}
+            for members in groups.values() if len(members) > 1]
 
 
 BLURRY = 45  # sharpness below this (see photos.sharpness) is very blurry; normal photos score 150+
