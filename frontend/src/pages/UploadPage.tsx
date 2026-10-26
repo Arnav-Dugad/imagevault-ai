@@ -44,7 +44,7 @@ export function UploadPage() {
       className={cn("focus-ring grid w-full place-items-center rounded-3xl border-2 border-dashed px-6 py-16 text-center transition",
         dragging ? "border-acid bg-acid/[.07]" : "border-line bg-panel/60 hover:border-acid/40 hover:bg-panel")}>
       <div className="grid h-16 w-16 place-items-center rounded-2xl border border-acid/20 bg-acid/10"><ImagePlus className="h-7 w-7 text-acid" /></div>
-      <p className="mt-5 text-lg font-semibold">{dragging ? "Drop to upload" : "Drag photos here, or click to choose"}</p>
+      <p className="mt-5 text-lg font-semibold">{dragging ? "Drop to upload" : <><span className="[@media(hover:none)]:hidden">Drag photos here, or click to choose</span><span className="hidden [@media(hover:none)]:inline">Tap to choose photos</span></>}</p>
       {system && <p className="mt-2 flex items-center gap-1.5 text-sm text-muted">
         {azure ? <Cloud className="h-4 w-4 text-lilac" /> : <HardDrive className="h-4 w-4 text-acid" />}
         Saved to {azure ? "Azure Blob Storage" : "a local folder"}

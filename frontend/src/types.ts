@@ -14,6 +14,7 @@ export interface Photo {
   ai_status: "processing" | "done" | "failed" | null;
   taken_at: string | null;
   sharpness: number | null;
+  focus?: [number, number] | null; // where to centre the thumbnail's crop (a face), as fractions
   favorite: boolean | null;
   thumb_url: string;
   file_url: string;

@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.10.1 (2026-10-26)
+
+A polish pass over every page, on a computer and on a phone, with automatic checks for console errors, sideways scrolling, unlabelled buttons and small tap targets.
+
+- **Photos of a person** are cropped around their face, so heads are no longer cut off.
+- **Phones:** the Home numbers sit two by two; the search box fits (Name/Smart become icons); the menu slides in from the side; the Select circle on each photo is bigger and always visible on touch screens; "Free up" tick boxes and the back links are easier to tap; the Upload page says "Tap to choose photos".
+- **Free up** lists the ticked photos first.
+- **Clearer numbers on Home:** "Photo files" (each file stored once) next to the photos' size with copies.
+- **Browser tabs** show the album's or person's name.
+- **People page** explains that you can name and merge people.
+- Every photo button has a label for screen readers; with "reduce motion" on, the scanning line stands still.
+
 ## 3.10.0 (2026-10-26)
 
 - **Check and correct receipts:** click a receipt to see the photo next to what was read, with the shop, date and total outlined on the photo. Fix any of them by hand, go back to the AI's reading, or say "Not a receipt". Photos the AI missed can be added with "This is a receipt".

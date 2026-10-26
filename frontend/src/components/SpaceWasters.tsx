@@ -39,6 +39,7 @@ export function SpaceWasters({ version, onOpen, onDeleted }: { version: number; 
   const suggested = items.filter((i) => i.suggested);
   const total = suggested.reduce((sum, i) => sum + i.bytes, 0);
   const screenshots = items.length - suggested.length;
+  const ordered = [...suggested, ...items.filter((i) => !i.suggested)]; // the ticked ones first
   const toggle = (id: string) => setPicked((p) => { const next = new Set(p); if (next.has(id)) next.delete(id); else next.add(id); return next; });
 
   async function remove() {
@@ -70,15 +71,15 @@ export function SpaceWasters({ version, onOpen, onDeleted }: { version: number; 
         </Button>
       </div>
       <ul className="divide-y divide-line">
-        {(all ? items : items.slice(0, SHOWN)).map((item) => {
+        {(all ? ordered : ordered.slice(0, SHOWN)).map((item) => {
           const on = picked.has(item.photo.id);
           return (
             <li key={item.photo.id} className={cn("flex items-center gap-3 px-4 py-2.5 transition sm:px-5", !on && "opacity-55")}>
-              <button onClick={() => toggle(item.photo.id)} aria-pressed={on} aria-label={on ? "Keep this photo" : "Delete this photo"}
-                className={cn("focus-ring grid h-5 w-5 shrink-0 place-items-center rounded-md border-2 transition", on ? "border-acid bg-acid text-[#11150c]" : "border-line")}>
+              <button onClick={() => toggle(item.photo.id)} aria-pressed={on} aria-label={`Delete ${item.photo.filename}`}
+                className={cn("focus-ring grid h-7 w-7 shrink-0 place-items-center rounded-lg border-2 transition sm:h-5 sm:w-5 sm:rounded-md", on ? "border-acid bg-acid text-[#11150c]" : "border-line")}>
                 {on && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
               </button>
-              <button onClick={() => onOpen(item.photo.id)} className="focus-ring shrink-0 overflow-hidden rounded-lg">
+              <button onClick={() => onOpen(item.photo.id)} aria-label={`Open ${item.photo.filename}`} className="focus-ring shrink-0 overflow-hidden rounded-lg">
                 <PhotoThumb photo={item.photo} className="h-11 w-14" />
               </button>
               <div className="min-w-0 flex-1">

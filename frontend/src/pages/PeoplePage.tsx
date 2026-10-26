@@ -6,7 +6,7 @@ import { PhotoViewer } from "../components/PhotoViewer";
 import { Button, EmptyState, ErrorNote, PageHeading, Spinner } from "../components/ui";
 import { api } from "../lib/api";
 import { useToast } from "../lib/toast";
-import { cn } from "../lib/utils";
+import { cn, usePageTitle } from "../lib/utils";
 import type { Person, PersonDetails } from "../types";
 
 export const personName = (person: { name: string | null }) => person.name || "Unnamed";
@@ -35,7 +35,7 @@ export function PeoplePage() {
   const toggle = (id: string) => setPicking((p) => { const next = new Set(p); if (next.has(id)) next.delete(id); else next.add(id); return next; });
 
   return <>
-    <PageHeading title="People"
+    <PageHeading title="People" description="Faces the free AI recognised. Click someone to name them; merge two that are the same person."
       action={people && people.length > 1 && (picking
         ? <><Button variant="ghost" onClick={() => setPicking(null)}><X className="h-4 w-4" />Cancel</Button>
             <Button onClick={merge} disabled={picking.size < 2}><Combine className="h-4 w-4" />Merge {picking.size || ""}</Button></>
@@ -80,6 +80,7 @@ export function PersonPage() {
   const [name, setName] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
   const [wrong, setWrong] = useState<Set<string> | null>(null); // split mode: faces that are someone else
+  usePageTitle(person ? personName(person) : undefined);
 
   const load = useCallback(() => {
     api<PersonDetails>(`/people/${id}`).then((p) => { setPerson(p); setName(p.name ?? ""); }).catch((e: Error) => setError(e.message));
@@ -105,7 +106,7 @@ export function PersonPage() {
   if (error) return <ErrorNote message={error} />;
   if (!person) return <Spinner />;
   return <>
-    <Link to="/people" className="focus-ring mb-6 inline-flex items-center gap-1.5 rounded-lg text-sm text-muted hover:text-ink"><ArrowLeft className="h-4 w-4" />People</Link>
+    <Link to="/people" className="focus-ring -my-1.5 mb-4.5 inline-flex items-center gap-1.5 rounded-lg py-1.5 text-sm text-muted hover:text-ink"><ArrowLeft className="h-4 w-4" />People</Link>
     <div className="mb-8 flex flex-col items-start gap-5 sm:flex-row sm:items-center">
       <FaceAvatar src={person.image_url} />
       <div className="flex-1">

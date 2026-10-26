@@ -6,7 +6,7 @@ import { PhotoBrowser } from "../components/PhotoBrowser";
 import { Button, ConfirmDialog, EmptyState, ErrorNote, PageHeading, Spinner } from "../components/ui";
 import { api } from "../lib/api";
 import { useToast } from "../lib/toast";
-import { formatBytes } from "../lib/utils";
+import { formatBytes, usePageTitle } from "../lib/utils";
 import type { Album } from "../types";
 
 function AlbumTile({ album, index }: { album: Album; index: number }) {
@@ -71,6 +71,7 @@ export function AlbumPage() {
   const [name, setName] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [photoIds, setPhotoIds] = useState<string[]>([]); // for name suggestions while renaming
+  usePageTitle(album?.name);
   const auto = id.startsWith("auto:");
   useEffect(() => {
     if (!editing) return;
@@ -99,7 +100,7 @@ export function AlbumPage() {
   }
 
   return <>
-    <Link to="/albums" className="focus-ring mb-6 inline-flex items-center gap-1.5 rounded-lg text-sm text-muted hover:text-ink"><ArrowLeft className="h-4 w-4" />Albums</Link>
+    <Link to="/albums" className="focus-ring -my-1.5 mb-4.5 inline-flex items-center gap-1.5 rounded-lg py-1.5 text-sm text-muted hover:text-ink"><ArrowLeft className="h-4 w-4" />Albums</Link>
     <PhotoBrowser albumId={id} rememberAs="album" emptyText={auto ? "No photos here yet." : "Empty. Select photos on the Photos page and choose Album."} header={(total) => (
       <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>

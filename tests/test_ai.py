@@ -35,6 +35,7 @@ def test_same_person_is_recognised_across_photos(client):
     client.put(f"/api/people/{person_id}", json={"name": "Person A"})
     details = client.get(f"/api/people/{person_id}").json()
     assert details["name"] == "Person A" and len(details["photos"]) == 2
+    assert all(0 < x < 1 and 0 < y < 1 for x, y in (p["focus"] for p in details["photos"]))  # crop around the face
 
     # Portraits of different people must not be grouped as "same subject".
     assert client.get("/api/related").json() == []
