@@ -22,7 +22,7 @@ _DATE_WORDS = re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]{3,9})\.?,?\s+(\d
 _PRICE = re.compile(r"(?:₹|rs\.?|inr|\$|€|£|usd|eur)\s?(\d[\d,]*(?:\.\d{1,2})?)(?:\s?/-)?|"
                     r"\b(\d[\d,]*)\s?/-|"
                     r"\b(\d{1,5}[.,]\d{2})\b", re.IGNORECASE)
-_PHONE = re.compile(r"(?:\+\d{1,3}[\s.-]?)?\(?\d{2,5}\)?(?:[\s.-]?\d{2,5}){0,3}")
+_PHONE = re.compile(r"(?:\+\d{1,3}[ \t.-]?)?\(?\d{2,5}\)?(?:[ \t.-]?\d{2,5}){0,3}")  # on one line
 _PHONE_CUE = re.compile(r"(?:tel|phone|ph|mob|mobile|call|contact|whatsapp|fax)\W{0,3}$", re.IGNORECASE)
 
 

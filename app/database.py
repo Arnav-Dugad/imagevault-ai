@@ -64,6 +64,7 @@ photos = Table(
     Column("camera", Boolean, nullable=True),                     # still has its camera details (EXIF)
     Column("qr_codes", Text, nullable=True),                      # QR codes in the photo, with where they are (JSON)
     Column("core_hash", String(16), nullable=True),               # hash of the middle of the picture (memes)
+    Column("receipt_fix", Text, nullable=True),                   # the user's corrections to its receipt (JSON)
 )
 
 albums = Table(

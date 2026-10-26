@@ -21,12 +21,12 @@
 - **Text in photos:** words on signs, receipts and boards are read in English, Hindi, Tamil, Telugu and Kannada (OCR). Search finds them (with the matching words outlined, even on thumbnails), a **Text** filter shows only photos with text, and you can copy the text in one click. Phone numbers, dates, prices, emails, links and QR codes are picked out, ready to tap or copy; a phone number can be saved as a contact and a date added to your calendar.
 - **Batch editing:** select many photos (Shift-click for a range, or Select all) to favourite, add to an album, download as a ZIP or delete.
 - **Browse** with sort (date taken, size, name), a date range filter, favourites, three thumbnail sizes and a full-screen viewer.
-- **Receipts:** photos of bills become a small spending table (shop, date, total), grouped by shop, with a CSV download.
+- **Receipts:** photos of bills and UPI payment screenshots become a small spending table (shop, date, total, items), grouped by shop, with what you buy most and a CSV download. Check each one next to its photo and correct it by hand; a receipt photographed twice is counted once.
 - **Cloud page:** live health of every Azure service, this month's Azure cost with a forecast for the month, storage used (with an estimated monthly cost and the space saved by removing duplicates), a one-click reset for demos, and the architecture.
 
 The AI is free: the models run inside the app (on your laptop or in App Service), with no paid API and no photos sent to another company.
 
-Try it with the [demo photos](frontend/public/demo-photos.zip): 102 photos from Unsplash and Wikimedia Commons, with copies, a burst, look-alikes, portraits, signs in English, Hindi, Tamil, Telugu and Kannada, receipts (some made up, one with a QR code), screenshots, memes and WhatsApp-style forwards. The zip's `README.txt` says what each one shows.
+Try it with the [demo photos](frontend/public/demo-photos.zip): 104 photos from Unsplash and Wikimedia Commons, with copies, a burst, look-alikes, portraits, signs in English, Hindi, Tamil, Telugu and Kannada, receipts (some made up, one with a QR code, one photographed twice), a UPI payment screenshot, screenshots, memes and WhatsApp-style forwards. The zip's `README.txt` says what each one shows.
 
 ## Cloud architecture
 

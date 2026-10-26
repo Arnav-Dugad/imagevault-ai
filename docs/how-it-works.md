@@ -110,7 +110,7 @@ Each word is stored with where it is (the reader reports where along the line ea
 
 **Phone numbers, dates, prices, emails and links** are picked out of the text with simple, strict rules (`app/textinfo.py`): a phone number needs a "+", a word like "Tel" or "Call" in front, or 10–12 digits (so "5841 5855" on a sign is not one); dates are read day-first, as in India; prices need a currency sign or "/-", or two decimals. They appear as chips you can tap to call, email, open or copy. A phone number can be saved as a contact card (.vcf) and a date as an all-day calendar reminder (.ics); both files are made in the browser. **QR codes** are read with OpenCV, outlined on the photo, and their text becomes a chip and is searchable.
 
-On the demo set, the receipt gives its phone number, date and four prices, the station boards are read in Tamil, Hindi and Telugu as well as English, and the temple notice in Kannada. Reading takes about 0.3 s for a sign on a laptop, under 1 s for a receipt or a busy street, and about 4 s for a full typed page. Bengali is not read, because PaddleOCR has no Bengali reader. Its Kannada reader wasn't published in the format the app uses, so it was converted with `paddle2onnx` and is downloaded from this project's GitHub release, checked by its SHA-256 like the other models.
+On the demo set, the receipt gives its phone number, date and four prices, the station boards are read in Tamil, Hindi and Telugu as well as English, and the temple notice in Kannada. Reading takes about 0.3 s for a sign on a laptop, under 1 s for a receipt or a busy street, and about 4 s for a full typed page. Bengali, Malayalam and Gujarati are not read, because PaddleOCR has no trained reader for them. Its Kannada reader wasn't published in the format the app uses, so it was converted with `paddle2onnx` and is downloaded from this project's GitHub release, checked by its SHA-256 like the other models.
 
 ### Memes and forwarded images
 
@@ -120,7 +120,15 @@ A **meme** is big caption text at the top and at the bottom of a photo (letters 
 
 `app/receipts.py` reads a receipt from its text: the **shop** is the first top line that is mostly letters and isn't a heading like "TAX INVOICE"; the **date** is the first date (day first); the **total** is the amount on the last "total" line that isn't a subtotal, or just after it, or a bare amount just before it (the text reader often reads the right-hand column first). Dates and times on that line are skipped, and an amount with two decimals wins. When a rule isn't sure, it says nothing instead of guessing, and the Receipts page shows each result next to its photo. Receipts are grouped by shop name, ignoring spaces, capitals and punctuation.
 
-On the demo set, the three made-up receipts give the right shop, date and total, the two Green Basket bills are grouped, and the real Dutch receipt gives its shop and date but no total (the photo stops above it).
+**Items.** The text reader reads "Masala Dosa x2" and "140.00" as two lines, because they are far apart. So the words are first put back into rows by where they are on the photo: the slope of the text is measured, the words are straightened, and words at the same height become one row ("Masala Dosa x2 140.00"). Rows above the total that end in a price are the items. "What you buy most" adds them up across receipts, ignoring sizes and counts, so "Toned Milk 2L" and "Toned Milk 1L" are the same thing.
+
+**Payment screenshots.** A screenshot with two payment words ("UPI", "Paid to", "Payment successful", "Transaction ID"...) is a payment: the shop is the name after "Paid to", the total is the ₹ amount. The reader sometimes takes a big "₹" for a 2 or a 7, depending on the app's font, so check the amount.
+
+**Corrections.** Click a receipt to see the photo next to what was read, with the shop, date and total outlined on it. Anything can be corrected; the corrections are stored separately, so "Use the AI's reading" brings the original back. "Not a receipt" removes a photo from the page, and "This is a receipt" in the photo viewer adds one the AI missed.
+
+**Photographed twice.** Receipts with the same shop, date and total are the same receipt: the sharpest photo is counted, the others are listed (crossed out) and offered on the Duplicates page.
+
+On the demo set, the three made-up receipts give the right shop, date, total and items, the two Green Basket bills are grouped (with milk bought twice), the bill photographed twice is counted once, the UPI screenshot gives Raju Tea Stall, 24 Oct 2026 and ₹450, and the real Dutch receipt gives its shop, date and five items but no total (the photo stops above it).
 
 ### Same meme, different caption
 

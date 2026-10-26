@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
-import { CalendarDays, CalendarPlus, ChevronLeft, ChevronRight, Cloud, Copy, Download, FolderOpen, HardDrive, Heart, IndianRupee, Link2, LoaderCircle, Mail, Maximize2, Phone, QrCode, ReceiptText, ScanText, Sparkles, Trash2, UserPlus, X, type LucideIcon } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
+import { CalendarDays, CalendarPlus, ChevronLeft, ChevronRight, Cloud, Copy, Download, FolderOpen, HardDrive, Heart, IndianRupee, Link2, LoaderCircle, Mail, Maximize2, Phone, QrCode, ReceiptText, ScanLine, ScanText, Sparkles, Trash2, UserPlus, X, type LucideIcon } from "lucide-react";
 import { FullscreenPhoto } from "./FullscreenPhoto";
 import { FaceAvatar, personName } from "../pages/PeoplePage";
 import { api } from "../lib/api";
@@ -14,6 +14,19 @@ import { Button, ConfirmDialog, ErrorNote, MatchBadge, Modal } from "./ui";
 
 const WORDS_SHOWN = 40; // a full page of text has hundreds of words; show the first ones until asked
 const FINDS_SHOWN = 8; // a receipt can list a dozen prices
+const PHONE = "(max-width: 639px)";
+
+/** True on phone-sized screens, where the chips become a row you swipe through. */
+function usePhone() {
+  const [phone, setPhone] = useState(() => window.matchMedia(PHONE).matches);
+  useEffect(() => {
+    const query = window.matchMedia(PHONE);
+    const changed = () => setPhone(query.matches);
+    query.addEventListener("change", changed);
+    return () => query.removeEventListener("change", changed);
+  }, []);
+  return phone;
+}
 
 /** Phone numbers, dates, prices, emails and links found in a photo's text, ready to use. */
 type Copy = (value: string, message: string) => Promise<void>;
@@ -31,6 +44,10 @@ interface Find {
 function Finds({ photo, copy }: { photo: PhotoDetails; copy: Copy }) {
   const { found, receipt } = photo;
   const [showAll, setShowAll] = useState(false);
+  const [marking, setMarking] = useState(false);
+  const phone = usePhone();
+  const navigate = useNavigate();
+  const toast = useToast();
   const who = receipt?.shop || photo.filename.replace(/\.[^.]+$/, "");
   const items: Find[] = [
     ...photo.qr_codes.map((q) => ({ icon: QrCode, label: q.text, value: q.text, title: "QR code",
@@ -43,27 +60,47 @@ function Finds({ photo, copy }: { photo: PhotoDetails; copy: Copy }) {
       extra: { icon: CalendarPlus, title: "Add to calendar (.ics)", run: () => calendarEvent(who, d.iso, `From the photo ${photo.filename}`) } })),
     ...found.prices.map((p) => ({ icon: IndianRupee, label: p.text, value: p.text, title: "Price" })),
   ];
-  const shown = showAll ? items : items.slice(0, FINDS_SHOWN);
+  const shown = showAll || phone ? items : items.slice(0, FINDS_SHOWN); // on phones, swipe through them all
+  const chip = phone ? "px-3 py-2.5" : "px-2 py-1";
+  const icon = phone ? "h-4 w-4" : "h-3.5 w-3.5";
+
+  async function markAsReceipt() {
+    setMarking(true);
+    try {
+      await api(`/photos/${photo.id}/receipt`, { method: "PUT", body: JSON.stringify({ receipt: true }) });
+      navigate(`/receipts?photo=${photo.id}`);
+    } catch (e) {
+      toast((e as Error).message, true);
+      setMarking(false);
+    }
+  }
+
   return <>
-    {receipt && <Link to="/receipts" className="focus-ring mb-3 flex items-center gap-2 rounded-xl border border-acid/30 bg-acid/[.06] px-3 py-2 text-sm hover:bg-acid/10">
+    {receipt ? <Link to={`/receipts?photo=${photo.id}`} title="Check or correct it on the Receipts page"
+      className="focus-ring group mb-3 flex items-center gap-2 rounded-xl border border-acid/30 bg-acid/[.06] px-3 py-2 text-sm transition hover:bg-acid/10">
       <ReceiptText className="h-4 w-4 shrink-0 text-acid" />
-      <span className="min-w-0 flex-1 truncate">{receipt.shop ?? "Receipt"}{receipt.date && ` · ${formatDay(receipt.date)}`}</span>
+      <span className="min-w-0 flex-1 truncate">{receipt.shop ?? (receipt.kind === "payment" ? "Payment" : "Receipt")}{receipt.date && ` · ${formatDay(receipt.date)}`}</span>
       {receipt.total !== null && <b className="shrink-0 tabular-nums">{receipt.currency}{receipt.total.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</b>}
-    </Link>}
-    {items.length > 0 && <div className="mb-3 flex flex-wrap gap-1.5">
+      <ChevronRight className="h-4 w-4 shrink-0 text-muted transition group-hover:translate-x-0.5 group-hover:text-acid" />
+    </Link> : photo.text && <button onClick={() => void markAsReceipt()} disabled={marking}
+      className="focus-ring mb-3 inline-flex items-center gap-1.5 rounded-lg px-1 text-xs text-muted hover:text-acid disabled:opacity-60">
+      <ReceiptText className="h-3.5 w-3.5" />{marking ? "Adding…" : "This is a receipt"}
+    </button>}
+    {items.length > 0 && <div className={cn("mb-3", phone ? "-mx-5 flex snap-x snap-mandatory gap-2 overflow-x-auto px-5 pb-2 [scrollbar-width:none]" : "flex flex-wrap gap-1.5")}>
       {shown.map(({ icon: Icon, label, value, href, title, extra }, i) => (
-        <span key={i} className="inline-flex max-w-full items-stretch overflow-hidden rounded-lg border border-sky-300/30 bg-sky-300/[.07] text-xs text-sky-200">
+        <span key={i} className={cn("inline-flex items-stretch overflow-hidden border border-sky-300/30 bg-sky-300/[.07] text-sky-200",
+          phone ? "shrink-0 snap-start rounded-xl text-sm" : "max-w-full rounded-lg text-xs")}>
           {href
             ? <a href={href} target={href.startsWith("http") ? "_blank" : undefined} rel="noreferrer" title={title}
-                className="focus-ring inline-flex min-w-0 items-center gap-1.5 px-2 py-1 hover:bg-sky-300/10"><Icon className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{label}</span></a>
-            : <span title={title} className="inline-flex min-w-0 items-center gap-1.5 px-2 py-1"><Icon className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{label}</span></span>}
+                className={cn("focus-ring inline-flex min-w-0 items-center gap-1.5 hover:bg-sky-300/10", chip)}><Icon className={cn(icon, "shrink-0")} /><span className={cn("truncate", phone && "max-w-[55vw]")}>{label}</span></a>
+            : <span title={title} className={cn("inline-flex min-w-0 items-center gap-1.5", chip)}><Icon className={cn(icon, "shrink-0")} /><span className={cn("truncate", phone && "max-w-[55vw]")}>{label}</span></span>}
           {extra && <button onClick={extra.run} title={extra.title} aria-label={extra.title}
-            className="focus-ring border-l border-sky-300/20 px-1.5 hover:bg-sky-300/10"><extra.icon className="h-3.5 w-3.5" /></button>}
+            className={cn("focus-ring border-l border-sky-300/20 hover:bg-sky-300/10", phone ? "px-3" : "px-1.5")}><extra.icon className={icon} /></button>}
           <button onClick={() => void copy(value, `Copied ${label.length > 30 ? "it" : label}`)} title="Copy" aria-label={`Copy ${label}`}
-            className="focus-ring border-l border-sky-300/20 px-1.5 hover:bg-sky-300/10"><Copy className="h-3.5 w-3.5" /></button>
+            className={cn("focus-ring border-l border-sky-300/20 hover:bg-sky-300/10", phone ? "px-3" : "px-1.5")}><Copy className={icon} /></button>
         </span>
       ))}
-      {items.length > FINDS_SHOWN && <button onClick={() => setShowAll(!showAll)} className="focus-ring rounded-lg px-2 py-1 text-xs text-sky-200 hover:underline">
+      {!phone && items.length > FINDS_SHOWN && <button onClick={() => setShowAll(!showAll)} className="focus-ring rounded-lg px-2 py-1 text-xs text-sky-200 hover:underline">
         {showAll ? "Show fewer" : `${items.length - FINDS_SHOWN} more`}</button>}
     </div>}
   </>;
@@ -105,6 +142,15 @@ export function PhotoViewer({ id, ids, onClose, onDeleted, onChanged, highlight 
     setPhoto(null); setError(""); setImageLoaded(false);
     api<PhotoDetails>(`/photos/${currentId}`).then(setPhoto).catch((e: Error) => setError(e.message));
   }, [currentId]);
+
+  const reading = !!photo && (photo.ai_status === null || photo.ai_status === "processing");
+  useEffect(() => {
+    if (!reading) return;
+    const timer = setTimeout(() => {
+      api<PhotoDetails>(`/photos/${currentId}`).then((fresh) => setPhoto((old) => (old?.id === fresh.id ? fresh : old))).catch(() => {});
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [reading, photo, currentId]);
 
   const index = ids ? ids.indexOf(currentId) : -1;
   const prevId = index > 0 ? ids![index - 1] : null;
@@ -173,7 +219,7 @@ export function PhotoViewer({ id, ids, onClose, onDeleted, onChanged, highlight 
 
   return (
     <Modal onClose={onClose} className="max-w-6xl">
-      <div className="grid lg:h-[86vh] lg:grid-cols-[1fr_340px]">
+      <div className="grid grid-cols-[minmax(0,1fr)] lg:h-[86vh] lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="relative grid min-h-[40vh] place-items-center bg-black/40 p-3 lg:min-h-0">
           {photo && <div className="relative">
             <img src={photo.file_url} alt={photo.filename} onLoad={() => setImageLoaded(true)} className="block max-h-[80vh] w-auto rounded-lg object-contain"
@@ -185,6 +231,11 @@ export function PhotoViewer({ id, ids, onClose, onDeleted, onChanged, highlight 
                 {face.name && <span className={`absolute left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-canvas/90 px-1.5 py-0.5 text-[11px] font-medium text-sky-200 ${namedIndex(face.id) % 2 ? "-top-6" : "-bottom-6"}`}>{face.name}</span>}
               </span>
             ))}
+            {imageLoaded && reading && <>
+              <span className="scan-line" aria-hidden />
+              <span className="absolute bottom-3 left-1/2 inline-flex -translate-x-1/2 items-center gap-1.5 whitespace-nowrap rounded-full bg-black/60 px-3 py-1 text-xs text-white/90 backdrop-blur">
+                <ScanLine className="h-3.5 w-3.5 text-acid" />The AI is reading this photo…</span>
+            </>}
             {imageLoaded && photo.qr_codes.map((code, i) => (
               <span key={`qr-${i}`} title={code.text}
                 className="face-box pointer-events-none absolute rounded-md border-2 border-dashed border-sky-300 shadow-[0_0_0_1px_rgba(0,0,0,.4)]"

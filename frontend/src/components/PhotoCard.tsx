@@ -51,6 +51,7 @@ export function PhotoCard({ photo, onOpen, selecting, selected, onSelect, compac
         <div className="relative overflow-hidden">
           <PhotoThumb photo={photo} className={cn("aspect-[4/3] w-full transition duration-300 group-hover:scale-[1.03]", selected && "scale-[.94] rounded-xl")} />
           <Highlights photo={photo} />
+          {photo.ai_status === "processing" && <span className="scan-line" aria-hidden />}
           {photo.match && <div className="absolute left-2 top-2"><MatchBadge kind={photo.match} /></div>}
           {photo.favorite && <Heart className="absolute bottom-2 right-2 h-4 w-4 fill-coral text-coral drop-shadow" />}
         </div>

@@ -58,6 +58,32 @@ body {
 @keyframes word-match { from { opacity: 0; transform: scale(1.25); } }
 .word-box { animation: word-glow 1.8s ease-out both; }
 .word-box.match, .word-box.pointed { animation: word-match .4s cubic-bezier(.22, 1, .36, 1) backwards; opacity: 1; }
+/* A line sweeps down a photo while the AI reads it */
+@keyframes scan {
+  0% { top: 0; opacity: 0; }
+  12%, 88% { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+.scan-line {
+  position: absolute; left: 0; right: 0; top: 0; height: 2px; pointer-events: none;
+  background: rgb(185 243 106); box-shadow: 0 0 14px 2px rgb(185 243 106 / .65);
+  animation: scan 2.4s ease-in-out infinite;
+}
+.scan-line::before {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 2px; height: 48px;
+  background: linear-gradient(to top, rgb(185 243 106 / .18), transparent);
+}
+.scan-line.once { animation-iteration-count: 1; animation-fill-mode: forwards; animation-duration: 1.4s; }
+/* A failed upload shakes once; one that works on a second try flashes green */
+@keyframes shake {
+  10%, 90% { transform: translateX(-1px); }
+  20%, 80% { transform: translateX(2px); }
+  30%, 50%, 70% { transform: translateX(-3px); }
+  40%, 60% { transform: translateX(3px); }
+}
+.shake { animation: shake .45s cubic-bezier(.36, .07, .19, .97) both; }
+@keyframes flash-ok { from { background-color: rgb(185 243 106 / .2); } to { background-color: transparent; } }
+.flash-ok { animation: flash-ok 1.8s ease-out; }
 /* Bars (like a shop's share of the spending) fill in from the left */
 @keyframes grow-x { from { transform: scaleX(0); } }
 .grow-x { animation: grow-x .6s cubic-bezier(.22, 1, .36, 1) backwards; }

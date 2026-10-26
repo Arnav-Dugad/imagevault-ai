@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from PIL import Image, ImageEnhance, ImageOps
 
-from app import intelligence
+from app import intelligence, textinfo
 
 ASSETS = Path(__file__).parent / "assets"
 pytestmark = pytest.mark.usefixtures("ai_models")  # downloads the models once (about 190 MB)
@@ -178,6 +178,8 @@ def test_phone_numbers_dates_and_prices_in_photos(client):
     assert found["phones"][0]["dial"] == "+919876543210"
     assert found["dates"][0]["iso"] == "2026-01-26"
     assert found["prices"][0]["text"].endswith("450.00")
+    # A phone number never runs on into the next line ("08:15" below it is a time).
+    assert [p["text"] for p in textinfo.find("Call 98450 12345\n08:15")["phones"]] == ["98450 12345"]
 
 
 def test_album_name_suggestions(client):
@@ -269,8 +271,71 @@ def test_receipts_are_read_and_grouped_by_shop(client):
     assert spending["count"] == 2 and spending["totals"] == {"₹": 570.5}
     assert [s["name"] for s in spending["shops"]] == ["Green Basket Stores"]
     receipt = client.get(f"/api/photos/{first}").json()["receipt"]
-    assert receipt == {"shop": "Green Basket Stores", "date": "2026-10-12", "total": 450.0, "currency": "₹"}
+    assert {k: receipt[k] for k in ("shop", "date", "total", "currency", "kind")} == {
+        "shop": "Green Basket Stores", "date": "2026-10-12", "total": 450.0, "currency": "₹", "kind": "receipt"}
     assert len(client.get("/api/photos?filter=text").json()["items"]) == 3  # the "Text" filter
+
+
+def test_receipt_rows_and_items_from_word_positions():
+    from app import receipts
+
+    # A slightly turned receipt: each price is read as its own line, a little higher than its item.
+    def word(text, x, y, line):
+        return {"text": text, "box": [x, y + 0.02 * x, 0.08, 0.025], "line": line}
+
+    words = [word("CORNER", 0.3, 0.10, 0), word("STORE", 0.4, 0.10, 0), word("Date: 19/10/2026", 0.3, 0.15, 1),
+             word("45.00", 0.7, 0.20, 2), word("Bread", 0.3, 0.20, 3), word("Milk", 0.3, 0.24, 5),
+             word("2L", 0.4, 0.24, 5), word("60.00", 0.7, 0.24, 4), word("TOTAL", 0.3, 0.30, 7),
+             word("105.00", 0.7, 0.30, 6)]
+    assert receipts.rows(words) == ["CORNER STORE", "Date: 19/10/2026", "Bread 45.00", "Milk 2L 60.00", "TOTAL 105.00"]
+    receipt = receipts.read("", words)
+    assert receipt["shop"] == "Corner Store" and receipt["total"] == 105.0
+    assert receipt["items"] == [{"name": "Bread", "amount": 45.0}, {"name": "Milk 2L", "amount": 60.0}]
+    assert receipts.item_name("ATTA 10kg") == receipts.item_name("Atta 5kg") == "Atta"
+
+
+def test_payment_screenshots_count_as_receipts():
+    from app import receipts
+
+    text = ("Payment successful\n₹450.00\nPaid to\nRaju Tea Stall\n24 Oct 2026, 7:42 pm\n"
+            "UPI transaction ID\n4301 1234 5678")
+    assert receipts.read(text) == {"shop": "Raju Tea Stall", "date": "2026-10-24", "total": 450.0, "currency": "₹",
+                                   "kind": "payment", "items": []}
+    assert receipts.read("Pay with UPI at the counter") is None  # one cue is not a payment
+
+
+def test_receipts_can_be_corrected_by_hand(client):
+    bill = upload(client, "bill.jpg", text_photo("GREEN BASKET STORES", "TOTAL Rs 450.00  12/10/2026"))
+    sign = upload(client, "sign.jpg", text_photo("WELCOME TO GOA"))
+    intelligence.process_pending()
+
+    fixed = client.put(f"/api/photos/{bill}/receipt", json={"shop": "Green Basket", "total": 455.5}).json()["receipt"]
+    assert fixed["shop"] == "Green Basket" and fixed["total"] == 455.5 and fixed["date"] == "2026-10-12"
+    assert sorted(fixed["edited"]) == ["shop", "total"]
+    assert client.get("/api/receipts").json()["totals"] == {"₹": 455.5}
+    assert client.put(f"/api/photos/{bill}/receipt", json={"date": "12-10-2026"}).status_code == 422
+
+    client.put(f"/api/photos/{sign}/receipt", json={"receipt": True, "shop": "Goa Cafe", "total": 80})
+    client.put(f"/api/photos/{bill}/receipt", json={"receipt": False})
+    spending = client.get("/api/receipts").json()
+    assert spending["count"] == 1 and spending["shops"][0]["name"] == "Goa Cafe"
+
+    restored = client.delete(f"/api/photos/{bill}/receipt").json()["receipt"]
+    assert restored["shop"] == "Green Basket Stores" and restored["total"] == 450.0 and restored["edited"] == []
+
+
+def test_a_receipt_photographed_twice_is_counted_once(client):
+    first = text_photo("GREEN BASKET STORES", "TOTAL Rs 450.00  12/10/2026")
+    again = io.BytesIO()
+    Image.open(io.BytesIO(first)).resize((860, 382)).save(again, "JPEG", quality=80)
+    upload(client, "bill.jpg", first)
+    upload(client, "bill-again.jpg", again.getvalue())
+    intelligence.process_pending()
+
+    spending = client.get("/api/receipts").json()
+    assert spending["count"] == 1 and spending["copies"] == 1 and spending["totals"] == {"₹": 450.0}
+    groups = client.get("/api/receipts/copies").json()
+    assert len(groups) == 1 and len(groups[0]["items"]) == 2
 
 
 def test_receipt_total_printed_before_its_label():
@@ -278,7 +343,8 @@ def test_receipt_total_printed_before_its_label():
 
     # The text reader often puts the right-hand amount on the line before "TOTAL".
     text = "ANNAPOORNA TIFFINS\nDate: 20/10/2026\n12.50\nGST 5%\n262.50\nTOTAL Rs\nThank you! Visit again"
-    assert receipts.read(text) == {"shop": "Annapoorna Tiffins", "date": "2026-10-20", "total": 262.5, "currency": "₹"}
+    assert receipts.read(text) == {"shop": "Annapoorna Tiffins", "date": "2026-10-20", "total": 262.5, "currency": "₹",
+                                   "kind": "receipt", "items": []}
 
 
 def test_qr_codes_are_read(client):

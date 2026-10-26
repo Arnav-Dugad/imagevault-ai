@@ -15,7 +15,7 @@ function ItemStatus({ item }: { item: UploadItem }) {
   const match = item.result?.match;
   if (match?.kind === "exact") return <span className="flex items-center gap-1.5 text-coral"><Copy className="h-4 w-4 shrink-0" />Copy of “{match.filename}”</span>;
   if (match) return <span className="flex items-center gap-1.5 text-lilac"><Sparkles className="h-4 w-4 shrink-0" />{percent(match.similarity)} like “{match.filename}”</span>;
-  return <span className="flex items-center gap-1.5 text-acid"><CheckCircle2 className="h-4 w-4 shrink-0" />Saved</span>;
+  return <span className="flex items-center gap-1.5 text-acid"><CheckCircle2 className="h-4 w-4 shrink-0" />{item.retried ? "Saved on the second try" : "Saved"}</span>;
 }
 
 export function UploadPage() {
@@ -74,7 +74,8 @@ export function UploadPage() {
       </div>
       <ul className="panel divide-y divide-line">
         {items.map((item) => (
-          <li key={item.key} className="relative flex flex-col gap-1 overflow-hidden px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+          <li key={item.key} className={cn("relative flex flex-col gap-1 overflow-hidden px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-6",
+            item.state === "failed" && "shake", item.state === "done" && item.retried && "flash-ok")}>
             {item.state === "uploading" && <span className="absolute inset-y-0 left-0 bg-acid/[.06] transition-all" style={{ width: `${item.progress}%` }} />}
             <span className="relative min-w-0 truncate"><span className="font-medium">{item.file.name}</span><span className="ml-2 text-muted">{formatBytes(item.file.size)}</span></span>
             <span className="relative shrink-0 text-right"><ItemStatus item={item} /></span>
