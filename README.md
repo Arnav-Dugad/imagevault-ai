@@ -50,7 +50,7 @@ flowchart LR
 | **Free AI models** (CLIP, YuNet, SFace, PaddleOCR text readers via ONNX Runtime + OpenCV) on **your laptop** (edge) or in App Service, chosen with a switch | People, smart search, text search and same-subject suggestions, at no extra cost |
 | **Terraform** | Creates all of the above with one command (Infrastructure as Code) |
 | **GitHub Actions** | Tests every push and deploys `main` to Azure (CI/CD) |
-| **Cost Management** (budget + Query API) | Emails alerts at 50%, 80% and forecast 100% of the US$5 monthly budget; the Cloud page shows the live month-to-date cost |
+| **Cost Management** (budget + Query API) | Emails alerts at 50%, 80% and forecast 100% of the ₹450 (about US$5) monthly budget; the Cloud page shows the live month-to-date cost |
 | **Managed identities + OIDC** | No storage keys and no deployment passwords |
 
 ## Run it on your computer

@@ -20,11 +20,11 @@ Terraform (`infra/main.tf`) creates everything in one resource group called **im
 | Log Analytics + Application Insights | Pay-as-you-go, **capped at 0.1 GB a day** | Free: the cap keeps it under the 5 GB/month free allowance |
 | Free AI recognition (CLIP, YuNet, SFace, PaddleOCR text readers) | Runs on your laptop, or in the Web App | Free: no AI service is created or billed |
 | Managed identity for GitHub Actions | | Free |
-| Budget with email alerts | US$5 a month | Free |
+| Budget with email alerts | ₹450 (about US$5) a month, in the billing currency | Free |
 
 **Expected total: US$0 a month during your first year** (only a few cents for storage). Azure for Students has no credit card, so real money can never be charged: if your US$100 credit ran out, Azure would switch the resources off rather than bill you.
 
-> **Budget caution (course guideline 7):** check your remaining credit in the [Azure for Students portal](https://portal.azure.com/#view/Microsoft_Azure_Education/EducationMenuBlade/~/overview). Terraform creates a monthly budget (default US$5) that emails you at 50%, at 80%, and when spending is forecast to reach 100%. See [keeping your credit safe](#keeping-your-credit-safe) below, and when the project is finished, run `terraform destroy` (step 7).
+> **Budget caution (course guideline 7):** check your remaining credit in the [Azure for Students portal](https://portal.azure.com/#view/Microsoft_Azure_Education/EducationMenuBlade/~/overview). Terraform creates a monthly budget (default ₹450, about US$5; the amount is in your billing currency) that emails you at 50%, at 80%, and when spending is forecast to reach 100%. See [keeping your credit safe](#keeping-your-credit-safe) below, and when the project is finished, run `terraform destroy` (step 7).
 
 ---
 
