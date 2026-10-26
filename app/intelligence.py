@@ -52,7 +52,7 @@ STALE_CLAIM_SECONDS = 600      # photos claimed by a worker that went silent are
 SLOW_PHOTO_SECONDS = 300       # analysing one photo should never take this long
 # Raise this whenever the analysis finds something new (for example word positions). Photos analysed by an
 # older version are analysed again, and laptop workers running older code get no photos until updated.
-ANALYSIS_VERSION = 5
+ANALYSIS_VERSION = 6
 
 _wake = threading.Event()
 _worker_started = False

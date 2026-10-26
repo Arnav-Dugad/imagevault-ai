@@ -4,7 +4,7 @@
 **Project:** ImageVault, a cloud photo vault with duplicate detection  
 **Cloud provider:** Microsoft Azure (Azure for Students)  
 **Repository:** https://github.com/Arnav-Dugad/imagevault-ai  
-**Version:** 3.10.1
+**Version:** 3.11.0
 
 ---
 
@@ -339,12 +339,12 @@ The app is stateless: all data lives in PostgreSQL and Blob Storage. So moving f
 
 ### 5.8 Testing
 
-- **48 automated backend tests** (including `tests/test_worker.py`, 8 tests: the website leaves new photos to an online laptop, takes over when photos wait too long or no laptop is online, releases claims of silent workers, the switch keeps the AI on one side, "waiting for your laptop" is shown, the worker settings file is read, and the worker loop rests and stops when asked, as the tray icon does):
+- **50 automated backend tests** (including `tests/test_worker.py`, 8 tests: the website leaves new photos to an online laptop, takes over when photos wait too long or no laptop is online, releases claims of silent workers, the switch keeps the AI on one side, "waiting for your laptop" is shown, the worker settings file is read, and the worker loop rests and stops when asked, as the tray icon does):
   - `tests/test_app.py` (18 tests): upload/download, exact copies and storage deduplication including file deletion, resized/compressed/brightened copies, non-matches, grouping and best copy, bulk removal, invalid files, search/filter, health/cloud status, password protection and lockout, the cost card, camera-date filters and sorting, batch actions (favourite, album, ZIP download, delete), the sharpest photo in a group, storage usage, space saved and "delete everything", and the space-waster list and the "already stored" check.
-  - `tests/test_ai.py` (22 tests, real public-domain photos and made-up text): the same person recognised across photos but not confused with another person; a mirrored, cropped, recoloured shot grouped as "same subject" rather than as a copy; smart search finding the right photos, and nothing for an absent subject; automatic albums; a burst keeping its sharpest frame (exact copies are not a burst); merging and splitting people by hand; text in a photo found by search; Hindi and Tamil words read, located and found by search; smart search using the text in photos; the Documents and Screenshots albums; outlines in search results; phone numbers, dates and prices; album name suggestions; memes and forwarded images; receipts read and grouped by shop, including a total printed before its label; receipt rows and items rebuilt from word positions; UPI payment screenshots; corrections by hand (and undoing them); a receipt photographed twice counted once; a phone number that doesn't run on into the next line; the "Text" filter; QR codes read; the same meme picture with different captions; the laptop worker's results sent over HTTPS and stored.
+  - `tests/test_ai.py` (24 tests, real public-domain photos and made-up text): the same person recognised across photos but not confused with another person; a mirrored, cropped, recoloured shot grouped as "same subject" rather than as a copy; smart search finding the right photos, and nothing for an absent subject; automatic albums; a burst keeping its sharpest frame (exact copies are not a burst); merging and splitting people by hand; text in a photo found by search; Hindi and Tamil words read, located and found by search; smart search using the text in photos; the Documents and Screenshots albums; outlines in search results; phone numbers, dates and prices; album name suggestions; memes and forwarded images; receipts read and grouped by shop, including a total printed before its label; receipt rows and items rebuilt from word positions; UPI payment screenshots; corrections by hand (and undoing them); a receipt photographed twice counted once; a phone number that doesn't run on into the next line; the "Text" filter; QR codes read; the same meme picture with different captions; the laptop worker's results sent over HTTPS and stored.
 - The same tests run in two modes in CI: SQLite + local folder, and PostgreSQL 16 + Azurite, so the cloud code paths are exercised on every push. The AI models are cached between runs.
 - Website: TypeScript type-checking, ESLint, production build.
-- Manual end-to-end check with the 104 demo photos (Sections 5.1, 5.9, 5.10, 5.11 and 5.12).
+- Manual end-to-end check with the 161 demo photos (Sections 5.1, 5.9, 5.10, 5.11 and 5.12).
 - **Live deployment check (2026-10-25)** on `https://imagevault-4g8kx.azurewebsites.net`:
   - `terraform apply` created all 19 resources;
   - the CD pipeline deployed and passed its smoke test;
