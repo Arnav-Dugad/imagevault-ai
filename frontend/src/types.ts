@@ -40,6 +40,8 @@ export interface PhotoDetails extends Photo {
   text: string;            // words read from the photo
   words: { text: string; box: [number, number, number, number]; line: number }[]; // the same words with where they are
   found: TextFinds;        // phone numbers, dates, prices, emails and links in the text
+  qr_codes: { text: string; box: [number, number, number, number] }[];
+  receipt: Receipt | null; // shop, date and total, if the photo is a receipt
 }
 
 export interface TextFinds {
@@ -96,7 +98,7 @@ export interface DuplicateGroup {
   id: string;
   extra_bytes: number;
   sharpest_id: string | null;
-  items: { kind: "keep" | MatchKind | "burst"; similarity: number; photo: Photo }[];
+  items: { kind: "keep" | MatchKind | "burst" | "meme"; similarity: number; photo: Photo }[];
 }
 
 export interface Album {
@@ -165,4 +167,19 @@ export interface SystemStatus {
   ai_mode: AiMode;
   laptop_online: boolean;
   services: CloudService[];
+}
+
+export interface Receipt {
+  shop: string | null;
+  date: string | null;     // YYYY-MM-DD
+  total: number | null;
+  currency: string;        // "₹", "$", "€", "£" or "" when the receipt doesn't say
+}
+
+export interface ReceiptItem extends Receipt { photo: Photo }
+
+export interface Spending {
+  count: number;
+  totals: Record<string, number>;
+  shops: { name: string; receipts: ReceiptItem[]; totals: Record<string, number> }[];
 }

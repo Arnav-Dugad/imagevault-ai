@@ -32,6 +32,7 @@ export function UploadPage() {
 
   const done = items.filter((i) => i.state === "done");
   const failed = items.filter((i) => i.state === "failed").length;
+  const retryable = items.filter((i) => i.state === "failed" && !i.final).length;
   const duplicates = done.filter((i) => i.result?.match).length;
   const stored = items.filter((i) => i.state === "stored").length;
 
@@ -65,7 +66,7 @@ export function UploadPage() {
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-semibold">{busy ? `Uploading ${done.length + failed + 1} of ${items.length - stored}` : `${done.length} uploaded${duplicates ? ` · ${duplicates} ${duplicates === 1 ? "duplicate" : "duplicates"}` : ""}${failed ? ` · ${failed} failed` : ""}`}</h2>
         <div className="flex flex-wrap gap-2">
-          {failed > 0 && !busy && <Button variant="secondary" onClick={retryFailed}><RotateCcw className="h-4 w-4" />Retry failed</Button>}
+          {retryable > 0 && !busy && <Button variant="secondary" onClick={retryFailed}><RotateCcw className="h-4 w-4" />Retry failed</Button>}
           {!busy && <Button variant="ghost" onClick={clearFinished}>Clear list</Button>}
           {!busy && duplicates > 0 && <Link to="/duplicates"><Button variant="secondary">Review duplicates</Button></Link>}
           {!busy && <Link to="/photos"><Button variant="secondary">View photos</Button></Link>}

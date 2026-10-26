@@ -13,19 +13,20 @@
 ## What it does
 
 - **Upload** by dragging photos anywhere on the page or choosing files.
-- **Duplicates:** finds exact copies (stored only once) and resized, compressed or edited versions. Compare them with a slider, see the biggest space-wasters, and delete the extras. Uploading a photo that's already stored gives a warning first.
+- **Duplicates:** finds exact copies (stored only once) and resized, compressed or edited versions, and the same meme with different captions. Compare them with a slider, see the biggest space-wasters, and delete the extras. Uploading a photo that's already stored gives a warning first.
 - **Bursts:** photos taken seconds apart are grouped, and the sharpest one is picked for you.
 - **People:** recognises the same person across photos, even in group photos. Name people, and merge or split them by hand when the AI gets it wrong.
 - **Albums:** make your own, or use the ones made automatically (Beach, Food & drink, Pets, Mountains, City, Sunsets, Documents & receipts, Screenshots, Memes, Forwarded and more). New albums get name suggestions from the words in their photos.
 - **Smart search:** describe a photo ("a dog on a beach", "a bridge at night") instead of remembering its name.
-- **Text in photos:** words on signs, receipts and boards are read in English, Hindi, Tamil and Telugu (OCR). Search finds them (with the matching words outlined, even on thumbnails), you can copy the text in one click, and phone numbers, dates, prices, emails and links are picked out, ready to tap.
+- **Text in photos:** words on signs, receipts and boards are read in English, Hindi, Tamil, Telugu and Kannada (OCR). Search finds them (with the matching words outlined, even on thumbnails), a **Text** filter shows only photos with text, and you can copy the text in one click. Phone numbers, dates, prices, emails, links and QR codes are picked out, ready to tap or copy; a phone number can be saved as a contact and a date added to your calendar.
 - **Batch editing:** select many photos (Shift-click for a range, or Select all) to favourite, add to an album, download as a ZIP or delete.
 - **Browse** with sort (date taken, size, name), a date range filter, favourites, three thumbnail sizes and a full-screen viewer.
+- **Receipts:** photos of bills become a small spending table (shop, date, total), grouped by shop, with a CSV download.
 - **Cloud page:** live health of every Azure service, this month's Azure cost with a forecast for the month, storage used (with an estimated monthly cost and the space saved by removing duplicates), a one-click reset for demos, and the architecture.
 
 The AI is free: the models run inside the app (on your laptop or in App Service), with no paid API and no photos sent to another company.
 
-Try it with the [demo photos](frontend/public/demo-photos.zip): 97 photos from Unsplash and Wikimedia Commons, with copies, a burst, look-alikes, portraits, signs in English, Hindi, Tamil and Telugu, a receipt, screenshots, memes and WhatsApp-style forwards. The zip's `README.txt` says what each one shows.
+Try it with the [demo photos](frontend/public/demo-photos.zip): 102 photos from Unsplash and Wikimedia Commons, with copies, a burst, look-alikes, portraits, signs in English, Hindi, Tamil, Telugu and Kannada, receipts (some made up, one with a QR code), screenshots, memes and WhatsApp-style forwards. The zip's `README.txt` says what each one shows.
 
 ## Cloud architecture
 
@@ -69,7 +70,7 @@ cd frontend && npm install && npm run build && cd ..
 python -m app                     # then open http://127.0.0.1:8000
 ```
 
-The first time it starts, ImageVault downloads its free AI models (about 235 MB, once) into `data/models`. To run without AI, set `IMAGEVAULT_AI=off`.
+The first time it starts, ImageVault downloads its free AI models (about 240 MB, once) into `data/models`. To run without AI, set `IMAGEVAULT_AI=off`.
 
 **AI on your laptop for the Azure website (edge computing):** after deploying, run `python -m app.worker` on your laptop. It connects to the website over HTTPS, so it works on any Wi-Fi, and analyses new photos for the live site. A switch on the Cloud page chooses where the AI runs: automatic, your laptop, or Azure. On Windows, double-click `start-ai-worker.cmd` to run it as an icon next to the clock, with Start and Stop. See [step 8 of the deployment guide](docs/azure-deployment.md#step-8-recommended-run-the-ai-on-your-laptop).
 

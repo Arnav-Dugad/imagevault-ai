@@ -62,6 +62,8 @@ photos = Table(
     Column("ocr_search", Text, nullable=True),                    # the text, lowercase without spaces, for search
     Column("jpeg_quality", Integer, nullable=True),               # 1-100; low for photos sent through messaging apps
     Column("camera", Boolean, nullable=True),                     # still has its camera details (EXIF)
+    Column("qr_codes", Text, nullable=True),                      # QR codes in the photo, with where they are (JSON)
+    Column("core_hash", String(16), nullable=True),               # hash of the middle of the picture (memes)
 )
 
 albums = Table(

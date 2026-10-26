@@ -20,7 +20,7 @@ const SORTS: { key: SortKey; label: string }[] = [
   { key: "smallest", label: "Smallest files" },
   { key: "name", label: "Name (A–Z)" },
 ];
-type Filter = "all" | "duplicates" | "favorites";
+type Filter = "all" | "duplicates" | "favorites" | "text";
 
 interface Options { smart: boolean; filter: Filter; sort: SortKey; size: GridSize }
 
@@ -115,7 +115,7 @@ export function PhotoBrowser({ albumId, rememberAs, header, emptyText }: {
         </div>
       </div>
       <div className="flex overflow-x-auto rounded-xl border border-line bg-panel p-1" role="group" aria-label="Filter">
-        {([["all", "All"], ["duplicates", "Duplicates"], ["favorites", "Favourites"]] as [Filter, string][]).map(([key, label]) => (
+        {([["all", "All"], ["text", "Text"], ["duplicates", "Duplicates"], ["favorites", "Favourites"]] as [Filter, string][]).map(([key, label]) => (
           <button key={key} onClick={() => setOptions({ filter: key })} aria-pressed={filter === key} className={pill(filter === key)}>{label}</button>
         ))}
       </div>

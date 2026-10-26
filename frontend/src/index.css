@@ -58,6 +58,9 @@ body {
 @keyframes word-match { from { opacity: 0; transform: scale(1.25); } }
 .word-box { animation: word-glow 1.8s ease-out both; }
 .word-box.match, .word-box.pointed { animation: word-match .4s cubic-bezier(.22, 1, .36, 1) backwards; opacity: 1; }
+/* Bars (like a shop's share of the spending) fill in from the left */
+@keyframes grow-x { from { transform: scaleX(0); } }
+.grow-x { animation: grow-x .6s cubic-bezier(.22, 1, .36, 1) backwards; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }

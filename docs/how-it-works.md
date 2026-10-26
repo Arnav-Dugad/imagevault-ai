@@ -70,7 +70,7 @@ Matching photos are joined into groups with a **union-find** algorithm. In each 
 
 ## Free AI recognition
 
-ImageVault runs small open-source AI models **on your own machines**, using ONNX Runtime and OpenCV: on your laptop when it's online, otherwise inside the App Service. There's no paid AI API, no per-photo charge and no usage limit, and photos are never sent to another company. The models (about 235 MB) are downloaded once from fixed versions and checked against SHA-256 fingerprints (`app/ai.py`). With all of them loaded, the app uses about 320 MB of memory, which fits the free F1 plan's 1 GB.
+ImageVault runs small open-source AI models **on your own machines**, using ONNX Runtime and OpenCV: on your laptop when it's online, otherwise inside the App Service. There's no paid AI API, no per-photo charge and no usage limit, and photos are never sent to another company. The models (about 240 MB) are downloaded once from fixed versions and checked against SHA-256 fingerprints (`app/ai.py`). With all of them loaded, the app uses about 320 MB of memory, which fits the free F1 plan's 1 GB.
 
 | Model | License | What it does | Used for |
 |---|---|---|---|
@@ -104,17 +104,27 @@ Photos are *claimed* with an atomic `UPDATE … WHERE ai_status IS NULL`, so no 
 
 ### Text in photos (OCR)
 
-The PP-OCR detector finds text regions and each one is straightened. PaddleOCR's English reader reads the whole line, keeping capitals, spaces and punctuation ("Tel:010-265.33.99", "Datum: 26/01/2021", "Rs 1,250.00"). Unless English is already very sure of the line, readers for Hindi (Devanagari), Tamil and Telugu read it too; the most confident reading wins, but an Indian-language reading only counts if at least 80% of its letters are in that script and it uses at least 3 different letters (the Telugu reader once read a row of light bulbs as "ంంంం"). Lines any reader is less than 85% sure about are dropped. To stay quick, the Indian languages are only tried on the 20 clearest text areas, and not on lines where English found two real words.
+The PP-OCR detector finds text regions and each one is straightened. PaddleOCR's English reader reads the whole line, keeping capitals, spaces and punctuation ("Tel:010-265.33.99", "Datum: 26/01/2021", "Rs 1,250.00"). Unless English is already very sure of the line, readers for Hindi (Devanagari), Tamil, Telugu and Kannada read it too; the most confident reading wins, but an Indian-language reading only counts if at least 80% of its letters are in that script and it uses at least 3 different letters (the Telugu reader once read a row of light bulbs as "ంంంం"). Lines any reader is less than 85% sure about are dropped. To stay quick, the Indian languages are only tried on the 20 clearest text areas, and not on lines where English found two real words.
 
 Each word is stored with where it is (the reader reports where along the line each letter is). The normal search box searches the text ignoring spaces, capitals and punctuation, so "las vegas", "சென்னை", "स्टेशन" and "అంగల" all work, and the matching words are outlined on the thumbnails and on the photo, where all the words light up one after another as it opens. Smart search gives a photo a bonus when the words of the search are written in it, so "menu with nachos" finds a menu board. The photo viewer has a **Copy** button for the whole text.
 
-**Phone numbers, dates, prices, emails and links** are picked out of the text with simple, strict rules (`app/textinfo.py`): a phone number needs a "+", a word like "Tel" or "Call" in front, or 10–12 digits (so "5841 5855" on a sign is not one); dates are read day-first, as in India; prices need a currency sign or "/-", or two decimals. They appear as chips you can tap to call, email, open or copy.
+**Phone numbers, dates, prices, emails and links** are picked out of the text with simple, strict rules (`app/textinfo.py`): a phone number needs a "+", a word like "Tel" or "Call" in front, or 10–12 digits (so "5841 5855" on a sign is not one); dates are read day-first, as in India; prices need a currency sign or "/-", or two decimals. They appear as chips you can tap to call, email, open or copy. A phone number can be saved as a contact card (.vcf) and a date as an all-day calendar reminder (.ics); both files are made in the browser. **QR codes** are read with OpenCV, outlined on the photo, and their text becomes a chip and is searchable.
 
-On the demo set, the receipt gives its phone number, date and four prices, and the station boards are read in Tamil, Hindi and Telugu as well as English. Reading takes about 0.3 s for a sign on a laptop, under 1 s for a receipt or a busy street, and about 4 s for a full typed page. Bengali and Kannada are not read: PaddleOCR has no Bengali reader, and the Kannada reader is not published in the format the app uses.
+On the demo set, the receipt gives its phone number, date and four prices, the station boards are read in Tamil, Hindi and Telugu as well as English, and the temple notice in Kannada. Reading takes about 0.3 s for a sign on a laptop, under 1 s for a receipt or a busy street, and about 4 s for a full typed page. Bengali is not read, because PaddleOCR has no Bengali reader. Its Kannada reader wasn't published in the format the app uses, so it was converted with `paddle2onnx` and is downloaded from this project's GitHub release, checked by its SHA-256 like the other models.
 
 ### Memes and forwarded images
 
 A **meme** is big caption text at the top and at the bottom of a photo (letters at least 5% of the photo's height, at most 30 words). Shop signs usually have big text at the top only, so they aren't caught. A **forwarded** image is named the way WhatsApp, Telegram or Signal save photos ("IMG-20251024-WA0007.jpg", "WhatsApp Image ..."), or is a JPEG of at most 1600 px with no camera details and a JPEG quality of 70 or less (estimated from its compression tables): that is what messaging apps send. Camera photos keep their details and are saved at quality 85–95. Both are automatic albums, and are offered (unticked) in the "Free up" list. On the demo set each finds exactly its 2 photos.
+
+### Receipts
+
+`app/receipts.py` reads a receipt from its text: the **shop** is the first top line that is mostly letters and isn't a heading like "TAX INVOICE"; the **date** is the first date (day first); the **total** is the amount on the last "total" line that isn't a subtotal, or just after it, or a bare amount just before it (the text reader often reads the right-hand column first). Dates and times on that line are skipped, and an amount with two decimals wins. When a rule isn't sure, it says nothing instead of guessing, and the Receipts page shows each result next to its photo. Receipts are grouped by shop name, ignoring spaces, capitals and punctuation.
+
+On the demo set, the three made-up receipts give the right shop, date and total, the two Green Basket bills are grouped, and the real Dutch receipt gives its shop and date but no total (the photo stops above it).
+
+### Same meme, different caption
+
+Captions sit at the top and bottom, so the picture in the middle (20–80% of the height) gets its own perceptual hash. Memes whose middle hashes differ by at most 10 of 64 bits are shown together on the Duplicates page. On the demo set, the two cat memes match exactly (distance 0) and the pug meme matches neither.
 
 ### Album name suggestions
 
@@ -122,7 +132,7 @@ When you make a new album from selected photos, or rename one, ImageVault sugges
 
 ### Documents and screenshots
 
-**Documents & receipts** is an automatic album for photos that CLIP finds more like "a receipt", "a printed document" or "a page of text" than like any real-life photo (by at least 0.035), or that have 20+ words, or words found on receipts ("total", "cash", "gst"...). On the demo set it holds the receipt, the typed letter and the menu board, and no portraits (which scored up to 0.029).
+**Documents & receipts** is an automatic album for photos that CLIP finds more like "a receipt", "a printed document" or "a page of text" than like any real-life photo (by at least 0.035), or that have 20+ words, or words found on receipts ("total", "cash", "gst"...). On the demo set it holds the receipts, the typed letter, the menu board and the Kannada temple notice, and no portraits (which scored up to 0.029). Screenshots are kept out of it even when they are full of words.
 
 **Screenshots** can't be told apart reliably by CLIP (a phone screenshot scored lower than a mountain photo), so a simple rule is used instead: the file is named like a screenshot, or it is a lossless picture (PNG) without a camera date in which at least 45% of neighbouring pixels are exactly the same colour (app and web page backgrounds). Camera photos are JPEG and never that flat. Screenshots are also offered, unticked, in the "Free up" list.
 

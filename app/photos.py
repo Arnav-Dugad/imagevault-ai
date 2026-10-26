@@ -72,6 +72,13 @@ def sharpness(image: Image.Image) -> float:
     return round(float(edges.var()), 1)
 
 
+def core_hash(image: Image.Image) -> str:
+    """A perceptual hash of the middle of the picture only (without the top and bottom fifth), where meme
+    captions are. Two memes made from the same picture get similar core hashes, whatever they say."""
+    width, height = image.size
+    return perceptual_hash(image.crop((0, int(height * 0.2), width, int(height * 0.8))))
+
+
 def flatness(image: Image.Image) -> float:
     """How much of the picture is perfectly flat colour (0..1). Screenshots (app and web page backgrounds)
     score high; camera photos almost never have exactly equal neighbouring pixels."""

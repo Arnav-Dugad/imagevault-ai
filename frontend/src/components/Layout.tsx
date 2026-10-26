@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
-import { ArrowUp, CheckCircle2, Cloud, Copy, FolderOpen, House, ImagePlus, Images, LoaderCircle, LogOut, Menu, Upload, Users, X } from "lucide-react";
+import { ArrowUp, CheckCircle2, Cloud, Copy, FolderOpen, House, ImagePlus, Images, LoaderCircle, LogOut, Menu, ReceiptText, RotateCcw, Upload, Users, X, XCircle } from "lucide-react";
 import { api } from "../lib/api";
 import { useSystem } from "../lib/system";
 import { useToast } from "../lib/toast";
@@ -12,6 +12,7 @@ const nav = [
   { to: "/", label: "Home", icon: House },
   { to: "/photos", label: "Photos", icon: Images },
   { to: "/albums", label: "Albums", icon: FolderOpen },
+  { to: "/receipts", label: "Receipts", icon: ReceiptText },
   { to: "/people", label: "People", icon: Users },
   { to: "/duplicates", label: "Duplicates", icon: Copy },
   { to: "/upload", label: "Upload", icon: Upload },
@@ -33,7 +34,7 @@ function UploadProgress() {
 /** A small panel while photos upload, so the queue is visible on every page (and on phones,
  *  where the sidebar is hidden). It stays a few seconds after the last upload, then goes. */
 function UploadDock() {
-  const { items, busy } = useUploads();
+  const { items, busy, retryFailed } = useUploads();
   const { pathname } = useLocation();
   const [closed, setClosed] = useState(false);
   const [lingering, setLingering] = useState(false);
@@ -46,10 +47,13 @@ function UploadDock() {
     const timer = setTimeout(() => setLingering(false), 6000);
     return () => clearTimeout(timer);
   }, [busy]);
-  if (pathname === "/upload" || closed || !(busy || lingering)) return null;
   const queue = items.filter((i) => i.state !== "stored" && i.state !== "checking");
+  const failures = queue.filter((i) => i.state === "failed");
+  // Failed uploads keep the panel open until they are retried or the panel is closed.
+  if (pathname === "/upload" || closed || !(busy || lingering || failures.length)) return null;
   const done = queue.filter((i) => i.state === "done").length;
-  const failed = queue.filter((i) => i.state === "failed").length;
+  const failed = failures.length;
+  const retryable = failures.filter((i) => !i.final).length;
   const stored = items.filter((i) => i.state === "stored").length;
   const copies = queue.filter((i) => i.result?.match).length;
   const current = items.find((i) => i.state === "uploading");
@@ -57,11 +61,25 @@ function UploadDock() {
   return (
     <div role="status" className="fixed inset-x-3 bottom-3 z-40 rounded-2xl border border-line bg-raised/95 p-4 shadow-2xl backdrop-blur sm:inset-x-auto sm:right-20 sm:bottom-5 sm:w-80">
       <div className="flex items-center gap-2">
-        {busy ? <LoaderCircle className="h-4 w-4 shrink-0 animate-spin text-acid" /> : <CheckCircle2 className="h-4 w-4 shrink-0 text-acid" />}
+        {busy ? <LoaderCircle className="h-4 w-4 shrink-0 animate-spin text-acid" />
+          : failed ? <XCircle className="h-4 w-4 shrink-0 text-coral" /> : <CheckCircle2 className="h-4 w-4 shrink-0 text-acid" />}
         <p className="flex-1 text-sm font-semibold">{busy ? `Uploading ${Math.min(done + failed + 1, queue.length)} of ${queue.length}` : `${done} uploaded`}</p>
         <button onClick={() => setClosed(true)} aria-label="Hide" className="focus-ring rounded-md p-1 text-muted hover:text-ink"><X className="h-4 w-4" /></button>
       </div>
       {current && <p className="mt-1 truncate text-xs text-muted">{current.file.name}</p>}
+      {failures.length > 0 && !busy && <div className="mt-3 rounded-xl border border-coral/30 bg-coral/[.06] p-2.5">
+        <ul className="max-h-28 space-y-1 overflow-y-auto text-xs">
+          {failures.map((item) => (
+            <li key={item.key} className="flex items-start gap-1.5" title={item.error}>
+              <XCircle className="mt-px h-3.5 w-3.5 shrink-0 text-coral" />
+              <span className="min-w-0"><span className="block truncate font-medium">{item.file.name}</span><span className="block truncate text-muted">{item.error}</span></span>
+            </li>
+          ))}
+        </ul>
+        {retryable > 0 && <button onClick={retryFailed} className="focus-ring mt-2 inline-flex items-center gap-1.5 rounded-lg bg-coral/15 px-2.5 py-1 text-xs font-medium text-coral hover:bg-coral/25">
+          <RotateCcw className="h-3.5 w-3.5" />Retry {retryable === 1 ? (failed === 1 ? "it" : "1") : `${retryable === failed ? "all " : ""}${retryable}`}
+        </button>}
+      </div>}
       <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-canvas">
         <div className="h-full rounded-full bg-acid transition-[width] duration-300" style={{ width: `${Math.round(share * 100)}%` }} />
       </div>
