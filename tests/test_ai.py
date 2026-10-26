@@ -226,6 +226,27 @@ def test_laptop_worker_sends_its_results_over_https(client):
     assert client.get(f"/api/photos/{second}").json()["ai_status"] is None
 
 
+def test_close_up_faces_are_found():
+    from app import ai
+
+    # A face filling the whole photo (a close-up portrait) is missed at full size.
+    photo = Image.open(ASSETS / "person-a-1.jpg").convert("RGB")
+    x, y, w, h = ai.find_faces(photo)[0].box
+    width, height = photo.size
+    close_up = photo.crop((int((x - w * 0.15) * width), int((y - h * 0.15) * height),
+                           int((x + w * 1.15) * width), int((y + h * 1.15) * height))).resize((1500, 1800))
+    assert len(ai.find_faces(close_up)) == 1
+
+
+def test_hindi_vowel_sign_is_stored_after_its_consonant():
+    from app import ai
+
+    # The reader gives "ि" where it is drawn (before the consonant); people type it after.
+    assert ai._logical_order("िटकट") == "टिकट"
+    assert ai._logical_order("िमलता") == "मिलता"
+    assert ai._logical_order("STATION") == "STATION"
+
+
 def test_hindi_and_tamil_text_is_read_and_searchable(client):
     board = upload(client, "indian-text.png")
     intelligence.process_pending()

@@ -26,7 +26,7 @@
 
 The AI is free: the models run inside the app (on your laptop or in App Service), with no paid API and no photos sent to another company.
 
-Try it with the [demo photos](frontend/public/demo-photos.zip): 104 photos from Unsplash and Wikimedia Commons, with copies, a burst, look-alikes, portraits, signs in English, Hindi, Tamil, Telugu and Kannada, receipts (some made up, one with a QR code, one photographed twice), a UPI payment screenshot, screenshots, memes and WhatsApp-style forwards. The zip's `README.txt` says what each one shows.
+Try it with the [demo photos](frontend/public/demo-photos.zip): 161 photos from Unsplash and Wikimedia Commons, including 57 from India (landmarks, food, wildlife, festivals, Hindi signboards, Indian bills and screenshots), with copies, a burst, look-alikes, portraits, signs in English, Hindi, Tamil, Telugu and Kannada, receipts (some made up, one with a QR code, one photographed twice), a UPI payment screenshot, screenshots, memes and WhatsApp-style forwards. The zip's `README.txt` says what each one shows.
 
 ## Cloud architecture
 

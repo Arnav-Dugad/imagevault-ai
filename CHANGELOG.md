@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.11.0 (2026-10-26)
+
+- **57 Indian demo photos** (161 in all): landmarks, mountains, beaches, food, wildlife, festivals and a Hindi railway signboard from Wikimedia Commons, with camera dates; plus an exact copy, a WhatsApp forward, an edited copy, a tiger burst, a blurry shot, two chai memes, bills from two made-up shops, a UPI payment and a bus ticket screenshot, so every feature has an Indian example.
+- Fixed: close-up portraits where the face fills the photo had no face found; the detector now tries again at a smaller size.
+- Fixed: Hindi words read from photos had the vowel sign "ि" before its consonant ("िटकट"), so typing "टिकट" didn't find them. Photos are analysed again once.
+- 50 automated tests.
+
 ## 3.10.1 (2026-10-26)
 
 A polish pass over every page, on a computer and on a phone, with automatic checks for console errors, sideways scrolling, unlabelled buttons and small tap targets.

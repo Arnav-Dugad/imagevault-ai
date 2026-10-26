@@ -18,6 +18,7 @@ Set IMAGEVAULT_AI=off to turn all of this off.
 import hashlib
 import logging
 import os
+import re
 import threading
 import urllib.request
 from dataclasses import dataclass
@@ -77,6 +78,7 @@ CLIP_STD = np.array([0.26862954, 0.26130258, 0.27577711], dtype=np.float32)
 FACE_MIN_SCORE = 0.9    # how sure YuNet must be that it found a face
 FACE_MIN_PIXELS = 32    # smaller faces are too blurry to recognise reliably
 FACE_MAX_SIDE = 1600    # photos are shrunk to this size before looking for faces
+FACE_RETRY_SIDE = 640   # a close-up face filling the photo is only found at a smaller size
 TEXT_SIDE = 960         # photos are shrunk to this size before looking for text
 TEXT_MIN_CONFIDENCE = 0.85  # lines the reader is less sure about are mostly noise, so they're dropped
 TEXT_MAX_LINES = 80     # text areas read per photo; keeps busy street photos quick to analyse
@@ -184,10 +186,14 @@ class Face:
 
 
 def find_faces(image: Image.Image) -> list[Face]:
+    return _detect_faces(image, FACE_MAX_SIDE) or _detect_faces(image, FACE_RETRY_SIDE)
+
+
+def _detect_faces(image: Image.Image, max_side: int) -> list[Face]:
     import cv2
 
     bgr = cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2BGR)
-    scale = min(1.0, FACE_MAX_SIDE / max(bgr.shape[:2]))
+    scale = min(1.0, max_side / max(bgr.shape[:2]))
     if scale < 1:
         bgr = cv2.resize(bgr, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
     height, width = bgr.shape[:2]
@@ -254,6 +260,15 @@ def _in_script(text: str, language: str) -> bool:
     in_script = [c for c in letters if low <= ord(c) <= high]
     # At least 3 different letters: a row of light bulbs can look like "ంంంం" to the Telugu reader.
     return len(set(in_script)) >= 3 and len(in_script) / len(letters) >= 0.8
+
+
+_VOWEL_SIGN_I = re.compile("\u093f([\u0915-\u0939\u0958-\u095f]\u093c?)")
+
+
+def _logical_order(word: str) -> str:
+    """The Hindi reader gives the vowel sign "ि" where it is drawn, before its consonant ("िटकट"), but
+    it is typed (and stored in Unicode) after it ("टिकट"), so search needs it moved."""
+    return _VOWEL_SIGN_I.sub("\\1\u093f", word)
 
 
 def _split_words(text: str, where: list[float], step: float) -> list[tuple[str, float, float]]:
@@ -355,7 +370,7 @@ def read_text(image: Image.Image) -> list[Word]:
             for word, start, end in _split_words(best[1], best[2], step):
                 points = _box_part(corners, start, end)
                 xs, ys = np.clip(points[:, 0] / width, 0, 1), np.clip(points[:, 1] / height, 0, 1)
-                words.append(Word(word, (float(xs.min()), float(ys.min()), float(xs.max() - xs.min()),
+                words.append(Word(_logical_order(word), (float(xs.min()), float(ys.min()), float(xs.max() - xs.min()),
                                          float(ys.max() - ys.min())), line))
             line += 1
     return words
