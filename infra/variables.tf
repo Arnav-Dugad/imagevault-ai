@@ -21,9 +21,9 @@ variable "alert_email" {
 }
 
 variable "monthly_budget" {
-  description = "Monthly budget in your billing currency (USD for Azure for Students); alerts at 50%, 80% and 100%"
+  description = "Monthly budget in the subscription's billing currency (INR for this Azure for Students subscription; about US$5); alerts at 50%, 80% and 100%"
   type        = number
-  default     = 5
+  default     = 450
 }
 
 variable "create_budget" {
