@@ -11,7 +11,7 @@ import time
 import uuid
 import zipfile
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from app.config import MAX_UPLOAD_BYTES, database_url, env
@@ -133,7 +133,8 @@ def logout():
 
 def _photo_json(row) -> dict:
     photo = dict(row)
-    for hidden in ("phash", "dhash", "clip", "ocr_text", "ocr_words", "ocr_search", "qr_codes", "core_hash"):
+    for hidden in ("phash", "dhash", "clip", "ocr_text", "ocr_words", "ocr_search", "qr_codes", "core_hash",
+                   "receipt_fix"):
         photo.pop(hidden, None)
     photo["thumb_url"] = f"/api/photos/{photo['id']}/thumb"
     photo["file_url"] = f"/api/photos/{photo['id']}/file"
@@ -376,8 +377,8 @@ def photo_details(photo_id: str):
     result["text"] = photo["ocr_text"] or ""
     result["found"] = textinfo.find(result["text"])  # phone numbers, dates, prices, emails and links
     result["qr_codes"] = json.loads(photo["qr_codes"]) if photo["qr_codes"] else []
-    result["receipt"] = receipts.read(result["text"])  # shop, date and total, if it is a receipt
     result["words"] = json.loads(photo["ocr_words"]) if photo["ocr_words"] else []
+    result["receipt"] = _receipt(photo, result["words"])  # shop, date, total and items, if it is a receipt
     return result
 
 
@@ -812,32 +813,141 @@ def remove_exact_copies():
     return {"removed": removed}
 
 
-@app.get("/api/receipts")
-def receipt_list():
-    """Every photo that looks like a receipt, with its shop, date and total, grouped by shop."""
+RECEIPT_FIELDS = ("shop", "date", "total", "currency")
+
+
+def _receipt(row, words: list[dict] | None = None) -> dict | None:
+    """The receipt in a photo: what the AI read, with the user's corrections on top."""
+    if words is None:
+        words = json.loads(row["ocr_words"]) if row["ocr_words"] else []
+    fix = json.loads(row["receipt_fix"]) if row["receipt_fix"] else {}
+    if fix.get("receipt") is False:
+        return None  # the user said it isn't one
+    found = receipts.read(row["ocr_text"] or "", words)
+    if found is None:
+        if not fix.get("receipt"):
+            return None
+        found = {"shop": None, "date": None, "total": None, "currency": "₹", "kind": "receipt", "items": []}
+    edited = [field for field in RECEIPT_FIELDS if field in fix]
+    return {**found, **{field: fix[field] for field in edited}, "edited": edited}
+
+
+def _all_receipts() -> list[dict]:
+    """Every receipt, newest first. A receipt photographed twice (same shop, date and total) is
+    counted once: the sharpest photo is kept, the others get "copy_of"."""
     with connect() as conn:
-        rows = conn.execute(text(f"SELECT {PHOTO_COLUMNS} FROM photos WHERE ocr_text IS NOT NULL AND ocr_text != ''"))\
-            .mappings().all()
+        rows = conn.execute(text(f"SELECT {PHOTO_COLUMNS} FROM photos WHERE (ocr_text IS NOT NULL AND ocr_text != '') "
+                                 "OR receipt_fix IS NOT NULL")).mappings().all()
     found = []
     for row in rows:
-        receipt = receipts.read(row["ocr_text"])
-        if receipt:
-            found.append({**receipt, "photo": _with_match(row)})
+        if receipt := _receipt(row):
+            found.append({**receipt, "copy_of": None, "photo": _with_match(row)})
     found.sort(key=lambda r: (r["date"] or "", r["photo"]["uploaded_at"]), reverse=True)
+    same: dict[tuple, list[dict]] = {}
+    for item in found:
+        if item["shop"] and item["date"] and item["total"] is not None:
+            same.setdefault((intelligence.squeeze(item["shop"])[:16], item["date"], item["total"]), []).append(item)
+    for copies in same.values():
+        keep = max(copies, key=lambda r: r["photo"]["sharpness"] or 0)
+        for item in copies:
+            if item is not keep:
+                item["copy_of"] = keep["photo"]["id"]
+    return found
+
+
+@app.get("/api/receipts")
+def receipt_list():
+    """Every receipt and payment, with its shop, date, total and items, grouped by shop, and the items
+    bought most often. Receipts photographed twice are listed, but counted once."""
+    found = _all_receipts()
+    counted = [item for item in found if not item["copy_of"]]
     shops: dict[str, dict] = {}
     for item in found:
         name = item["shop"] or "Unknown shop"
         key = intelligence.squeeze(name)[:16] or "unknown"
         shop = shops.setdefault(key, {"name": name, "receipts": [], "totals": {}})
         shop["receipts"].append(item)
-        if item["total"] is not None:
+        if item["total"] is not None and not item["copy_of"]:
             shop["totals"][item["currency"]] = round(shop["totals"].get(item["currency"], 0) + item["total"], 2)
     totals: dict[str, float] = {}
-    for item in found:
+    bought: dict[str, dict] = {}
+    for item in counted:
         if item["total"] is not None:
             totals[item["currency"]] = round(totals.get(item["currency"], 0) + item["total"], 2)
+        for line in item["items"]:
+            name = receipts.item_name(line["name"])
+            entry = bought.setdefault(intelligence.squeeze(name), {"name": name, "times": 0, "spent": 0.0,
+                                                                   "currency": item["currency"], "last": item["date"]})
+            entry["times"] += 1
+            entry["spent"] = round(entry["spent"] + line["amount"], 2)
+            entry["last"] = max(filter(None, (entry["last"], item["date"])), default=None)
     groups = sorted(shops.values(), key=lambda s: (-len(s["receipts"]), s["name"].lower()))
-    return {"count": len(found), "totals": totals, "shops": groups}
+    top = sorted(bought.values(), key=lambda b: (-b["times"], -b["spent"]))[:8]
+    return {"count": len(counted), "copies": len(found) - len(counted), "totals": totals, "shops": groups,
+            "top_items": top}
+
+
+@app.get("/api/receipts/copies")
+def receipt_copies():
+    """The same receipt photographed more than once, as duplicate groups (the sharpest photo first)."""
+    groups: dict[str, list[dict]] = {}
+    found = _all_receipts()
+    for item in found:
+        if item["copy_of"]:
+            groups.setdefault(item["copy_of"], []).append(item["photo"])
+    kept = {item["photo"]["id"]: item["photo"] for item in found}
+    return [{"id": keep, "items": [{"kind": "receipt", "similarity": 1.0, "photo": p} for p in [kept[keep], *copies]],
+             "extra_bytes": sum(p["size"] for p in copies), "sharpest_id": keep}
+            for keep, copies in groups.items()]
+
+
+class ReceiptFix(BaseModel):
+    receipt: bool | None = None      # true: it is a receipt even if the AI missed it; false: it isn't one
+    shop: str | None = None
+    date: str | None = None          # YYYY-MM-DD
+    total: float | None = None
+    currency: str | None = None
+
+
+@app.put("/api/photos/{photo_id}/receipt")
+def fix_receipt(photo_id: str, body: ReceiptFix):
+    """Correct what the AI read from a receipt. Only the fields sent are changed; null clears one."""
+    sent = body.model_fields_set
+    if "shop" in sent and body.shop is not None:
+        body.shop = " ".join(body.shop.split())[:80] or None
+    if "date" in sent and body.date is not None:
+        try:
+            body.date = date.fromisoformat(body.date).isoformat()
+        except ValueError:
+            raise HTTPException(422, "Use a date like 2026-10-24.") from None
+    if "total" in sent and body.total is not None and not 0 <= body.total < 10**9:
+        raise HTTPException(422, "The total must be a positive amount.")
+    if "currency" in sent and body.currency not in ("₹", "$", "€", "£", ""):
+        raise HTTPException(422, "Use ₹, $, € or £.")
+    with connect() as conn:
+        photo = _get_photo(conn, photo_id)
+        fix = json.loads(photo["receipt_fix"]) if photo["receipt_fix"] else {}
+        for field in sent:
+            value = getattr(body, field)
+            if field == "total" and value is not None:
+                value = round(value, 2)
+            fix[field] = value
+        if "receipt" in fix and fix["receipt"] is None:
+            del fix["receipt"]  # back to letting the AI decide
+        if fix.get("receipt") is False:
+            fix = {"receipt": False}  # corrections to something that isn't a receipt mean nothing
+        conn.execute(text("UPDATE photos SET receipt_fix = :fix WHERE id = :id"),
+                     {"fix": json.dumps(fix) if fix else None, "id": photo_id})
+        return {"receipt": _receipt(_get_photo(conn, photo_id))}
+
+
+@app.delete("/api/photos/{photo_id}/receipt")
+def undo_receipt_fix(photo_id: str):
+    """Forget the user's corrections and show what the AI read again."""
+    with connect() as conn:
+        _get_photo(conn, photo_id)
+        conn.execute(text("UPDATE photos SET receipt_fix = NULL WHERE id = :id"), {"id": photo_id})
+        return {"receipt": _receipt(_get_photo(conn, photo_id))}
 
 
 MEME_SAME_PICTURE = 10  # core hashes (the middle of the picture) this close mean the same meme picture

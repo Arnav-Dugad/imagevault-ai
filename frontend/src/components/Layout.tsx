@@ -54,6 +54,7 @@ function UploadDock() {
   const done = queue.filter((i) => i.state === "done").length;
   const failed = failures.length;
   const retryable = failures.filter((i) => !i.final).length;
+  const recovered = queue.filter((i) => i.state === "done" && i.retried);
   const stored = items.filter((i) => i.state === "stored").length;
   const copies = queue.filter((i) => i.result?.match).length;
   const current = items.find((i) => i.state === "uploading");
@@ -67,12 +68,19 @@ function UploadDock() {
         <button onClick={() => setClosed(true)} aria-label="Hide" className="focus-ring rounded-md p-1 text-muted hover:text-ink"><X className="h-4 w-4" /></button>
       </div>
       {current && <p className="mt-1 truncate text-xs text-muted">{current.file.name}</p>}
-      {failures.length > 0 && !busy && <div className="mt-3 rounded-xl border border-coral/30 bg-coral/[.06] p-2.5">
+      {(failures.length > 0 || recovered.length > 0) && !busy && <div className={cn("mt-3 rounded-xl border p-2.5 transition-colors",
+        failures.length ? "border-coral/30 bg-coral/[.06]" : "border-acid/30 bg-acid/[.06]")}>
         <ul className="max-h-28 space-y-1 overflow-y-auto text-xs">
           {failures.map((item) => (
-            <li key={item.key} className="flex items-start gap-1.5" title={item.error}>
+            <li key={item.key} className="shake flex items-start gap-1.5" title={item.error}>
               <XCircle className="mt-px h-3.5 w-3.5 shrink-0 text-coral" />
               <span className="min-w-0"><span className="block truncate font-medium">{item.file.name}</span><span className="block truncate text-muted">{item.error}</span></span>
+            </li>
+          ))}
+          {recovered.map((item) => (
+            <li key={item.key} className="flash-ok flex items-start gap-1.5 rounded-md">
+              <CheckCircle2 className="mt-px h-3.5 w-3.5 shrink-0 text-acid" />
+              <span className="min-w-0"><span className="block truncate font-medium">{item.file.name}</span><span className="block truncate text-acid">Uploaded on the second try</span></span>
             </li>
           ))}
         </ul>

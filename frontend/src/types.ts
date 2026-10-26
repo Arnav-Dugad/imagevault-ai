@@ -98,7 +98,7 @@ export interface DuplicateGroup {
   id: string;
   extra_bytes: number;
   sharpest_id: string | null;
-  items: { kind: "keep" | MatchKind | "burst" | "meme"; similarity: number; photo: Photo }[];
+  items: { kind: "keep" | MatchKind | "burst" | "meme" | "receipt"; similarity: number; photo: Photo }[];
 }
 
 export interface Album {
@@ -174,12 +174,22 @@ export interface Receipt {
   date: string | null;     // YYYY-MM-DD
   total: number | null;
   currency: string;        // "₹", "$", "€", "£" or "" when the receipt doesn't say
+  kind: "receipt" | "payment"; // a paper receipt, or a payment screenshot from a UPI app
+  items: { name: string; amount: number }[];
+  edited?: string[];       // the fields the user corrected by hand
 }
 
-export interface ReceiptItem extends Receipt { photo: Photo }
+export interface ReceiptItem extends Receipt {
+  photo: Photo;
+  copy_of: string | null;  // the same receipt photographed again: the photo that is counted instead
+}
+
+export interface BoughtItem { name: string; times: number; spent: number; currency: string; last: string | null }
 
 export interface Spending {
   count: number;
+  copies: number;          // receipts photographed twice (listed, but counted once)
   totals: Record<string, number>;
   shops: { name: string; receipts: ReceiptItem[]; totals: Record<string, number> }[];
+  top_items: BoughtItem[];
 }

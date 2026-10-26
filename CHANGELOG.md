@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.10.0 (2026-10-26)
+
+- **Check and correct receipts:** click a receipt to see the photo next to what was read, with the shop, date and total outlined on the photo. Fix any of them by hand, go back to the AI's reading, or say "Not a receipt". Photos the AI missed can be added with "This is a receipt".
+- **Items on receipts** are read ("Basmati Rice 5kg – ₹450"), and the Receipts page shows **what you buy most**. Prices are matched to their items by where they are on the photo, even when it is a little turned.
+- **UPI payment screenshots** count as receipts: who was paid, when and how much.
+- **The same receipt photographed twice** is counted once, and offered on the Duplicates page.
+- **A scanning line** sweeps over a photo while the AI reads it; the photo viewer updates by itself when it's done.
+- **Bigger chips you can swipe** on phones (phone numbers, QR codes, dates and prices).
+- **Failed uploads shake**, and an upload that works on a second try flashes green.
+- Fixed: a phone number could run on into the next line ("98450 12345 08"); on phones, long chips pushed the photo details off the screen.
+- Malayalam and Gujarati are not read: PaddleOCR has no trained model for either.
+- Demo photos: 104, with the same bill photographed twice and a made-up UPI payment screenshot. 48 automated tests.
+
 ## 3.9.0 (2026-10-26)
 
 - **Receipts page:** the shop, date and total of each receipt in a small spending table, grouped by shop, with totals, each shop's share of the spending and a CSV download.

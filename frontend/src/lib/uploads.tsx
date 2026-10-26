@@ -11,6 +11,7 @@ export interface UploadItem {
   result?: UploadResult;
   error?: string;
   final?: boolean; // failed for a reason trying again can't fix: not a photo, or too big
+  retried?: boolean; // uploaded again with Retry
 }
 
 interface Uploads {
@@ -116,7 +117,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
 
   const retryFailed = useCallback(() => {
     const failed = items.filter((i) => i.state === "failed" && !i.final);
-    failed.forEach((i) => update(i.key, { state: "waiting", error: undefined }));
+    failed.forEach((i) => update(i.key, { state: "waiting", error: undefined, retried: true }));
     pending.current.push(...failed);
     void pump();
   }, [items, pump]);
